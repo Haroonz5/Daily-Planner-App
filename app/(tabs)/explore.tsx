@@ -1,4 +1,5 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Notifications from 'expo-notifications';
 import { addDoc, collection } from "firebase/firestore";
 import { useState } from "react";
 import {
@@ -7,7 +8,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { auth, db } from "../../constants/firebaseConfig";
 
@@ -22,6 +23,25 @@ export default function AddTask() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     return tomorrow.toISOString().split("T")[0];
+  };
+
+  const scheduleNotification = async (title: string, time: Date) => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(time.getHours());
+    tomorrow.setMinutes(time.getMinutes());
+    tomorrow.setSeconds(0);
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Task Reminder",
+        body: title,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: tomorrow,
+      },
+    });
   };
 
   const handleAddTask = async () => {
@@ -42,6 +62,7 @@ export default function AddTask() {
         createdAt: new Date(),
       });
       setTitle("");
+      await scheduleNotification(title, time);
       setSuccess(true);
       setError("");
       setTimeout(() => setSuccess(false), 2000);
