@@ -1,9 +1,10 @@
-import { collection, doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { signOut } from "firebase/auth";
+import {
+  collection, deleteDoc, doc, onSnapshot, updateDoc
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  ScrollView,
-  StyleSheet,
-  Text,
+  ScrollView, StyleSheet, Text,
   TouchableOpacity,
   View
 } from "react-native";
@@ -44,32 +45,52 @@ export default function HomeScreen() {
     });
   };
 
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  const handleDelete = async (taskId: string) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    await deleteDoc(doc(db, "users", uid, "tasks", taskId));
+  };
+
   const today = getTodayDate();
   const todayTasks = tasks.filter((t) => t.date === today);
   const futureTasks = tasks.filter((t) => t.date > today);
   const completed = todayTasks.filter((t) => t.completed).length;
 
   const renderTask = (item: Task) => (
-    <TouchableOpacity
-      key={item.id}
-      style={styles.task}
-      onPress={() => toggleComplete(item)}
-    >
-      <View style={[styles.checkbox, item.completed && styles.checked]} />
-      <View>
-        <Text
-          style={[styles.taskTitle, item.completed && styles.strikethrough]}
-        >
-          {item.title}
-        </Text>
-        <Text style={styles.taskTime}>{item.time}</Text>
-      </View>
-    </TouchableOpacity>
+    <View key={item.id} style={styles.task}>
+      <TouchableOpacity
+        onPress={() => toggleComplete(item)}
+        style={styles.taskLeft}
+      >
+        <View style={[styles.checkbox, item.completed && styles.checked]} />
+        <View>
+          <Text
+            style={[styles.taskTitle, item.completed && styles.strikethrough]}
+          >
+            {item.title}
+          </Text>
+          <Text style={styles.taskTime}>{item.time}</Text>
+        </View>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => handleDelete(item.id)}
+        style={styles.deleteButton}
+      >
+        <Text style={styles.deleteText}>✕</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Today</Text>
+      <TouchableOpacity onPress={handleLogout} style={styles.logout}>
+        <Text style={styles.logoutText}>Log Out</Text>
+      </TouchableOpacity>
       {todayTasks.length > 0 && (
         <Text style={styles.progress}>
           {completed}/{todayTasks.length} tasks done
@@ -86,13 +107,26 @@ export default function HomeScreen() {
           <Text style={styles.futureHeading}>Future Plans</Text>
           {futureTasks.map((item) => (
             <View key={item.id} style={styles.task}>
-              <View style={styles.checkbox} />
-              <View>
-                <Text style={styles.taskTitle}>{item.title}</Text>
-                <Text style={styles.taskTime}>
-                  {item.time} · {item.date}
-                </Text>
-              </View>
+              <TouchableOpacity
+                onPress={() => toggleComplete(item)}
+                style={styles.taskLeft}
+              >
+                <View style={[styles.checkbox, item.completed && styles.checked]} />
+                <View>
+                  <Text style={[styles.taskTitle, item.completed && styles.strikethrough]}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.taskTime}>
+                    {item.time} · {item.date}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleDelete(item.id)}
+                style={styles.deleteButton}
+              >
+                <Text style={styles.deleteText}>✕</Text>
+              </TouchableOpacity>
             </View>
           ))}
         </View>
@@ -112,7 +146,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
-    gap: 16,
   },
   checkbox: {
     width: 24,
@@ -132,4 +165,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: "#333",
   },
+  logout: { position: "absolute", top: 32, right: 24 },
+  logoutText: { color: "#999", fontSize: 14 },
+  taskLeft: { flexDirection: "row", alignItems: "center", gap: 16, flex: 1 },
+  deleteButton: { padding: 8 },
+  deleteText: { color: "#ccc", fontSize: 16 },
 });
