@@ -26,17 +26,30 @@ export default function HomeScreen() {
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const unsub = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
+    const unsub = onSnapshot(collection(db, "users", uid, "tasks"), async (snap) => {
       const fetched = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
       })) as Task[];
       fetched.sort((a, b) => a.time.localeCompare(b.time));
       setTasks(fetched);
+
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayDate = yesterday.toISOString().split("T")[0];
+      const todayDate = new Date().toISOString().split("T")[0];
+
+      const incompleteTasks = fetched.filter(
+        (t) => t.date === yesterdayDate && !t.completed
+      );
+      for (const task of incompleteTasks) {
+        await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+          date: todayDate,
+        });
+      }
     });
     return unsub;
   }, []);
-
   const toggleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -66,7 +79,23 @@ export default function HomeScreen() {
     const taskMinutes = taskHours * 60 + minutes;
     return taskMinutes <= currentMinutes && currentMinutes < taskMinutes + 60;
   };
+  const carryOverTasks = async () => {
+    const uid = auth.currentUser?.uid;
+    if(!uid) return;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayDate = yesterday.toISOString().split("T")[0];
 
+    const incompleteTasks = tasks.filter(
+      (t) => t.date === yesterdayDate && !t.completed
+    );
+    for (const task of incompleteTasks)
+    {
+      await updateDoc(doc(db, "users", uid, "tasks", task.id),{
+        date: today,
+      });
+    }
+  };
   const today = getTodayDate();
   const todayTasks = tasks.filter((t) => t.date === today);
   const futureTasks = tasks.filter((t) => t.date > today);
