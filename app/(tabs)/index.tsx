@@ -57,8 +57,15 @@ export default function HomeScreen() {
 
   const isCurrentTask = (task: Task) => {
     const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes 
-  }
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const [time, period] = task.time.split(" ");
+    const [hours, minutes] = time.split(":").map(Number);
+    let taskHours = hours;
+    if (period == "PM" && hours !== 12) taskHours += 12;
+    if(period == "AM" && hours == 12) taskHours = 0;
+    const taskMinutes = taskHours * 60 + minutes;
+    return taskMinutes <= currentMinutes && currentMinutes < taskMinutes + 60;
+  };
 
   const today = getTodayDate();
   const todayTasks = tasks.filter((t) => t.date === today);
@@ -66,19 +73,17 @@ export default function HomeScreen() {
   const completed = todayTasks.filter((t) => t.completed).length;
 
   const renderTask = (item: Task) => (
-    <View key={item.id} style={styles.task}>
+    <View key={item.id} style={[styles.task, isCurrentTask(item) && styles.currentTask]}>
       <TouchableOpacity
         onPress={() => toggleComplete(item)}
         style={styles.taskLeft}
       >
-        <View style={[styles.checkbox, item.completed && styles.checked]} />
+        <View style={[styles.checkbox, item.completed && styles.checked, isCurrentTask(item) && styles.currentCheckbox]} />
         <View>
-          <Text
-            style={[styles.taskTitle, item.completed && styles.strikethrough]}
-          >
+          <Text style={[styles.taskTitle, item.completed && styles.strikethrough]}>
             {item.title}
           </Text>
-          <Text style={styles.taskTime}>{item.time}</Text>
+          <Text style={[styles.taskTime, isCurrentTask(item) && styles.currentTime]}>{item.time}</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity
@@ -192,4 +197,19 @@ const styles = StyleSheet.create({
     backgroundColor: "000",
     borderRadius: 4,
   },
+  currentTask: { 
+    backgroundColor: "#f9f9f9",
+    borderLeftWidth: 3,
+    borderLeftColor: "000",
+    paddingLeft: 12,
+  },
+  currentCheckbox: {
+    borderColor: "#000",
+
+  },
+  currentTime: { 
+    color: "000",
+    fontWeight:"600",
+  },
+
 });
