@@ -55,6 +55,11 @@ export default function HomeScreen() {
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
   };
 
+  const isCurrentTask = (task: Task) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes 
+  }
+
   const today = getTodayDate();
   const todayTasks = tasks.filter((t) => t.date === today);
   const futureTasks = tasks.filter((t) => t.date > today);
@@ -92,10 +97,15 @@ export default function HomeScreen() {
         <Text style={styles.logoutText}>Log Out</Text>
       </TouchableOpacity>
       {todayTasks.length > 0 && (
-        <Text style={styles.progress}>
-          {completed}/{todayTasks.length} tasks done
-        </Text>
-      )}
+    <View style={styles.progressBarContainer}>
+    <View
+      style={[
+        styles.progressBarFill,
+        { width: `${(completed / todayTasks.length) * 100}%` },
+      ]}
+    />
+  </View>
+)}
       {todayTasks.length === 0 ? (
         <Text style={styles.empty}>No tasks for today 👀</Text>
       ) : (
@@ -170,4 +180,16 @@ const styles = StyleSheet.create({
   taskLeft: { flexDirection: "row", alignItems: "center", gap: 16, flex: 1 },
   deleteButton: { padding: 8 },
   deleteText: { color: "#ccc", fontSize: 16 },
+  progressBarContainer: {
+    height : 8,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 4, 
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: 0,
+    backgroundColor: "000",
+    borderRadius: 4,
+  },
 });
