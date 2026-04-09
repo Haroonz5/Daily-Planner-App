@@ -1,50 +1,48 @@
-# Welcome to your Expo app 👋
+# Daily Planner App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A mobile productivity app built with React Native and Firebase that helps users plan their next day the night before.
 
-## Get started
+## Features
 
-1. Install dependencies
+- **Authentication** — Sign up and log in with email and password
+- **Add Tasks** — Input tasks with a specific time for the next day
+- **Today View** — See all of today's tasks organized by time
+- **Future Plans** — View upcoming tasks scheduled beyond today
+- **Mark Complete** — Tap the circle to mark tasks as done with strikethrough
+- **Delete Tasks** — Remove tasks with the X button
+- **Progress Bar** — Visual tracker showing completed vs total tasks
+- **Push Notifications** — Get notified at the scheduled time of each task
+- **Carry Over** — Incomplete tasks from yesterday automatically move to today
+- **Current Task Highlight** — Highlights whichever task is active right now
 
-   ```bash
-   npm install
-   ```
+## Tech Stack
 
-2. Start the app
+- React Native (Expo)
+- Firebase Authentication
+- Cloud Firestore
+- Expo Notifications
+- TypeScript
 
-   ```bash
-   npx expo start
-   ```
+## Getting Started
 
-In the output, you'll find options to open the app in a
+1. Clone the repo
+2. Run npm install
+3. Run npx expo start
+4. Scan the QR code with Expo Go on your phone
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## Project Structure
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+app/
+  (tabs)/
+    index.tsx       - Today View (main screen)
+    explore.tsx     - Add Task screen
+  _layout.tsx       - Root layout with auth guard
+  login.tsx         - Login screen
+  signup.tsx        - Signup screen
+constants/
+  firebaseConfig.ts - Firebase setup
+hooks/              - Custom hooks
 
-## Get a fresh project
+## Status
 
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Currently in active development. Phase 2 in progress. UI polish, stats screen, and AI features coming soon.
