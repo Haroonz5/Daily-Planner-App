@@ -3,8 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { addDoc, collection } from "firebase/firestore";
 import { useState } from "react";
 import {
-  Platform,
-  StyleSheet,
+  KeyboardAvoidingView, Platform, ScrollView, StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -72,75 +71,86 @@ export default function AddTask() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.heading}>Add Task for Tomorrow</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="What do you need to do?"
-        value={title}
-        onChangeText={setTitle}
-      />
-      <TouchableOpacity
-        style={styles.timeButton}
-        onPress={() => setShowPicker(true)}
-      >
-        <Text style={styles.timeText}>
-          ⏰{" "}
-          {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </Text>
-      </TouchableOpacity>
-      {showPicker && (
-        <DateTimePicker
-          value={time}
-          mode="time"
-          is24Hour={false}
-          onChange={(event, selected) => {
-            setShowPicker(Platform.OS === "ios");
-            if (selected) setTime(selected);
-          }}
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.emoji}>📝</Text>
+          <Text style={styles.title}>Plan Tomorrow</Text>
+          <Text style={styles.subtitle}>What do you want to get done?</Text>
+        </View>
+        <TextInput
+          style={styles.input}
+          placeholder="What do you need to do?"
+          placeholderTextColor="#c4b5c8"
+          value={title}
+          onChangeText={setTitle}
         />
-      )}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {success ? <Text style={styles.success}>Task added!</Text> : null}
-      <TouchableOpacity style={styles.button} onPress={handleAddTask}>
-        <Text style={styles.buttonText}>Add Task</Text>
-      </TouchableOpacity>
-    </View>
+        <TouchableOpacity
+          style={styles.timeButton}
+          onPress={() => setShowPicker(true)}
+        >
+          <Text style={styles.timeText}>
+            ⏰{" "}
+            {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </Text>
+        </TouchableOpacity>
+        {showPicker && (
+          <DateTimePicker
+            value={time}
+            mode="time"
+            is24Hour={false}
+            onChange={(event, selected) => {
+              setShowPicker(Platform.OS === "ios");
+              if (selected) setTime(selected);
+            }}
+          />
+        )}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {success ? <Text style={styles.success}>Task added! 🌸</Text> : null}
+        <TouchableOpacity style={styles.button} onPress={handleAddTask}>
+          <Text style={styles.buttonText}>Add Task</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: "#fff" },
-  heading: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 32,
-    marginTop: 32,
-  },
+  container: { flex: 1, backgroundColor: "#fdf6ff" },
+  header: { alignItems: "center", paddingTop: 60, paddingBottom: 32 },
+  emoji: { fontSize: 48, marginBottom: 12 },
+  title: { fontSize: 32, fontWeight: "700", color: "#4a3f55" },
+  subtitle: { fontSize: 14, color: "#9b8aa8", marginTop: 6 },
   input: {
+    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: "#e8d8f0",
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 24,
     marginBottom: 16,
-    fontSize: 16,
+    fontSize: 15,
+    color: "#4a3f55",
   },
   timeButton: {
+    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: "#e8d8f0",
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 24,
     marginBottom: 16,
   },
-  timeText: { fontSize: 16, color: "#333" },
+  timeText: { fontSize: 15, color: "#4a3f55" },
   button: {
-    backgroundColor: "#000",
+    backgroundColor: "#c4a8d4",
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: "center",
+    marginHorizontal: 24,
     marginTop: 8,
   },
-  buttonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  error: { color: "red", marginBottom: 12 },
-  success: { color: "green", marginBottom: 12 },
+  buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  error: { color: "#e07a9b", marginBottom: 12, textAlign: "center", marginHorizontal: 24 },
+  success: { color: "#9b8aa8", marginBottom: 12, textAlign: "center", fontSize: 14 },
 });
