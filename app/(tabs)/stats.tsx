@@ -1,0 +1,189 @@
+import { collection, onSnapshot } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { auth, db } from "../../constants/firebaseConfig";
+
+type Task = {
+  id: string;
+  title: string;
+  time: string;
+  date: string;
+  completed: boolean;
+};
+
+export default function StatsScreen() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const unsub = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
+      const fetched = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Task[];
+      setTasks(fetched);
+    });
+    return unsub;
+  }, []);
+
+  const getTodayDate = () => new Date().toISOString().split("T")[0];
+
+  const todayDate = getTodayDate();
+  const todayTasks = tasks.filter((t) => t.date === todayDate);
+  const todayCompleted = todayTasks.filter((t) => t.completed).length;
+  const todayPercent = todayTasks.length > 0
+    ? Math.round((todayCompleted / todayTasks.length) * 100)
+    : 0;
+
+  const getLast7Days = () => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().split("T")[0]);
+    }
+    return days;
+  };
+
+  const last7Days = getLast7Days();
+
+  const weeklyStats = last7Days.map((date) => {
+    const dayTasks = tasks.filter((t) => t.date === date);
+    const done = dayTasks.filter((t) => t.completed).length;
+    const percent = dayTasks.length > 0 ? Math.round((done / dayTasks.length) * 100) : 0;
+    const label = new Date(date).toLocaleDateString("en-US", { weekday: "short" });
+    return { date, done, total: dayTasks.length, percent, label };
+  });
+
+  const totalCompleted = tasks.filter((t) => t.completed).length;
+  const totalTasks = tasks.length;
+
+  const calculateStreak = () => {
+    let streak = 0;
+    for (let i = 0; i < last7Days.length; i++) {
+      const date = last7Days[last7Days.length - 1 - i];
+      const dayTasks = tasks.filter((t) => t.date === date);
+      if (dayTasks.length === 0) break;
+      const allDone = dayTasks.every((t) => t.completed);
+      if (allDone) streak++;
+      else break;
+    }
+    return streak;
+  };
+
+  const streak = calculateStreak();
+
+  return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <View style={styles.header}>
+        <Text style={styles.emoji}>📊</Text>
+        <Text style={styles.title}>Your Stats</Text>
+        <Text style={styles.subtitle}>Keep up the great work!</Text>
+      </View>
+
+      {/* Today's Summary */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Today's Progress</Text>
+        <Text style={styles.bigNumber}>{todayPercent}%</Text>
+        <Text style={styles.cardSubtitle}>{todayCompleted} of {todayTasks.length} tasks completed</Text>
+        <View style={styles.progressBarContainer}>
+          <View style={[styles.progressBarFill, { width: `${todayPercent}%` }]} />
+        </View>
+      </View>
+
+      {/* Streak */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Current Streak 🔥</Text>
+        <Text style={styles.bigNumber}>{streak}</Text>
+        <Text style={styles.cardSubtitle}>
+          {streak === 0 ? "Complete all tasks today to start a streak!" : `${streak} day${streak > 1 ? "s" : ""} in a row!`}
+        </Text>
+      </View>
+
+      {/* Weekly Bar Chart */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>This Week</Text>
+        <View style={styles.barChart}>
+          {weeklyStats.map((day) => (
+            <View key={day.date} style={styles.barColumn}>
+              <Text style={styles.barPercent}>{day.total > 0 ? `${day.percent}%` : ""}</Text>
+              <View style={styles.barTrack}>
+                <View
+                  style={[
+                    styles.barFill,
+                    { height: `${day.percent}%` },
+                    day.percent === 100 && styles.barFillComplete,
+                  ]}
+                />
+              </View>
+              <Text style={styles.barLabel}>{day.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* All Time */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>All Time</Text>
+        <View style={styles.allTimeRow}>
+          <View style={styles.allTimeStat}>
+            <Text style={styles.allTimeNumber}>{totalTasks}</Text>
+            <Text style={styles.allTimeLabel}>Total Tasks</Text>
+          </View>
+          <View style={styles.allTimeDivider} />
+          <View style={styles.allTimeStat}>
+            <Text style={styles.allTimeNumber}>{totalCompleted}</Text>
+            <Text style={styles.allTimeLabel}>Completed</Text>
+          </View>
+          <View style={styles.allTimeDivider} />
+          <View style={styles.allTimeStat}>
+            <Text style={styles.allTimeNumber}>
+              {totalTasks > 0 ? Math.round((totalCompleted / totalTasks) * 100) : 0}%
+            </Text>
+            <Text style={styles.allTimeLabel}>Success Rate</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={{ height: 40 }} />
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#fdf6ff" },
+  header: { alignItems: "center", paddingTop: 60, paddingBottom: 24 },
+  emoji: { fontSize: 48, marginBottom: 12 },
+  title: { fontSize: 32, fontWeight: "700", color: "#4a3f55" },
+  subtitle: { fontSize: 14, color: "#9b8aa8", marginTop: 6 },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowColor: "#c4a8d4",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  cardTitle: { fontSize: 14, fontWeight: "600", color: "#9b8aa8", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
+  bigNumber: { fontSize: 52, fontWeight: "700", color: "#4a3f55" },
+  cardSubtitle: { fontSize: 14, color: "#9b8aa8", marginTop: 4, marginBottom: 12 },
+  progressBarContainer: { height: 8, backgroundColor: "#e8d8f0", borderRadius: 4, overflow: "hidden" },
+  progressBarFill: { height: 8, backgroundColor: "#c4a8d4", borderRadius: 4 },
+  barChart: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", height: 120, marginTop: 8 },
+  barColumn: { alignItems: "center", flex: 1 },
+  barPercent: { fontSize: 10, color: "#9b8aa8", marginBottom: 4 },
+  barTrack: { width: 24, height: 80, backgroundColor: "#e8d8f0", borderRadius: 12, overflow: "hidden", justifyContent: "flex-end" },
+  barFill: { width: "100%", backgroundColor: "#c4a8d4", borderRadius: 12 },
+  barFillComplete: { backgroundColor: "#a88bc4" },
+  barLabel: { fontSize: 11, color: "#9b8aa8", marginTop: 6 },
+  allTimeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  allTimeStat: { flex: 1, alignItems: "center" },
+  allTimeDivider: { width: 1, height: 40, backgroundColor: "#e8d8f0" },
+  allTimeNumber: { fontSize: 28, fontWeight: "700", color: "#4a3f55" },
+  allTimeLabel: { fontSize: 12, color: "#9b8aa8", marginTop: 4 },
+});
