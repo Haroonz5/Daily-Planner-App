@@ -1,18 +1,44 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
 import { auth } from "../constants/firebaseConfig";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const loadSavedEmail = async () => {
+      const saved = await AsyncStorage.getItem("savedEmail");
+      if (saved) {
+        setEmail(saved);
+        setRememberMe(true);
+      }
+    };
+    loadSavedEmail();
+  }, []);
 
   const handleLogin = async () => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      if (rememberMe) {
+        await AsyncStorage.setItem("savedEmail", email);
+      } else {
+        await AsyncStorage.removeItem("savedEmail");
+      }
       router.replace("/(tabs)");
     } catch (e: any) {
       setError("Invalid email or password");
@@ -54,6 +80,16 @@ export default function Login() {
           />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          <TouchableOpacity
+            style={styles.rememberMe}
+            onPress={() => setRememberMe(!rememberMe)}
+          >
+            <View style={[styles.rememberBox, rememberMe && styles.rememberBoxChecked]}>
+              {rememberMe && <Text style={styles.rememberCheck}>✓</Text>}
+            </View>
+            <Text style={styles.rememberText}>Remember Me</Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.button} onPress={handleLogin}>
             <Text style={styles.buttonText}>Log In</Text>
@@ -155,4 +191,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
   },
+  rememberMe: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  rememberBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#c4a8d4",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  rememberBoxChecked: { backgroundColor: "#c4a8d4" },
+  rememberCheck: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  rememberText: { color: "#9b8aa8", fontSize: 14 },
 });
