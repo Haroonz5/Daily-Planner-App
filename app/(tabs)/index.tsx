@@ -1,9 +1,11 @@
+import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import {
   collection, deleteDoc, doc, onSnapshot, updateDoc
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
+  Alert,
   ScrollView, StyleSheet, Text,
   TouchableOpacity,
   View
@@ -20,6 +22,8 @@ type Task = {
 
 export default function HomeScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [missedAlertShown, setMissedAlertShown] = useState(false);
+  const router = useRouter();
 
   const getTodayDate = () => new Date().toISOString().split("T")[0];
 
@@ -51,6 +55,13 @@ export default function HomeScreen() {
     return unsub;
   }, []);
 
+  useEffect(() => {
+    if (tasks.length > 0) {
+      checkMissedTasks();
+      setMissedAlertShown(true);
+    }
+  }, [tasks]);
+
   const toggleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -67,6 +78,55 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
+  };
+
+  const checkMissedTasks = () => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const todayDate = new Date().toISOString().split("T")[0];
+
+    const missedTasks = tasks.filter((t) => {
+      if (t.completed) return false;
+      if (t.date !== todayDate) return false;
+      const [time, period] = t.time.split(" ");
+      const [hours, minutes] = time.split(":").map(Number);
+      let taskHours = hours;
+      if (period === "PM" && hours !== 12) taskHours += 12;
+      if (period === "AM" && hours === 12) taskHours = 0;
+      const taskMinutes = taskHours * 60 + minutes;
+      return taskMinutes + 60 < currentMinutes;
+    });
+
+    if (missedTasks.length > 0) {
+      Alert.alert(
+        "Missed Tasks 😬",
+        `You missed ${missedTasks.length} task${missedTasks.length > 1 ? "s" : ""} today. Want to reschedule them to later today?`,
+        [
+          { text: "No thanks", style: "cancel" },
+          {
+            text: "Reschedule",
+            onPress: () => rescheduleMissedTasks(missedTasks),
+          },
+        ]
+      );
+    }
+  };
+
+  const rescheduleMissedTasks = async (missedTasks: Task[]) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const now = new Date();
+    for (let i = 0; i < missedTasks.length; i++) {
+      const newTime = new Date(now.getTime() + (i + 1) * 30 * 60000);
+      const newTimeString = newTime.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      await updateDoc(doc(db, "users", uid, "tasks", missedTasks[i].id), {
+        time: newTimeString,
+      });
+    }
+    Alert.alert("Done! ✅", "Your missed tasks have been rescheduled in 30 minute intervals.");
   };
 
   const isCurrentTask = (task: Task) => {
@@ -178,6 +238,9 @@ export default function HomeScreen() {
           ))}
         </View>
       )}
+      <TouchableOpacity style={styles.summaryButton} onPress={() => router.push("/summary")}>
+        <Text style={styles.summaryButtonText}>View Day Summary 📋</Text>
+      </TouchableOpacity>
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -279,4 +342,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 8,
   },
+  summaryButton: { marginHorizontal: 16, marginTop: 24, backgroundColor: "#fff", padding: 14, borderRadius: 14, alignItems: "center", borderWidth: 1, borderColor: "#e8d8f0" },
+  summaryButtonText: { color: "#9b8aa8", fontWeight: "600", fontSize: 15 },
 });
