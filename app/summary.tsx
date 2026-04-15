@@ -1,8 +1,8 @@
+import { useRouter } from "expo-router";
 import { collection, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { auth, db } from "../constants/firebaseConfig";
-import { useRouter } from "expo-router";
 
 type Task = {
   id: string;

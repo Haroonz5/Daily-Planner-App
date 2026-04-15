@@ -1,12 +1,18 @@
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import {
-  collection, deleteDoc, doc, onSnapshot, updateDoc
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  updateDoc
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
-  ScrollView, StyleSheet, Text,
+  ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
   View
 } from "react-native";
@@ -27,16 +33,38 @@ export default function HomeScreen() {
 
   const getTodayDate = () => new Date().toISOString().split("T")[0];
 
+  const formatTime12Hour = (date: Date) => {
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+    const period = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    return `${hours}:${minutes} ${period}`;
+  };
+
+  const parseTimeToMinutes = (time: string) => {
+    const parts = time.split(" ");
+    if (parts.length !== 2) return null;
+    const period = parts[1];
+    const [hoursStr, minutesStr] = parts[0].split(":");
+    const hours = parseInt(hoursStr, 10);
+    const minutes = parseInt(minutesStr, 10);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+    let taskHours = hours;
+    if (period === "PM" && hours !== 12) taskHours += 12;
+    if (period === "AM" && hours === 12) taskHours = 0;
+    return taskHours * 60 + minutes;
+  };
+
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
+
     const unsub = onSnapshot(collection(db, "users", uid, "tasks"), async (snap) => {
       const fetched = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
       })) as Task[];
-      fetched.sort((a, b) => a.time.localeCompare(b.time));
-      setTasks(fetched);
 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -46,21 +74,111 @@ export default function HomeScreen() {
       const incompleteTasks = fetched.filter(
         (t) => t.date === yesterdayDate && !t.completed
       );
+
       for (const task of incompleteTasks) {
         await updateDoc(doc(db, "users", uid, "tasks", task.id), {
           date: todayDate,
         });
       }
+
+      const sortedTasks = fetched.sort((a, b) => {
+        const timeA = parseTimeToMinutes(a.time) ?? 0;
+        const timeB = parseTimeToMinutes(b.time) ?? 0;
+        return timeA - timeB;
+      });
+
+      setTasks(sortedTasks);
+      console.log("Tasks updated, resetting missedAlertShown to false.");
+      setMissedAlertShown(false);
     });
+
     return unsub;
   }, []);
 
-  useEffect(() => {
-    if (tasks.length > 0 && !missedAlertShown) {
-      checkMissedTasks();
-      setMissedAlertShown(true);
+  const rescheduleMissedTasks = async (missedTasks: Task[]) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    try {
+      const now = new Date();
+      for (let i = 0; i < missedTasks.length; i++) {
+        const newTime = new Date(now.getTime() + (i + 1) * 30 * 60000);
+        await updateDoc(doc(db, "users", uid, "tasks", missedTasks[i].id), {
+          time: formatTime12Hour(newTime),
+          date: newTime.toISOString().split("T")[0],
+        });
+      }
+      Alert.alert("Done! ✅", "Your missed tasks have been rescheduled.");
+      console.log("Missed tasks rescheduled successfully.");
+    } catch (error) {
+      console.error("Reschedule error:", error);
+      Alert.alert("Error", "Could not reschedule tasks. Please try again.");
     }
-  }, [tasks]);
+  };
+
+  const checkMissedTasks = useCallback(() => {
+    console.log("checkMissedTasks called.");
+    console.log("missedAlertShown:", missedAlertShown, "tasks.length:", tasks.length);
+
+    if (missedAlertShown || tasks.length === 0) {
+      console.log("Skipping checkMissedTasks: missedAlertShown is true or no tasks.");
+      return;
+    }
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const todayDate = new Date().toISOString().split("T")[0];
+    console.log("Current date:", todayDate, "Current minutes:", currentMinutes);
+
+    const missedTasks = tasks.filter((t) => {
+      console.log(`Checking task: ${t.title}, Date: ${t.date}, Time: ${t.time}, Completed: ${t.completed}`);
+      if (t.completed) {
+        console.log(`Task ${t.title} is completed, skipping.`);
+        return false;
+      }
+      if (t.date !== todayDate) {
+        console.log(`Task ${t.title} is not for today, skipping.`);
+        return false;
+      }
+      const taskMinutes = parseTimeToMinutes(t.time);
+      if (taskMinutes === null) {
+        console.log(`Could not parse time for task ${t.title}, skipping.`);
+        return false;
+      }
+      const isMissed = taskMinutes + 60 < currentMinutes;
+      console.log(`Task ${t.title}: Task minutes: ${taskMinutes}, Current minutes: ${currentMinutes}, Is missed: ${isMissed}`);
+      return isMissed;
+    });
+
+    console.log("Found missed tasks:", missedTasks.length);
+
+    if (missedTasks.length > 0) {
+      setMissedAlertShown(true);
+      Alert.alert(
+        "Missed Tasks 😬",
+        `You missed ${missedTasks.length} task${missedTasks.length > 1 ? "s" : ""}. Want to reschedule ${missedTasks.length > 1 ? "them" : "it"} to later today?`,
+        [
+          { text: "No thanks", style: "cancel" },
+          {
+            text: "Reschedule",
+            onPress: () => {
+              void rescheduleMissedTasks(missedTasks);
+            },
+          },
+        ]
+      );
+      console.log("Missed tasks alert shown.");
+    } else {
+      console.log("No missed tasks found, not showing alert.");
+    }
+  }, [tasks, missedAlertShown]);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log("useFocusEffect triggered.");
+      checkMissedTasks();
+    }, [checkMissedTasks])
+  );
 
   const toggleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
@@ -80,68 +198,11 @@ export default function HomeScreen() {
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
   };
 
-  const checkMissedTasks = () => {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const todayDate = new Date().toISOString().split("T")[0];
-    console.log("Checking missed tasks, total tasks:", tasks.length, "today:", todayDate, "currentMinutes:", currentMinutes);
-
-    const missedTasks = tasks.filter((t) => {
-      if (t.completed) return false;
-      if (t.date !== todayDate) return false;
-      const [time, period] = t.time.split(" ");
-      const [hours, minutes] = time.split(":").map(Number);
-      let taskHours = hours;
-      if (period === "PM" && hours !== 12) taskHours += 12;
-      if (period === "AM" && hours === 12) taskHours = 0;
-      const taskMinutes = taskHours * 60 + minutes;
-      console.log("Task:", t.title, "taskMinutes:", taskMinutes, "currentMinutes:", currentMinutes, "missed:", taskMinutes + 60 < currentMinutes);
-      return taskMinutes + 60 < currentMinutes;
-    });
-
-    console.log("Missed tasks found:", missedTasks.length);
-
-    if (missedTasks.length > 0) {
-      Alert.alert(
-        "Missed Tasks 😬",
-        `You missed ${missedTasks.length} task${missedTasks.length > 1 ? "s" : ""} today. Want to reschedule them to later today?`,
-        [
-          { text: "No thanks", style: "cancel" },
-          {
-            text: "Reschedule",
-            onPress: () => rescheduleMissedTasks(missedTasks),
-          },
-        ]
-      );
-    }
-  };
-
-  const rescheduleMissedTasks = async (missedTasks: Task[]) => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const now = new Date();
-    for (let i = 0; i < missedTasks.length; i++) {
-      const newTime = new Date(now.getTime() + (i + 1) * 30 * 60000);
-      const newTimeString = newTime.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      await updateDoc(doc(db, "users", uid, "tasks", missedTasks[i].id), {
-        time: newTimeString,
-      });
-    }
-    Alert.alert("Done! ✅", "Your missed tasks have been rescheduled in 30 minute intervals.");
-  };
-
   const isCurrentTask = (task: Task) => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const [time, period] = task.time.split(" ");
-    const [hours, minutes] = time.split(":").map(Number);
-    let taskHours = hours;
-    if (period === "PM" && hours !== 12) taskHours += 12;
-    if (period === "AM" && hours === 12) taskHours = 0;
-    const taskMinutes = taskHours * 60 + minutes;
+    const taskMinutes = parseTimeToMinutes(task.time);
+    if (taskMinutes === null) return false;
     return taskMinutes <= currentMinutes && currentMinutes < taskMinutes + 60;
   };
 
