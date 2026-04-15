@@ -56,7 +56,7 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (tasks.length > 0) {
+    if (tasks.length > 0 && !missedAlertShown) {
       checkMissedTasks();
       setMissedAlertShown(true);
     }
@@ -84,6 +84,7 @@ export default function HomeScreen() {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const todayDate = new Date().toISOString().split("T")[0];
+    console.log("Checking missed tasks, total tasks:", tasks.length, "today:", todayDate, "currentMinutes:", currentMinutes);
 
     const missedTasks = tasks.filter((t) => {
       if (t.completed) return false;
@@ -94,8 +95,11 @@ export default function HomeScreen() {
       if (period === "PM" && hours !== 12) taskHours += 12;
       if (period === "AM" && hours === 12) taskHours = 0;
       const taskMinutes = taskHours * 60 + minutes;
+      console.log("Task:", t.title, "taskMinutes:", taskMinutes, "currentMinutes:", currentMinutes, "missed:", taskMinutes + 60 < currentMinutes);
       return taskMinutes + 60 < currentMinutes;
     });
+
+    console.log("Missed tasks found:", missedTasks.length);
 
     if (missedTasks.length > 0) {
       Alert.alert(
