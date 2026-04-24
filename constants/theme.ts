@@ -1,48 +1,98 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+import { Platform } from "react-native";
 
-import { Platform } from 'react-native';
+export type AppThemeName = "pastel" | "light" | "dark" | "focus";
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+type ThemePalette = {
+  text: string;
+  background: string;
+  card: string;
+  surface: string;
+  tint: string;
+  icon: string;
+  tabIconDefault: string;
+  tabIconSelected: string;
+  subtle: string;
+  border: string;
+  danger: string;
+  success: string;
+  warning: string;
+};
 
-export const Colors = {
+export const Colors: Record<AppThemeName, ThemePalette> = {
+  pastel: {
+    text: "#4a3f55",
+    background: "#fdf6ff",
+    card: "#ffffff",
+    surface: "#f8f0fb",
+    tint: "#c4a8d4",
+    icon: "#9b8aa8",
+    tabIconDefault: "#baa8c6",
+    tabIconSelected: "#c4a8d4",
+    subtle: "#9b8aa8",
+    border: "#e8d8f0",
+    danger: "#e07a9b",
+    success: "#8dcf9f",
+    warning: "#f2b97f",
+  },
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: "#2b2f38",
+    background: "#f8fafc",
+    card: "#ffffff",
+    surface: "#eef2f7",
+    tint: "#6c8ef5",
+    icon: "#7a8599",
+    tabIconDefault: "#9aa3b2",
+    tabIconSelected: "#6c8ef5",
+    subtle: "#6b7280",
+    border: "#dbe3ef",
+    danger: "#dc6f7d",
+    success: "#5fa97a",
+    warning: "#e0a84f",
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: "#f3f4f6",
+    background: "#121418",
+    card: "#1b1f27",
+    surface: "#252b36",
+    tint: "#8ca8ff",
+    icon: "#9aa4b2",
+    tabIconDefault: "#657080",
+    tabIconSelected: "#8ca8ff",
+    subtle: "#b3bcc8",
+    border: "#2f3744",
+    danger: "#ff8ba0",
+    success: "#7ad79d",
+    warning: "#f4c27a",
+  },
+  focus: {
+    text: "#1f2a1f",
+    background: "#f4f1e8",
+    card: "#fffdf7",
+    surface: "#ece6d7",
+    tint: "#6f8a56",
+    icon: "#7d876f",
+    tabIconDefault: "#a0a78f",
+    tabIconSelected: "#6f8a56",
+    subtle: "#707763",
+    border: "#ddd5c2",
+    danger: "#c96f5d",
+    success: "#7aa06a",
+    warning: "#c79a4b",
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    sans: "system-ui",
+    serif: "ui-serif",
+    rounded: "ui-rounded",
+    mono: "ui-monospace",
   },
   default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+    sans: "normal",
+    serif: "serif",
+    rounded: "normal",
+    mono: "monospace",
   },
   web: {
     sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
