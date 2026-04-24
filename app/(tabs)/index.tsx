@@ -24,9 +24,16 @@ import { Swipeable } from "react-native-gesture-handler";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
+import {
+  cancelTaskNotifications,
+  syncMorningSummaryNotification,
+  syncTaskNotifications
+} from "../../utils/notifications";
+
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
+type TaskStatus = "pending" | "completed" | "skipped";
 
 type Task = {
   id: string;
@@ -36,6 +43,12 @@ type Task = {
   completed: boolean;
   priority?: Priority;
   notes?: string;
+  status?: TaskStatus;
+  completedAt?: Date | string | null;
+  skippedAt?: Date | string | null;
+  lastActionAt?: Date | string | null;
+  rescheduledCount?: number;
+  originalTime?: string;
 };
 
 const priorityColors: Record<Priority, string> = {
@@ -69,6 +82,7 @@ export default function HomeScreen() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [skipCandidate, setSkipCandidate] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -127,12 +141,26 @@ export default function HomeScreen() {
         const todayDate = new Date().toISOString().split("T")[0];
 
         const incompleteTasks = fetched.filter(
-          (t) => t.date === yesterdayDate && !t.completed
+          (t) =>
+            t.date === yesterdayDate &&
+            !t.completed &&
+            (t.status ?? "pending") !== "skipped"
         );
 
         for (const task of incompleteTasks) {
           await updateDoc(doc(db, "users", uid, "tasks", task.id), {
             date: todayDate,
+            lastActionAt: new Date(),
+          });
+
+          await syncTaskNotifications({
+            id: task.id,
+            title: task.title,
+            time: task.time,
+            date: todayDate,
+            priority: task.priority,
+            completed: false,
+            status: "pending",
           });
         }
 
@@ -162,6 +190,7 @@ export default function HomeScreen() {
 
     return todayTasks.filter((task) => {
       if (task.completed) return false;
+      if ((task.status ?? "pending") === "skipped") return false;
       const taskMinutes = parseTimeToMinutes(task.time);
       return taskMinutes !== null && taskMinutes + 60 < currentMinutes;
     });
@@ -211,11 +240,48 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    const nextCompleted = !task.completed;
+
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     await updateDoc(doc(db, "users", uid, "tasks", task.id), {
-      completed: !task.completed,
+      completed: nextCompleted,
+      status: nextCompleted ? "completed" : "pending",
+      completedAt: nextCompleted ? new Date() : null,
+      skippedAt: nextCompleted ? null : task.skippedAt ?? null,
+      lastActionAt: new Date(),
     });
+
+    if (nextCompleted) {
+      await cancelTaskNotifications(task.id);
+    } else {
+      await syncTaskNotifications({
+        id: task.id,
+        title: task.title,
+        time: task.time,
+        date: task.date,
+        priority: task.priority,
+        completed: false,
+        status: "pending",
+      });
+    }
+  };
+
+  const handleSkipTask = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !skipCandidate) return;
+
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+
+    await updateDoc(doc(db, "users", uid, "tasks", skipCandidate.id), {
+      completed: false,
+      status: "skipped",
+      skippedAt: new Date(),
+      lastActionAt: new Date(),
+    });
+
+    await cancelTaskNotifications(skipCandidate.id);
+    setSkipCandidate(null);
   };
 
   const handleLogout = async () => {
@@ -225,7 +291,10 @@ export default function HomeScreen() {
   const handleDelete = async (taskId: string) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
+
+    await cancelTaskNotifications(taskId);
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
+    await syncMorningSummaryNotification(uid);
   };
 
   const openEditModal = (task: Task) => {
@@ -253,8 +322,24 @@ export default function HomeScreen() {
       time: editTime.trim(),
       notes: editNotes.trim(),
       priority: editPriority,
+      lastActionAt: new Date(),
     });
 
+    if ((editingTask.status ?? "pending") !== "skipped" && !editingTask.completed) {
+      await syncTaskNotifications({
+        id: editingTask.id,
+        title: editTitle.trim(),
+        time: editTime.trim(),
+        date: editingTask.date,
+        priority: editPriority,
+        completed: false,
+        status: "pending",
+      });
+    } else {
+      await cancelTaskNotifications(editingTask.id);
+    }
+
+    await syncMorningSummaryNotification(uid);
     closeEditModal();
   };
 
@@ -262,7 +347,9 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const remainingTasks = todayTasks.filter((task) => !task.completed);
+    const remainingTasks = todayTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    );
     if (remainingTasks.length === 0) return;
 
     const base = new Date();
@@ -271,11 +358,26 @@ export default function HomeScreen() {
     base.setMilliseconds(0);
 
     for (let i = 0; i < remainingTasks.length; i++) {
+      const task = remainingTasks[i];
       const nextTime = new Date(base);
       nextTime.setMinutes(base.getMinutes() + i * 60);
+      const updatedTime = formatTimeFromDate(nextTime);
 
-      await updateDoc(doc(db, "users", uid, "tasks", remainingTasks[i].id), {
-        time: formatTimeFromDate(nextTime),
+      await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+        time: updatedTime,
+        originalTime: task.originalTime ?? task.time,
+        rescheduledCount: (task.rescheduledCount ?? 0) + 1,
+        lastActionAt: new Date(),
+      });
+
+      await syncTaskNotifications({
+        id: task.id,
+        title: task.title,
+        time: updatedTime,
+        date: task.date,
+        priority: task.priority,
+        completed: false,
+        status: "pending",
       });
     }
   };
@@ -296,11 +398,26 @@ export default function HomeScreen() {
     base.setMilliseconds(0);
 
     for (let i = 0; i < missedTasks.length; i++) {
+      const task = missedTasks[i];
       const nextTime = new Date(base);
       nextTime.setMinutes(base.getMinutes() + i * 60);
+      const updatedTime = formatTimeFromDate(nextTime);
 
-      await updateDoc(doc(db, "users", uid, "tasks", missedTasks[i].id), {
-        time: formatTimeFromDate(nextTime),
+      await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+        time: updatedTime,
+        originalTime: task.originalTime ?? task.time,
+        rescheduledCount: (task.rescheduledCount ?? 0) + 1,
+        lastActionAt: new Date(),
+      });
+
+      await syncTaskNotifications({
+        id: task.id,
+        title: task.title,
+        time: updatedTime,
+        date: task.date,
+        priority: task.priority,
+        completed: false,
+        status: "pending",
       });
     }
 
@@ -349,85 +466,114 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  const renderTask = (item: Task, showDate?: boolean) => (
-    <Swipeable
-      key={item.id}
-      renderRightActions={() => renderRightActions(item.id)}
-      overshootRight={false}
-    >
-      <View
-        style={[
-          styles.task,
-          { borderBottomColor: colors.border },
-          isCurrentTask(item) && [
-            styles.currentTask,
-            {
-              backgroundColor: colors.surface,
-              borderLeftColor: colors.tint,
-            },
-          ],
-        ]}
+  const renderTask = (item: Task, showDate?: boolean) => {
+    const isSkipped = (item.status ?? "pending") === "skipped";
+
+    return (
+      <Swipeable
+        key={item.id}
+        renderRightActions={() => renderRightActions(item.id)}
+        overshootRight={false}
       >
-        <TouchableOpacity
-          onPress={() => toggleComplete(item)}
-          style={styles.checkboxWrap}
+        <View
+          style={[
+            styles.task,
+            { borderBottomColor: colors.border },
+            isCurrentTask(item) &&
+              !isSkipped && [
+                styles.currentTask,
+                {
+                  backgroundColor: colors.surface,
+                  borderLeftColor: colors.tint,
+                },
+              ],
+          ]}
         >
-          <View
-            style={[
-              styles.checkbox,
-              { borderColor: colors.tint },
-              item.completed && {
-                backgroundColor: colors.tint,
-                borderColor: colors.tint,
-              },
-            ]}
+          <TouchableOpacity
+            onPress={() => toggleComplete(item)}
+            style={styles.checkboxWrap}
           >
-            {item.completed && <Text style={styles.checkmark}>✓</Text>}
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => openEditModal(item)}
-          style={styles.taskContent}
-          activeOpacity={0.8}
-        >
-          <Text
-            style={[
-              styles.taskTitle,
-              { color: colors.text },
-              item.completed && styles.strikethrough,
-              item.completed && { color: colors.subtle },
-            ]}
-          >
-            {item.title}
-          </Text>
-
-          <Text
-            style={[
-              styles.taskTime,
-              { color: colors.subtle },
-              isCurrentTask(item) && { color: colors.tint, fontWeight: "600" },
-            ]}
-          >
-            {item.time}
-            {showDate ? ` · ${item.date}` : ""}
-            {isCurrentTask(item) && !showDate ? " · Now" : ""}
-          </Text>
-
-          {renderPriority(item.priority)}
-
-          {!!item.notes && (
-            <Text
-              style={[styles.taskNotes, { color: colors.subtle }]}
-              numberOfLines={2}
+            <View
+              style={[
+                styles.checkbox,
+                { borderColor: colors.tint },
+                item.completed && {
+                  backgroundColor: colors.tint,
+                  borderColor: colors.tint,
+                },
+                isSkipped && {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.warning,
+                },
+              ]}
             >
-              {item.notes}
+              {item.completed && <Text style={styles.checkmark}>✓</Text>}
+              {isSkipped && <Text style={[styles.skipMark, { color: colors.warning }]}>»</Text>}
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => openEditModal(item)}
+            style={styles.taskContent}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.taskTitle,
+                { color: colors.text },
+                (item.completed || isSkipped) && styles.strikethrough,
+                (item.completed || isSkipped) && { color: colors.subtle },
+              ]}
+            >
+              {item.title}
             </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    </Swipeable>
-  );
+
+            <Text
+              style={[
+                styles.taskTime,
+                { color: colors.subtle },
+                isCurrentTask(item) &&
+                  !isSkipped && { color: colors.tint, fontWeight: "600" },
+              ]}
+            >
+              {item.time}
+              {showDate ? ` · ${item.date}` : ""}
+              {isCurrentTask(item) && !showDate && !isSkipped ? " · Now" : ""}
+              {isSkipped && !showDate ? " · Skipped" : ""}
+            </Text>
+
+            {renderPriority(item.priority)}
+
+            {!!item.notes && (
+              <Text
+                style={[styles.taskNotes, { color: colors.subtle }]}
+                numberOfLines={2}
+              >
+                {item.notes}
+              </Text>
+            )}
+
+            {!showDate && !item.completed && !isSkipped && (
+              <TouchableOpacity
+                style={[
+                  styles.skipButton,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setSkipCandidate(item)}
+              >
+                <Text style={[styles.skipButtonText, { color: colors.warning }]}>
+                  Skip Task
+                </Text>
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
+        </View>
+      </Swipeable>
+    );
+  };
 
   return (
     <>
@@ -468,9 +614,7 @@ export default function HomeScreen() {
                 onPress={() => setThemeModalVisible(true)}
                 style={[styles.iconButton, { backgroundColor: colors.surface }]}
               >
-                <Text
-                  style={[styles.iconButtonText, { color: colors.subtle }]}
-                >
+                <Text style={[styles.iconButtonText, { color: colors.subtle }]}>
                   Theme
                 </Text>
               </TouchableOpacity>
@@ -479,9 +623,7 @@ export default function HomeScreen() {
                 onPress={handleLogout}
                 style={[styles.iconButton, { backgroundColor: colors.surface }]}
               >
-                <Text
-                  style={[styles.iconButtonText, { color: colors.subtle }]}
-                >
+                <Text style={[styles.iconButtonText, { color: colors.subtle }]}>
                   Log Out
                 </Text>
               </TouchableOpacity>
@@ -512,7 +654,9 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {todayTasks.some((task) => !task.completed) && (
+          {todayTasks.some(
+            (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+          ) && (
             <TouchableOpacity
               style={[
                 styles.resetButton,
@@ -858,6 +1002,52 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={!!skipCandidate}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSkipCandidate(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.themeCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Skip This Task?
+            </Text>
+
+            <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
+              Are you sure? This sounds like an excuse. You can still reschedule
+              it instead if the timing is the problem.
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: colors.surface },
+                ]}
+                onPress={() => setSkipCandidate(null)}
+              >
+                <Text
+                  style={[
+                    styles.secondaryButtonText,
+                    { color: colors.subtle },
+                  ]}
+                >
+                  Keep It
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.warning }]}
+                onPress={handleSkipTask}
+              >
+                <Text style={styles.primaryButtonText}>Skip</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -956,6 +1146,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   checkmark: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  skipMark: { fontSize: 12, fontWeight: "700" },
   taskContent: {
     flex: 1,
     paddingRight: 8,
@@ -982,6 +1173,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 6,
     lineHeight: 18,
+  },
+  skipButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+  },
+  skipButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   swipeDelete: {
     justifyContent: "center",
@@ -1149,4 +1352,3 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
 });
-

@@ -1,5 +1,4 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
-import * as Notifications from "expo-notifications";
 import { addDoc, collection } from "firebase/firestore";
 import { useState } from "react";
 import {
@@ -10,10 +9,16 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import { Colors } from "@/constants/theme";
+import {
+  syncMorningSummaryNotification,
+  syncTaskNotifications
+} from "../../utils/notifications";
+
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -26,7 +31,7 @@ const priorityColors: Record<Priority, string> = {
 
 export default function AddTask() {
   const { themeName } = useAppTheme();
-  const colors = require("@/constants/theme").Colors[themeName];
+  const colors = Colors[themeName];
 
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -40,26 +45,6 @@ export default function AddTask() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     return tomorrow.toISOString().split("T")[0];
-  };
-
-  const scheduleNotification = async (taskTitle: string, taskTime: Date) => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(taskTime.getHours());
-    tomorrow.setMinutes(taskTime.getMinutes());
-    tomorrow.setSeconds(0);
-    tomorrow.setMilliseconds(0);
-
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Task Reminder",
-        body: taskTitle,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: tomorrow,
-      },
-    });
   };
 
   const resetForm = () => {
@@ -82,20 +67,41 @@ export default function AddTask() {
         return;
       }
 
-      await addDoc(collection(db, "users", uid, "tasks"), {
+      const formattedTime = time.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+      const tomorrowDate = getTomorrowDate();
+
+      const docRef = await addDoc(collection(db, "users", uid, "tasks"), {
         title: title.trim(),
         notes: notes.trim(),
         priority,
-        time: time.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        date: getTomorrowDate(),
+        time: formattedTime,
+        date: tomorrowDate,
         completed: false,
+        status: "pending",
         createdAt: new Date(),
+        completedAt: null,
+        skippedAt: null,
+        lastActionAt: new Date(),
+        rescheduledCount: 0,
+        originalTime: formattedTime,
       });
 
-      await scheduleNotification(title.trim(), time);
+      await syncTaskNotifications({
+        id: docRef.id,
+        title: title.trim(),
+        time: formattedTime,
+        date: tomorrowDate,
+        priority,
+        completed: false,
+        status: "pending",
+      });
+
+      await syncMorningSummaryNotification(uid);
+
       resetForm();
       setSuccess(true);
       setError("");
@@ -216,7 +222,11 @@ export default function AddTask() {
         )}
 
         {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
-        {success ? <Text style={[styles.success, { color: colors.subtle }]}>Task added for tomorrow 🌸</Text> : null}
+        {success ? (
+          <Text style={[styles.success, { color: colors.subtle }]}>
+            Task added and tomorrow’s notifications updated 🌸
+          </Text>
+        ) : null}
 
         <TouchableOpacity
           style={[styles.button, { backgroundColor: colors.tint }]}
@@ -306,5 +316,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: "center",
     fontSize: 14,
+    marginHorizontal: 24,
   },
 });

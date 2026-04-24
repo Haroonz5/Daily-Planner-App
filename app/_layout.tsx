@@ -1,7 +1,7 @@
 import {
   DarkTheme,
   DefaultTheme,
-  ThemeProvider,
+  ThemeProvider
 } from "@react-navigation/native";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
@@ -11,13 +11,16 @@ import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
+
 import {
   AppThemeContext,
   getStoredTheme,
   hasSeenOnboarding,
-  setStoredTheme,
+  setStoredTheme
 } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
+import { ensureBaseReminders } from "../utils/notifications";
+
 import { auth } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
@@ -59,8 +62,6 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    Notifications.requestPermissionsAsync();
-
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
@@ -70,6 +71,8 @@ export default function RootLayout() {
         shouldShowList: true,
       }),
     });
+
+    ensureBaseReminders();
   }, []);
 
   useEffect(() => {

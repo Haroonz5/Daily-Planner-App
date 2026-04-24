@@ -1,5 +1,5 @@
 import { collection, onSnapshot } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
@@ -7,6 +7,7 @@ import { Colors } from "@/constants/theme";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
+type TaskStatus = "pending" | "completed" | "skipped";
 
 type Task = {
   id: string;
@@ -16,6 +17,12 @@ type Task = {
   completed: boolean;
   priority?: Priority;
   notes?: string;
+  status?: TaskStatus;
+  completedAt?: Date | string | null;
+  skippedAt?: Date | string | null;
+  lastActionAt?: Date | string | null;
+  rescheduledCount?: number;
+  originalTime?: string;
 };
 
 const priorityColors: Record<Priority, string> = {
@@ -33,7 +40,7 @@ export default function StatsScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const unsub = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
+    const unsubscribe = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
       const fetched = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),
@@ -42,70 +49,133 @@ export default function StatsScreen() {
       setTasks(fetched);
     });
 
-    return unsub;
+    return unsubscribe;
   }, []);
 
-  const getTodayDate = () => new Date().toISOString().split("T")[0];
+  const stats = useMemo(() => {
+    const getTodayDate = () => new Date().toISOString().split("T")[0];
 
-  const todayDate = getTodayDate();
-  const todayTasks = tasks.filter((t) => t.date === todayDate);
-  const todayCompleted = todayTasks.filter((t) => t.completed).length;
-  const todayPercent =
-    todayTasks.length > 0
-      ? Math.round((todayCompleted / todayTasks.length) * 100)
-      : 0;
+    const getLast7Days = () => {
+      const days: string[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push(d.toISOString().split("T")[0]);
+      }
+      return days;
+    };
 
-  const getLast7Days = () => {
-    const days: string[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      days.push(d.toISOString().split("T")[0]);
-    }
-    return days;
-  };
+    const todayDate = getTodayDate();
+    const todayTasks = tasks.filter((task) => task.date === todayDate);
+    const todayCompleted = todayTasks.filter((task) => task.completed).length;
+    const todaySkipped = todayTasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+    const todayPercent =
+      todayTasks.length > 0
+        ? Math.round((todayCompleted / todayTasks.length) * 100)
+        : 0;
 
-  const last7Days = getLast7Days();
+    const last7Days = getLast7Days();
 
-  const weeklyStats = last7Days.map((date) => {
-    const dayTasks = tasks.filter((t) => t.date === date);
-    const done = dayTasks.filter((t) => t.completed).length;
-    const percent =
-      dayTasks.length > 0 ? Math.round((done / dayTasks.length) * 100) : 0;
-    const label = new Date(date).toLocaleDateString("en-US", {
-      weekday: "short",
+    const weeklyStats = last7Days.map((date) => {
+      const dayTasks = tasks.filter((task) => task.date === date);
+      const completed = dayTasks.filter((task) => task.completed).length;
+      const skipped = dayTasks.filter(
+        (task) => (task.status ?? "pending") === "skipped"
+      ).length;
+      const percent =
+        dayTasks.length > 0
+          ? Math.round((completed / dayTasks.length) * 100)
+          : 0;
+
+      return {
+        date,
+        label: new Date(date).toLocaleDateString("en-US", { weekday: "short" }),
+        total: dayTasks.length,
+        completed,
+        skipped,
+        percent,
+      };
     });
 
-    return { date, done, total: dayTasks.length, percent, label };
-  });
+    const totalTasks = tasks.length;
+    const totalCompleted = tasks.filter((task) => task.completed).length;
+    const totalSkipped = tasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+    const totalRescheduled = tasks.reduce(
+      (sum, task) => sum + (task.rescheduledCount ?? 0),
+      0
+    );
 
-  const totalCompleted = tasks.filter((t) => t.completed).length;
-  const totalTasks = tasks.length;
-
-  const calculateStreak = () => {
     let streak = 0;
-
-    for (let i = 0; i < last7Days.length; i++) {
-      const date = last7Days[last7Days.length - 1 - i];
-      const dayTasks = tasks.filter((t) => t.date === date);
-
-      if (dayTasks.length === 0) break;
-
-      const allDone = dayTasks.every((t) => t.completed);
+    for (let i = weeklyStats.length - 1; i >= 0; i--) {
+      const day = weeklyStats[i];
+      if (day.total === 0) break;
+      const allDone = day.completed === day.total;
       if (allDone) streak++;
       else break;
     }
 
-    return streak;
-  };
+    const priorityCounts: Record<Priority, number> = {
+      Low: tasks.filter((task) => (task.priority ?? "Medium") === "Low").length,
+      Medium: tasks.filter((task) => (task.priority ?? "Medium") === "Medium").length,
+      High: tasks.filter((task) => (task.priority ?? "Medium") === "High").length,
+    };
 
-  const streak = calculateStreak();
+    const mostSkippedTask = (() => {
+      const counts = new Map<string, number>();
 
-  const priorityCounts: Record<Priority, number> = {
-    Low: tasks.filter((task) => (task.priority ?? "Medium") === "Low").length,
-    Medium: tasks.filter((task) => (task.priority ?? "Medium") === "Medium").length,
-    High: tasks.filter((task) => (task.priority ?? "Medium") === "High").length,
-  };
+      tasks.forEach((task) => {
+        if ((task.status ?? "pending") === "skipped") {
+          counts.set(task.title, (counts.get(task.title) ?? 0) + 1);
+        }
+      });
+
+      let topTitle = "None yet";
+      let topCount = 0;
+
+      counts.forEach((count, title) => {
+        if (count > topCount) {
+          topTitle = title;
+          topCount = count;
+        }
+      });
+
+      return {
+        title: topTitle,
+        count: topCount,
+      };
+    })();
+
+    const bestDay = weeklyStats.reduce((best, day) => {
+      if (!best) return day;
+      return day.percent > best.percent ? day : best;
+    }, weeklyStats[0]);
+
+    const worstDay = weeklyStats.reduce((worst, day) => {
+      if (!worst) return day;
+      return day.percent < worst.percent ? day : worst;
+    }, weeklyStats[0]);
+
+    return {
+      todayTasks,
+      todayCompleted,
+      todaySkipped,
+      todayPercent,
+      weeklyStats,
+      totalTasks,
+      totalCompleted,
+      totalSkipped,
+      totalRescheduled,
+      streak,
+      priorityCounts,
+      mostSkippedTask,
+      bestDay,
+      worstDay,
+    };
+  }, [tasks]);
 
   return (
     <ScrollView
@@ -116,35 +186,46 @@ export default function StatsScreen() {
         <Text style={styles.emoji}>📊</Text>
         <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
         <Text style={[styles.subtitle, { color: colors.subtle }]}>
-          Keep up the great work!
+          See how your discipline is shaping up.
         </Text>
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>Today's Progress</Text>
-        <Text style={[styles.bigNumber, { color: colors.text }]}>{todayPercent}%</Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>
+          {stats.todayPercent}%
+        </Text>
         <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
-          {todayCompleted} of {todayTasks.length} tasks completed
+          {stats.todayCompleted} completed, {stats.todaySkipped} skipped,{" "}
+          {stats.todayTasks.length} total
         </Text>
         <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
-          <View style={[styles.progressBarFill, { width: `${todayPercent}%`, backgroundColor: colors.tint }]} />
+          <View
+            style={[
+              styles.progressBarFill,
+              {
+                width: `${stats.todayPercent}%`,
+                backgroundColor: colors.tint,
+              },
+            ]}
+          />
         </View>
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>Current Streak 🔥</Text>
-        <Text style={[styles.bigNumber, { color: colors.text }]}>{streak}</Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>{stats.streak}</Text>
         <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
-          {streak === 0
-            ? "Complete all tasks today to start a streak!"
-            : `${streak} day${streak > 1 ? "s" : ""} in a row!`}
+          {stats.streak === 0
+            ? "Complete every task in a day to start a streak."
+            : `${stats.streak} perfect day${stats.streak > 1 ? "s" : ""} in a row.`}
         </Text>
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>This Week</Text>
         <View style={styles.barChart}>
-          {weeklyStats.map((day) => (
+          {stats.weeklyStats.map((day) => (
             <View key={day.date} style={styles.barColumn}>
               <Text style={[styles.barPercent, { color: colors.subtle }]}>
                 {day.total > 0 ? `${day.percent}%` : ""}
@@ -153,15 +234,33 @@ export default function StatsScreen() {
                 <View
                   style={[
                     styles.barFill,
-                    { height: `${day.percent}%`, backgroundColor: colors.tint },
-                    day.percent === 100 && { backgroundColor: colors.icon },
+                    {
+                      height: `${day.percent}%`,
+                      backgroundColor: colors.tint,
+                    },
                   ]}
                 />
               </View>
-              <Text style={[styles.barLabel, { color: colors.subtle }]}>{day.label}</Text>
+              <Text style={[styles.barLabel, { color: colors.subtle }]}>
+                {day.label}
+              </Text>
             </View>
           ))}
         </View>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Weekly Insight</Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Best day: {stats.bestDay?.label ?? "N/A"} ({stats.bestDay?.percent ?? 0}%)
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Toughest day: {stats.worstDay?.label ?? "N/A"} ({stats.worstDay?.percent ?? 0}%)
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Most skipped task: {stats.mostSkippedTask.title}
+          {stats.mostSkippedTask.count > 0 ? ` (${stats.mostSkippedTask.count}x)` : ""}
+        </Text>
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
@@ -179,7 +278,7 @@ export default function StatsScreen() {
                 ]}
               />
               <Text style={[styles.priorityStatCount, { color: colors.text }]}>
-                {priorityCounts[priority]}
+                {stats.priorityCounts[priority]}
               </Text>
               <Text style={[styles.priorityStatLabel, { color: colors.subtle }]}>
                 {priority}
@@ -193,20 +292,39 @@ export default function StatsScreen() {
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>All Time</Text>
         <View style={styles.allTimeRow}>
           <View style={styles.allTimeStat}>
-            <Text style={[styles.allTimeNumber, { color: colors.text }]}>{totalTasks}</Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Total Tasks</Text>
-          </View>
-          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.allTimeStat}>
-            <Text style={[styles.allTimeNumber, { color: colors.text }]}>{totalCompleted}</Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Completed</Text>
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>
+              {stats.totalTasks}
+            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Total
+            </Text>
           </View>
           <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
-              {totalTasks > 0 ? Math.round((totalCompleted / totalTasks) * 100) : 0}%
+              {stats.totalCompleted}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Success Rate</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Completed
+            </Text>
+          </View>
+          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.allTimeStat}>
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>
+              {stats.totalSkipped}
+            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Skipped
+            </Text>
+          </View>
+          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.allTimeStat}>
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>
+              {stats.totalRescheduled}
+            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Rescheduled
+            </Text>
           </View>
         </View>
       </View>
@@ -265,6 +383,11 @@ const styles = StyleSheet.create({
   },
   barFill: { width: "100%", borderRadius: 12 },
   barLabel: { fontSize: 11, marginTop: 6 },
+  insightText: {
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: 6,
+  },
   priorityStatsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -297,6 +420,6 @@ const styles = StyleSheet.create({
   },
   allTimeStat: { flex: 1, alignItems: "center" },
   allTimeDivider: { width: 1, height: 40 },
-  allTimeNumber: { fontSize: 28, fontWeight: "700" },
+  allTimeNumber: { fontSize: 24, fontWeight: "700" },
   allTimeLabel: { fontSize: 12, marginTop: 4 },
 });
