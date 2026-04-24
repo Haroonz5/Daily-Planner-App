@@ -8,6 +8,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { useEffect, useState } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 import {
@@ -138,18 +139,20 @@ export default function RootLayout() {
         };
 
   return (
-    <AppThemeContext.Provider value={{ themeName, setThemeName }}>
-      <ThemeProvider value={navigationTheme}>
-        <Stack>
-          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-          <Stack.Screen name="signup" options={{ headerShown: false }} />
-          <Stack.Screen name="summary" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ headerShown: false }} />
-        </Stack>
-        <StatusBar style={themeName === "dark" ? "light" : "dark"} />
-      </ThemeProvider>
-    </AppThemeContext.Provider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppThemeContext.Provider value={{ themeName, setThemeName }}>
+        <ThemeProvider value={navigationTheme}>
+          <Stack>
+            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="signup" options={{ headerShown: false }} />
+            <Stack.Screen name="summary" options={{ headerShown: false }} />
+            <Stack.Screen name="modal" options={{ headerShown: false }} />
+          </Stack>
+          <StatusBar style={themeName === "dark" ? "light" : "dark"} />
+        </ThemeProvider>
+      </AppThemeContext.Provider>
+    </GestureHandlerRootView>
   );
 }
