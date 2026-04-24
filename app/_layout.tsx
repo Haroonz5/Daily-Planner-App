@@ -30,19 +30,23 @@ export default function RootLayout() {
   const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const loadAppState = async () => {
-      const [savedTheme, seenOnboarding] = await Promise.all([
-        getStoredTheme(),
-        hasSeenOnboarding(),
-      ]);
-
+    const loadTheme = async () => {
+      const savedTheme = await getStoredTheme();
       setThemeNameState(savedTheme);
       setThemeLoaded(true);
-      setOnboardingSeen(seenOnboarding);
     };
 
-    loadAppState();
+    loadTheme();
   }, []);
+
+  useEffect(() => {
+    const loadOnboardingStatus = async () => {
+      const seen = await hasSeenOnboarding();
+      setOnboardingSeen(seen);
+    };
+
+    loadOnboardingStatus();
+  }, [segments]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
