@@ -1,6 +1,9 @@
 import { collection, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
+
+import { useAppTheme } from "@/constants/appTheme";
+import { Colors } from "@/constants/theme";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -22,6 +25,8 @@ const priorityColors: Record<Priority, string> = {
 };
 
 export default function StatsScreen() {
+  const { themeName } = useAppTheme();
+  const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
 
   useEffect(() => {
@@ -103,98 +108,105 @@ export default function StatsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.header}>
         <Text style={styles.emoji}>📊</Text>
-        <Text style={styles.title}>Your Stats</Text>
-        <Text style={styles.subtitle}>Keep up the great work!</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
+        <Text style={[styles.subtitle, { color: colors.subtle }]}>
+          Keep up the great work!
+        </Text>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Today's Progress</Text>
-        <Text style={styles.bigNumber}>{todayPercent}%</Text>
-        <Text style={styles.cardSubtitle}>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Today's Progress</Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>{todayPercent}%</Text>
+        <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
           {todayCompleted} of {todayTasks.length} tasks completed
         </Text>
-        <View style={styles.progressBarContainer}>
-          <View style={[styles.progressBarFill, { width: `${todayPercent}%` }]} />
+        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
+          <View style={[styles.progressBarFill, { width: `${todayPercent}%`, backgroundColor: colors.tint }]} />
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Current Streak 🔥</Text>
-        <Text style={styles.bigNumber}>{streak}</Text>
-        <Text style={styles.cardSubtitle}>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Current Streak 🔥</Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>{streak}</Text>
+        <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
           {streak === 0
             ? "Complete all tasks today to start a streak!"
             : `${streak} day${streak > 1 ? "s" : ""} in a row!`}
         </Text>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>This Week</Text>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>This Week</Text>
         <View style={styles.barChart}>
           {weeklyStats.map((day) => (
             <View key={day.date} style={styles.barColumn}>
-              <Text style={styles.barPercent}>
+              <Text style={[styles.barPercent, { color: colors.subtle }]}>
                 {day.total > 0 ? `${day.percent}%` : ""}
               </Text>
-              <View style={styles.barTrack}>
+              <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
                 <View
                   style={[
                     styles.barFill,
-                    { height: `${day.percent}%` },
-                    day.percent === 100 && styles.barFillComplete,
+                    { height: `${day.percent}%`, backgroundColor: colors.tint },
+                    day.percent === 100 && { backgroundColor: colors.icon },
                   ]}
                 />
               </View>
-              <Text style={styles.barLabel}>{day.label}</Text>
+              <Text style={[styles.barLabel, { color: colors.subtle }]}>{day.label}</Text>
             </View>
           ))}
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Task Mix</Text>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Task Mix</Text>
         <View style={styles.priorityStatsRow}>
           {(["Low", "Medium", "High"] as Priority[]).map((priority) => (
-            <View key={priority} style={styles.priorityStat}>
+            <View
+              key={priority}
+              style={[styles.priorityStat, { backgroundColor: colors.surface }]}
+            >
               <View
                 style={[
                   styles.priorityStatDot,
                   { backgroundColor: priorityColors[priority] },
                 ]}
               />
-              <Text style={styles.priorityStatCount}>
+              <Text style={[styles.priorityStatCount, { color: colors.text }]}>
                 {priorityCounts[priority]}
               </Text>
-              <Text style={styles.priorityStatLabel}>{priority}</Text>
+              <Text style={[styles.priorityStatLabel, { color: colors.subtle }]}>
+                {priority}
+              </Text>
             </View>
           ))}
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>All Time</Text>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>All Time</Text>
         <View style={styles.allTimeRow}>
           <View style={styles.allTimeStat}>
-            <Text style={styles.allTimeNumber}>{totalTasks}</Text>
-            <Text style={styles.allTimeLabel}>Total Tasks</Text>
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>{totalTasks}</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Total Tasks</Text>
           </View>
-          <View style={styles.allTimeDivider} />
+          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
-            <Text style={styles.allTimeNumber}>{totalCompleted}</Text>
-            <Text style={styles.allTimeLabel}>Completed</Text>
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>{totalCompleted}</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Completed</Text>
           </View>
-          <View style={styles.allTimeDivider} />
+          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
-            <Text style={styles.allTimeNumber}>
-              {totalTasks > 0
-                ? Math.round((totalCompleted / totalTasks) * 100)
-                : 0}
-              %
+            <Text style={[styles.allTimeNumber, { color: colors.text }]}>
+              {totalTasks > 0 ? Math.round((totalCompleted / totalTasks) * 100) : 0}%
             </Text>
-            <Text style={styles.allTimeLabel}>Success Rate</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Success Rate</Text>
           </View>
         </View>
       </View>
@@ -205,18 +217,16 @@ export default function StatsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fdf6ff" },
+  container: { flex: 1 },
   header: { alignItems: "center", paddingTop: 60, paddingBottom: 24 },
   emoji: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 32, fontWeight: "700", color: "#4a3f55" },
-  subtitle: { fontSize: 14, color: "#9b8aa8", marginTop: 6 },
+  title: { fontSize: 32, fontWeight: "700" },
+  subtitle: { fontSize: 14, marginTop: 6 },
   card: {
-    backgroundColor: "#fff",
     borderRadius: 20,
     padding: 20,
     marginHorizontal: 16,
     marginBottom: 16,
-    shadowColor: "#c4a8d4",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -225,29 +235,18 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#9b8aa8",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 12,
   },
-  bigNumber: { fontSize: 52, fontWeight: "700", color: "#4a3f55" },
-  cardSubtitle: {
-    fontSize: 14,
-    color: "#9b8aa8",
-    marginTop: 4,
-    marginBottom: 12,
-  },
+  bigNumber: { fontSize: 52, fontWeight: "700" },
+  cardSubtitle: { fontSize: 14, marginTop: 4, marginBottom: 12 },
   progressBarContainer: {
     height: 8,
-    backgroundColor: "#e8d8f0",
     borderRadius: 4,
     overflow: "hidden",
   },
-  progressBarFill: {
-    height: 8,
-    backgroundColor: "#c4a8d4",
-    borderRadius: 4,
-  },
+  progressBarFill: { height: 8, borderRadius: 4 },
   barChart: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -256,33 +255,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   barColumn: { alignItems: "center", flex: 1 },
-  barPercent: { fontSize: 10, color: "#9b8aa8", marginBottom: 4 },
+  barPercent: { fontSize: 10, marginBottom: 4 },
   barTrack: {
     width: 24,
     height: 80,
-    backgroundColor: "#e8d8f0",
     borderRadius: 12,
     overflow: "hidden",
     justifyContent: "flex-end",
   },
-  barFill: {
-    width: "100%",
-    backgroundColor: "#c4a8d4",
-    borderRadius: 12,
-  },
-  barFillComplete: { backgroundColor: "#a88bc4" },
-  barLabel: { fontSize: 11, color: "#9b8aa8", marginTop: 6 },
+  barFill: { width: "100%", borderRadius: 12 },
+  barLabel: { fontSize: 11, marginTop: 6 },
   priorityStatsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
   },
   priorityStat: {
     flex: 1,
     alignItems: "center",
-    backgroundColor: "#fcf7fe",
     borderRadius: 16,
     paddingVertical: 16,
+    marginHorizontal: 4,
   },
   priorityStatDot: {
     width: 12,
@@ -293,11 +285,9 @@ const styles = StyleSheet.create({
   priorityStatCount: {
     fontSize: 26,
     fontWeight: "700",
-    color: "#4a3f55",
   },
   priorityStatLabel: {
     fontSize: 12,
-    color: "#9b8aa8",
     marginTop: 4,
   },
   allTimeRow: {
@@ -306,7 +296,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   allTimeStat: { flex: 1, alignItems: "center" },
-  allTimeDivider: { width: 1, height: 40, backgroundColor: "#e8d8f0" },
-  allTimeNumber: { fontSize: 28, fontWeight: "700", color: "#4a3f55" },
-  allTimeLabel: { fontSize: 12, color: "#9b8aa8", marginTop: 4 },
+  allTimeDivider: { width: 1, height: 40 },
+  allTimeNumber: { fontSize: 28, fontWeight: "700" },
+  allTimeLabel: { fontSize: 12, marginTop: 4 },
 });

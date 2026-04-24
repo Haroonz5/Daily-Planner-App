@@ -12,6 +12,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { useAppTheme } from "@/constants/appTheme";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -23,6 +25,9 @@ const priorityColors: Record<Priority, string> = {
 };
 
 export default function AddTask() {
+  const { themeName } = useAppTheme();
+  const colors = require("@/constants/theme").Colors[themeName];
+
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [priority, setPriority] = useState<Priority>("Medium");
@@ -102,42 +107,66 @@ export default function AddTask() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.emoji}>📝</Text>
-          <Text style={styles.title}>Plan Tomorrow</Text>
-          <Text style={styles.subtitle}>What do you want to get done?</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Plan Tomorrow</Text>
+          <Text style={[styles.subtitle, { color: colors.subtle }]}>
+            What do you want to get done?
+          </Text>
         </View>
 
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
           placeholder="What do you need to do?"
-          placeholderTextColor="#c4b5c8"
+          placeholderTextColor={colors.subtle}
           value={title}
           onChangeText={setTitle}
         />
 
         <TextInput
-          style={[styles.input, styles.notesInput]}
+          style={[
+            styles.input,
+            styles.notesInput,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
           placeholder="Optional notes or extra detail"
-          placeholderTextColor="#c4b5c8"
+          placeholderTextColor={colors.subtle}
           value={notes}
           onChangeText={setNotes}
           multiline
         />
 
         <View style={styles.prioritySection}>
-          <Text style={styles.sectionLabel}>Priority</Text>
+          <Text style={[styles.sectionLabel, { color: colors.subtle }]}>Priority</Text>
           <View style={styles.priorityRow}>
             {(["Low", "Medium", "High"] as Priority[]).map((item) => (
               <TouchableOpacity
                 key={item}
                 style={[
                   styles.priorityChip,
-                  priority === item && styles.priorityChipActive,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+                  priority === item && {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.tint,
+                  },
                 ]}
                 onPress={() => setPriority(item)}
               >
@@ -147,17 +176,25 @@ export default function AddTask() {
                     { backgroundColor: priorityColors[item] },
                   ]}
                 />
-                <Text style={styles.priorityChipText}>{item}</Text>
+                <Text style={[styles.priorityChipText, { color: colors.text }]}>
+                  {item}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
 
         <TouchableOpacity
-          style={styles.timeButton}
+          style={[
+            styles.timeButton,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
           onPress={() => setShowPicker(true)}
         >
-          <Text style={styles.timeText}>
+          <Text style={[styles.timeText, { color: colors.text }]}>
             ⏰{" "}
             {time.toLocaleTimeString([], {
               hour: "2-digit",
@@ -178,10 +215,13 @@ export default function AddTask() {
           />
         )}
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-        {success ? <Text style={styles.success}>Task added for tomorrow 🌸</Text> : null}
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
+        {success ? <Text style={[styles.success, { color: colors.subtle }]}>Task added for tomorrow 🌸</Text> : null}
 
-        <TouchableOpacity style={styles.button} onPress={handleAddTask}>
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: colors.tint }]}
+          onPress={handleAddTask}
+        >
           <Text style={styles.buttonText}>Add Task</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -190,21 +230,18 @@ export default function AddTask() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fdf6ff" },
+  container: { flex: 1 },
   header: { alignItems: "center", paddingTop: 60, paddingBottom: 32 },
   emoji: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 32, fontWeight: "700", color: "#4a3f55" },
-  subtitle: { fontSize: 14, color: "#9b8aa8", marginTop: 6 },
+  title: { fontSize: 32, fontWeight: "700" },
+  subtitle: { fontSize: 14, marginTop: 6 },
   input: {
-    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e8d8f0",
     borderRadius: 14,
     padding: 14,
     marginHorizontal: 24,
     marginBottom: 16,
     fontSize: 15,
-    color: "#4a3f55",
   },
   notesInput: {
     minHeight: 96,
@@ -217,29 +254,22 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#9b8aa8",
     marginBottom: 10,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   priorityRow: {
     flexDirection: "row",
-    gap: 10,
   },
   priorityChip: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e8d8f0",
     borderRadius: 14,
     paddingVertical: 14,
-  },
-  priorityChipActive: {
-    backgroundColor: "#f7eefb",
-    borderColor: "#c4a8d4",
+    marginHorizontal: 4,
   },
   priorityDot: {
     width: 10,
@@ -249,21 +279,17 @@ const styles = StyleSheet.create({
   },
   priorityChipText: {
     fontSize: 14,
-    color: "#4a3f55",
     fontWeight: "600",
   },
   timeButton: {
-    backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e8d8f0",
     borderRadius: 14,
     padding: 14,
     marginHorizontal: 24,
     marginBottom: 16,
   },
-  timeText: { fontSize: 15, color: "#4a3f55" },
+  timeText: { fontSize: 15 },
   button: {
-    backgroundColor: "#c4a8d4",
     padding: 16,
     borderRadius: 14,
     alignItems: "center",
@@ -272,13 +298,11 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   error: {
-    color: "#e07a9b",
     marginBottom: 12,
     textAlign: "center",
     marginHorizontal: 24,
   },
   success: {
-    color: "#9b8aa8",
     marginBottom: 12,
     textAlign: "center",
     fontSize: 14,

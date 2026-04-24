@@ -8,7 +8,8 @@ import {
   View,
 } from "react-native";
 
-import { markOnboardingSeen } from "@/constants/appTheme";
+import { markOnboardingSeen, useAppTheme } from "@/constants/appTheme";
+import { Colors } from "@/constants/theme";
 
 const slides = [
   {
@@ -33,6 +34,8 @@ const slides = [
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { themeName } = useAppTheme();
+  const colors = Colors[themeName];
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const isLastSlide = currentSlide === slides.length - 1;
@@ -54,19 +57,28 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-        <Text style={styles.skipText}>Skip</Text>
+        <Text style={[styles.skipText, { color: colors.subtle }]}>Skip</Text>
       </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroCard}>
+        <View
+          style={[
+            styles.heroCard,
+            { backgroundColor: colors.card, shadowColor: colors.tint },
+          ]}
+        >
           <Text style={styles.emoji}>{slide.emoji}</Text>
-          <Text style={styles.title}>{slide.title}</Text>
-          <Text style={styles.description}>{slide.description}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {slide.title}
+          </Text>
+          <Text style={[styles.description, { color: colors.subtle }]}>
+            {slide.description}
+          </Text>
         </View>
 
         <View style={styles.dotsRow}>
@@ -75,19 +87,33 @@ export default function OnboardingScreen() {
               key={index}
               style={[
                 styles.dot,
-                index === currentSlide && styles.dotActive,
+                { backgroundColor: colors.border },
+                index === currentSlide && [
+                  styles.dotActive,
+                  { backgroundColor: colors.tint },
+                ],
               ]}
             />
           ))}
         </View>
 
-        <View style={styles.footerCard}>
-          <Text style={styles.footerTitle}>Daily Discipline</Text>
-          <Text style={styles.footerText}>
+        <View
+          style={[
+            styles.footerCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.footerTitle, { color: colors.text }]}>
+            Daily Discipline
+          </Text>
+          <Text style={[styles.footerText, { color: colors.subtle }]}>
             Calm planning. Honest execution. Better follow-through.
           </Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNext}>
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+            onPress={handleNext}
+          >
             <Text style={styles.primaryButtonText}>
               {isLastSlide ? "Get Started" : "Next"}
             </Text>
@@ -101,7 +127,6 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fdf6ff",
     paddingTop: 60,
     paddingHorizontal: 24,
   },
@@ -111,7 +136,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   skipText: {
-    color: "#9b8aa8",
     fontSize: 14,
     fontWeight: "600",
   },
@@ -121,11 +145,9 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   heroCard: {
-    backgroundColor: "#fff",
     borderRadius: 28,
     padding: 28,
     alignItems: "center",
-    shadowColor: "#c4a8d4",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 18,
@@ -138,14 +160,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: "700",
-    color: "#4a3f55",
     textAlign: "center",
     marginBottom: 12,
   },
   description: {
     fontSize: 16,
     lineHeight: 24,
-    color: "#9b8aa8",
     textAlign: "center",
   },
   dotsRow: {
@@ -158,34 +178,29 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#e8d8f0",
     marginHorizontal: 5,
   },
   dotActive: {
     width: 24,
-    backgroundColor: "#c4a8d4",
   },
   footerCard: {
-    backgroundColor: "#f8f0fb",
     borderRadius: 24,
     padding: 24,
     alignItems: "center",
+    borderWidth: 1,
   },
   footerTitle: {
     fontSize: 20,
     fontWeight: "700",
-    color: "#4a3f55",
     marginBottom: 8,
   },
   footerText: {
     fontSize: 14,
-    color: "#9b8aa8",
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 20,
   },
   primaryButton: {
-    backgroundColor: "#c4a8d4",
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 28,

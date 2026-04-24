@@ -11,15 +11,21 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { useAppTheme } from "@/constants/appTheme";
+import { Colors } from "@/constants/theme";
 import { auth } from "../constants/firebaseConfig";
 
 export default function Login() {
+  const router = useRouter();
+  const { themeName } = useAppTheme();
+  const colors = Colors[themeName];
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     const loadSavedEmail = async () => {
@@ -62,22 +68,31 @@ export default function Login() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.inner}>
         <View style={styles.headerContainer}>
           <Text style={styles.emoji}>🌸</Text>
-          <Text style={styles.title}>Daily Planner</Text>
-          <Text style={styles.subtitle}>Plan today. Own tomorrow.</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Daily Planner</Text>
+          <Text style={[styles.subtitle, { color: colors.subtle }]}>
+            Plan today. Own tomorrow.
+          </Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Email</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+          <Text style={[styles.label, { color: colors.subtle }]}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
             placeholder="you@email.com"
-            placeholderTextColor="#c4b5c8"
+            placeholderTextColor={colors.subtle}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -85,17 +100,24 @@ export default function Login() {
             keyboardType="email-address"
           />
 
-          <Text style={styles.label}>Password</Text>
+          <Text style={[styles.label, { color: colors.subtle }]}>Password</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
             placeholder="••••••••"
-            placeholderTextColor="#c4b5c8"
+            placeholderTextColor={colors.subtle}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
           />
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
           <TouchableOpacity
             style={styles.rememberMe}
@@ -104,16 +126,19 @@ export default function Login() {
             <View
               style={[
                 styles.rememberBox,
-                rememberMe && styles.rememberBoxChecked,
+                { borderColor: colors.tint },
+                rememberMe && { backgroundColor: colors.tint },
               ]}
             >
               {rememberMe && <Text style={styles.rememberCheck}>✓</Text>}
             </View>
-            <Text style={styles.rememberText}>Remember Me</Text>
+            <Text style={[styles.rememberText, { color: colors.subtle }]}>
+              Remember Me
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            style={[styles.button, { backgroundColor: colors.tint }, isSubmitting && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={isSubmitting}
           >
@@ -123,9 +148,9 @@ export default function Login() {
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.push("/signup")}>
-            <Text style={styles.link}>
+            <Text style={[styles.link, { color: colors.subtle }]}>
               Don't have an account?{" "}
-              <Text style={styles.linkBold}>Sign Up</Text>
+              <Text style={[styles.linkBold, { color: colors.tint }]}>Sign Up</Text>
             </Text>
           </TouchableOpacity>
         </View>
@@ -137,7 +162,6 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fdf6ff",
   },
   inner: {
     flex: 1,
@@ -155,19 +179,15 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: "700",
-    color: "#4a3f55",
     letterSpacing: 0.5,
   },
   subtitle: {
     fontSize: 14,
-    color: "#9b8aa8",
     marginTop: 6,
   },
   card: {
-    backgroundColor: "#fff",
     borderRadius: 24,
     padding: 24,
-    shadowColor: "#c4a8d4",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -176,24 +196,19 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#9b8aa8",
     marginBottom: 6,
     marginLeft: 4,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   input: {
-    backgroundColor: "#fdf6ff",
     borderRadius: 12,
     padding: 14,
     fontSize: 15,
-    color: "#4a3f55",
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#e8d8f0",
   },
   button: {
-    backgroundColor: "#c4a8d4",
     borderRadius: 14,
     padding: 16,
     alignItems: "center",
@@ -211,15 +226,12 @@ const styles = StyleSheet.create({
   },
   link: {
     textAlign: "center",
-    color: "#9b8aa8",
     fontSize: 14,
   },
   linkBold: {
     fontWeight: "700",
-    color: "#c4a8d4",
   },
   error: {
-    color: "#e07a9b",
     marginBottom: 12,
     fontSize: 13,
     textAlign: "center",
@@ -234,13 +246,9 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: "#c4a8d4",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
-  },
-  rememberBoxChecked: {
-    backgroundColor: "#c4a8d4",
   },
   rememberCheck: {
     color: "#fff",
@@ -248,7 +256,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   rememberText: {
-    color: "#9b8aa8",
     fontSize: 14,
   },
 });

@@ -2,6 +2,9 @@ import { useRouter } from "expo-router";
 import { collection, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+
+import { useAppTheme } from "@/constants/appTheme";
+import { Colors } from "@/constants/theme";
 import { auth, db } from "../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -23,8 +26,10 @@ const priorityColors: Record<Priority, string> = {
 };
 
 export default function SummaryScreen() {
-  const [tasks, setTasks] = useState<Task[]>([]);
   const router = useRouter();
+  const { themeName } = useAppTheme();
+  const colors = Colors[themeName];
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const getTodayDate = () => new Date().toISOString().split("T")[0];
 
@@ -59,7 +64,7 @@ export default function SummaryScreen() {
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
@@ -67,7 +72,7 @@ export default function SummaryScreen() {
         {total === 0 ? "🌙" : allDone ? "🎉" : "💪"}
       </Text>
 
-      <Text style={styles.title}>
+      <Text style={[styles.title, { color: colors.text }]}>
         {total === 0
           ? "Quiet day"
           : allDone
@@ -75,24 +80,31 @@ export default function SummaryScreen() {
             : "Let's try changing it up tomorrow"}
       </Text>
 
-      <Text style={styles.subtitle}>{message}</Text>
+      <Text style={[styles.subtitle, { color: colors.subtle }]}>{message}</Text>
 
-      <View style={styles.progressCard}>
-        <Text style={styles.progressLabel}>Today's Score</Text>
-        <Text style={styles.progressNumber}>{percent}%</Text>
-        <View style={styles.progressBarContainer}>
-          <View style={[styles.progressBarFill, { width: `${percent}%` }]} />
+      <View style={[styles.progressCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.progressLabel, { color: colors.subtle }]}>Today's Score</Text>
+        <Text style={[styles.progressNumber, { color: colors.text }]}>{percent}%</Text>
+        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: `${percent}%`, backgroundColor: colors.tint },
+            ]}
+          />
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Today's Tasks</Text>
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Today's Tasks</Text>
 
         {todayTasks.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>📭</Text>
-            <Text style={styles.emptyTitle}>Nothing was planned today</Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>
+              Nothing was planned today
+            </Text>
+            <Text style={[styles.emptySubtitle, { color: colors.subtle }]}>
               Use tonight to set up tomorrow with a few clear priorities.
             </Text>
           </View>
@@ -105,25 +117,46 @@ export default function SummaryScreen() {
                 <Text style={styles.taskDot}>{task.completed ? "✅" : "❌"}</Text>
 
                 <View style={styles.taskInfo}>
-                  <Text style={[styles.taskTitle, !task.completed && styles.missed]}>
+                  <Text
+                    style={[
+                      styles.taskTitle,
+                      { color: colors.text },
+                      !task.completed && { color: colors.subtle },
+                    ]}
+                  >
                     {task.title}
                   </Text>
 
                   <View style={styles.metaRow}>
-                    {task.time ? <Text style={styles.taskMeta}>{task.time}</Text> : null}
-                    <View style={styles.priorityBadge}>
+                    {task.time ? (
+                      <Text style={[styles.taskMeta, { color: colors.subtle }]}>
+                        {task.time}
+                      </Text>
+                    ) : null}
+
+                    <View
+                      style={[
+                        styles.priorityBadge,
+                        { backgroundColor: colors.surface },
+                      ]}
+                    >
                       <View
                         style={[
                           styles.priorityDot,
                           { backgroundColor: priorityColors[priority] },
                         ]}
                       />
-                      <Text style={styles.priorityText}>{priority}</Text>
+                      <Text style={[styles.priorityText, { color: colors.subtle }]}>
+                        {priority}
+                      </Text>
                     </View>
                   </View>
 
                   {!!task.notes && (
-                    <Text style={styles.taskNotes} numberOfLines={2}>
+                    <Text
+                      style={[styles.taskNotes, { color: colors.subtle }]}
+                      numberOfLines={2}
+                    >
                       {task.notes}
                     </Text>
                   )}
@@ -135,7 +168,7 @@ export default function SummaryScreen() {
       </View>
 
       <TouchableOpacity
-        style={styles.button}
+        style={[styles.button, { backgroundColor: colors.tint }]}
         onPress={() => router.replace("/(tabs)")}
       >
         <Text style={styles.buttonText}>Back to Today</Text>
@@ -145,7 +178,7 @@ export default function SummaryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fdf6ff" },
+  container: { flex: 1 },
   content: {
     padding: 24,
     paddingTop: 72,
@@ -156,25 +189,21 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#4a3f55",
     textAlign: "center",
     marginBottom: 12,
   },
   subtitle: {
     fontSize: 15,
-    color: "#9b8aa8",
     textAlign: "center",
     lineHeight: 24,
     marginBottom: 24,
     paddingHorizontal: 16,
   },
   progressCard: {
-    backgroundColor: "#fff",
     borderRadius: 20,
     padding: 20,
     width: "100%",
     marginBottom: 16,
-    shadowColor: "#c4a8d4",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -183,7 +212,6 @@ const styles = StyleSheet.create({
   progressLabel: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#9b8aa8",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 10,
@@ -191,27 +219,22 @@ const styles = StyleSheet.create({
   progressNumber: {
     fontSize: 42,
     fontWeight: "700",
-    color: "#4a3f55",
     marginBottom: 12,
   },
   progressBarContainer: {
     height: 8,
-    backgroundColor: "#e8d8f0",
     borderRadius: 4,
     overflow: "hidden",
   },
   progressBarFill: {
     height: 8,
-    backgroundColor: "#c4a8d4",
     borderRadius: 4,
   },
   card: {
-    backgroundColor: "#fff",
     borderRadius: 20,
     padding: 20,
     width: "100%",
     marginBottom: 24,
-    shadowColor: "#c4a8d4",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -220,7 +243,6 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#9b8aa8",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 16,
@@ -240,11 +262,7 @@ const styles = StyleSheet.create({
   },
   taskTitle: {
     fontSize: 15,
-    color: "#4a3f55",
     fontWeight: "500",
-  },
-  missed: {
-    color: "#c4b5c8",
   },
   metaRow: {
     flexDirection: "row",
@@ -254,13 +272,11 @@ const styles = StyleSheet.create({
   },
   taskMeta: {
     fontSize: 12,
-    color: "#9b8aa8",
     marginRight: 10,
   },
   priorityBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f8f1fb",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -273,12 +289,10 @@ const styles = StyleSheet.create({
   },
   priorityText: {
     fontSize: 12,
-    color: "#7e6d8d",
     fontWeight: "600",
   },
   taskNotes: {
     fontSize: 13,
-    color: "#9b8aa8",
     lineHeight: 18,
     marginTop: 6,
   },
@@ -294,18 +308,15 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#4a3f55",
     marginBottom: 8,
     textAlign: "center",
   },
   emptySubtitle: {
     fontSize: 14,
-    color: "#9b8aa8",
     textAlign: "center",
     lineHeight: 22,
   },
   button: {
-    backgroundColor: "#c4a8d4",
     borderRadius: 14,
     padding: 16,
     alignItems: "center",
