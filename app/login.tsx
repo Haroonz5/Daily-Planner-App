@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useEffect, useState } from "react";
@@ -9,7 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { auth } from "../constants/firebaseConfig";
 
@@ -18,6 +18,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -28,20 +29,34 @@ export default function Login() {
         setRememberMe(true);
       }
     };
+
     loadSavedEmail();
   }, []);
 
   const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError("Please enter your email and password");
+      return;
+    }
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      setIsSubmitting(true);
+      setError("");
+
+      const normalizedEmail = email.trim().toLowerCase();
+      await signInWithEmailAndPassword(auth, normalizedEmail, password);
+
       if (rememberMe) {
-        await AsyncStorage.setItem("savedEmail", email);
+        await AsyncStorage.setItem("savedEmail", normalizedEmail);
       } else {
         await AsyncStorage.removeItem("savedEmail");
       }
+
       router.replace("/(tabs)");
-    } catch (e: any) {
+    } catch {
       setError("Invalid email or password");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -66,6 +81,7 @@ export default function Login() {
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
           />
 
@@ -83,20 +99,34 @@ export default function Login() {
 
           <TouchableOpacity
             style={styles.rememberMe}
-            onPress={() => setRememberMe(!rememberMe)}
+            onPress={() => setRememberMe((prev) => !prev)}
           >
-            <View style={[styles.rememberBox, rememberMe && styles.rememberBoxChecked]}>
+            <View
+              style={[
+                styles.rememberBox,
+                rememberMe && styles.rememberBoxChecked,
+              ]}
+            >
               {rememberMe && <Text style={styles.rememberCheck}>✓</Text>}
             </View>
             <Text style={styles.rememberText}>Remember Me</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>Log In</Text>
+          <TouchableOpacity
+            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            onPress={handleLogin}
+            disabled={isSubmitting}
+          >
+            <Text style={styles.buttonText}>
+              {isSubmitting ? "Logging In..." : "Log In"}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.push("/signup")}>
-            <Text style={styles.link}>Don't have an account? <Text style={styles.linkBold}>Sign Up</Text></Text>
+            <Text style={styles.link}>
+              Don't have an account?{" "}
+              <Text style={styles.linkBold}>Sign Up</Text>
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -170,6 +200,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 16,
   },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
   buttonText: {
     color: "#fff",
     fontWeight: "700",
@@ -206,7 +239,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 8,
   },
-  rememberBoxChecked: { backgroundColor: "#c4a8d4" },
-  rememberCheck: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  rememberText: { color: "#9b8aa8", fontSize: 14 },
+  rememberBoxChecked: {
+    backgroundColor: "#c4a8d4",
+  },
+  rememberCheck: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  rememberText: {
+    color: "#9b8aa8",
+    fontSize: 14,
+  },
 });

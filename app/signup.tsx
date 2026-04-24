@@ -1,21 +1,47 @@
 import { useRouter } from "expo-router";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { auth } from "../constants/firebaseConfig";
 
 export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
   const handleSignup = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError("Please enter your email and password");
+      return;
+    }
+
+    if (password.trim().length < 6) {
+      setError("Password should be at least 6 characters");
+      return;
+    }
+
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      setIsSubmitting(true);
+      setError("");
+
+      const normalizedEmail = email.trim().toLowerCase();
+      await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+
       router.replace("/(tabs)");
-    } catch (e: any) {
+    } catch {
       setError("Could not create account. Try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -40,6 +66,7 @@ export default function Signup() {
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
           />
 
@@ -55,12 +82,20 @@ export default function Signup() {
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <TouchableOpacity style={styles.button} onPress={handleSignup}>
-            <Text style={styles.buttonText}>Create Account</Text>
+          <TouchableOpacity
+            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            onPress={handleSignup}
+            disabled={isSubmitting}
+          >
+            <Text style={styles.buttonText}>
+              {isSubmitting ? "Creating Account..." : "Create Account"}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => router.push("/login")}>
-            <Text style={styles.link}>Already have an account? <Text style={styles.linkBold}>Log In</Text></Text>
+            <Text style={styles.link}>
+              Already have an account? <Text style={styles.linkBold}>Log In</Text>
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -133,6 +168,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
     marginBottom: 16,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
   buttonText: {
     color: "#fff",
