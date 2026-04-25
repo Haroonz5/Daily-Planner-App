@@ -6,9 +6,9 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  updateDoc
+  updateDoc,
 } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -18,7 +18,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 
@@ -26,14 +26,13 @@ import { useAppTheme } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
 import {
   cancelTaskNotifications,
-  syncMorningSummaryNotification,
-  syncTaskNotifications
+  syncTaskNotifications,
 } from "../../utils/notifications";
-
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
 type TaskStatus = "pending" | "completed" | "skipped";
+type TimeBucket = "early" | "morning" | "afternoon" | "evening";
 
 type Task = {
   id: string;
@@ -57,11 +56,31 @@ const priorityColors: Record<Priority, string> = {
   High: "#e58ca8",
 };
 
+const priorityRank: Record<Priority, number> = {
+  High: 0,
+  Medium: 1,
+  Low: 2,
+};
+
 const themeLabels: Record<AppThemeName, string> = {
   pastel: "Pastel",
   light: "Light",
   dark: "Dark",
   focus: "Focus",
+};
+
+const bucketLabels: Record<TimeBucket, string> = {
+  early: "early morning",
+  morning: "morning",
+  afternoon: "afternoon",
+  evening: "evening",
+};
+
+const bucketTemplates: Record<TimeBucket, number[]> = {
+  early: [8 * 60, 8 * 60 + 45],
+  morning: [9 * 60 + 30, 10 * 60 + 30, 11 * 60 + 30],
+  afternoon: [13 * 60, 14 * 60 + 30, 16 * 60],
+  evening: [18 * 60, 19 * 60 + 30, 21 * 60],
 };
 
 const confettiPalette = [
@@ -74,6 +93,44 @@ const confettiPalette = [
 ];
 
 const { width: screenWidth } = Dimensions.get("window");
+
+const roundUpToInterval = (value: number, interval: number) =>
+  Math.ceil(value / interval) * interval;
+
+const parseTimeToMinutes = (time: string) => {
+  const parts = time.split(" ");
+  if (parts.length !== 2) return null;
+
+  const [timePart, period] = parts;
+  const [hoursStr, minutesStr] = timePart.split(":");
+  const hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+  let normalizedHours = hours;
+  if (period === "PM" && hours !== 12) normalizedHours += 12;
+  if (period === "AM" && hours === 12) normalizedHours = 0;
+
+  return normalizedHours * 60 + minutes;
+};
+
+const getTimeBucket = (minutes: number | null): TimeBucket => {
+  if (minutes === null) return "morning";
+  if (minutes < 9 * 60) return "early";
+  if (minutes < 12 * 60) return "morning";
+  if (minutes < 17 * 60) return "afternoon";
+  return "evening";
+};
+
+const formatMinutesToTime = (minutes: number) => {
+  const date = new Date();
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -98,30 +155,6 @@ export default function HomeScreen() {
   const hasCelebratedRef = useRef(false);
 
   const getTodayDate = () => new Date().toISOString().split("T")[0];
-
-  const parseTimeToMinutes = (time: string) => {
-    const parts = time.split(" ");
-    if (parts.length !== 2) return null;
-
-    const period = parts[1];
-    const [hoursStr, minutesStr] = parts[0].split(":");
-    const hours = parseInt(hoursStr, 10);
-    const minutes = parseInt(minutesStr, 10);
-
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-
-    let taskHours = hours;
-    if (period === "PM" && hours !== 12) taskHours += 12;
-    if (period === "AM" && hours === 12) taskHours = 0;
-
-    return taskHours * 60 + minutes;
-  };
-
-  const formatTimeFromDate = (date: Date) =>
-    date.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -184,6 +217,76 @@ export default function HomeScreen() {
   const progressPercent =
     todayTasks.length > 0 ? (completed / todayTasks.length) * 100 : 0;
 
+  const adaptiveReschedule = useMemo(() => {
+    const historyTasks = tasks.filter((task) => task.date < today);
+
+    const bucketStats: Record<
+      TimeBucket,
+      { total: number; completed: number; friction: number }
+    > = {
+      early: { total: 0, completed: 0, friction: 0 },
+      morning: { total: 0, completed: 0, friction: 0 },
+      afternoon: { total: 0, completed: 0, friction: 0 },
+      evening: { total: 0, completed: 0, friction: 0 },
+    };
+
+    historyTasks.forEach((task) => {
+      const sourceTime = parseTimeToMinutes(task.originalTime ?? task.time);
+      const bucket = getTimeBucket(sourceTime);
+
+      bucketStats[bucket].total += 1;
+      if (task.completed) bucketStats[bucket].completed += 1;
+      if ((task.status ?? "pending") === "skipped" || (task.rescheduledCount ?? 0) > 0) {
+        bucketStats[bucket].friction += 1;
+      }
+    });
+
+    const scoreBucket = (bucket: TimeBucket) => {
+      const stat = bucketStats[bucket];
+      if (stat.total === 0) return -1;
+      const completionRate = stat.completed / stat.total;
+      const frictionRate = stat.friction / stat.total;
+      return completionRate - frictionRate * 0.35;
+    };
+
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const currentBucket = getTimeBucket(currentMinutes);
+    const fallbackOrder: TimeBucket[] =
+      currentBucket === "early"
+        ? ["morning", "afternoon", "evening", "early"]
+        : currentBucket === "morning"
+          ? ["morning", "afternoon", "evening", "early"]
+          : currentBucket === "afternoon"
+            ? ["afternoon", "evening", "morning", "early"]
+            : ["evening", "afternoon", "morning", "early"];
+
+    const preferredBuckets = (Object.keys(bucketStats) as TimeBucket[])
+      .sort((a, b) => scoreBucket(b) - scoreBucket(a))
+      .filter(
+        (bucket, index, array) =>
+          array.indexOf(bucket) === index
+      );
+
+    const mergedBuckets: TimeBucket[] = [];
+    [...preferredBuckets, ...fallbackOrder].forEach((bucket) => {
+      if (!mergedBuckets.includes(bucket)) mergedBuckets.push(bucket);
+    });
+
+    const bestBucket = mergedBuckets[0];
+    const bestStats = bucketStats[bestBucket];
+
+    let message = "Reschedules will spread your remaining work into realistic time slots.";
+    if (bestStats.total >= 3) {
+      message = `You usually follow through better in the ${bucketLabels[bestBucket]}. Reschedules will favor that window first.`;
+    }
+
+    return {
+      preferredBuckets: mergedBuckets,
+      bestBucket,
+      message,
+    };
+  }, [tasks, today]);
+
   const getMissedTasksForToday = () => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -194,6 +297,54 @@ export default function HomeScreen() {
       const taskMinutes = parseTimeToMinutes(task.time);
       return taskMinutes !== null && taskMinutes + 60 < currentMinutes;
     });
+  };
+
+  const buildAdaptiveTimes = (count: number, excludedIds: Set<string>) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const earliestMinute = roundUpToInterval(currentMinutes + 30, 15);
+
+    const occupiedMinutes = todayTasks
+      .filter((task) => !excludedIds.has(task.id))
+      .map((task) => parseTimeToMinutes(task.time))
+      .filter((value): value is number => value !== null);
+
+    const assignedMinutes: number[] = [];
+
+    const isAvailable = (minute: number, gap: number) => {
+      if (minute < earliestMinute || minute > 23 * 60) return false;
+      const clashesWithExisting = occupiedMinutes.some(
+        (existing) => Math.abs(existing - minute) < gap
+      );
+      const clashesWithAssigned = assignedMinutes.some(
+        (existing) => Math.abs(existing - minute) < gap
+      );
+      return !clashesWithExisting && !clashesWithAssigned;
+    };
+
+    for (const bucket of adaptiveReschedule.preferredBuckets) {
+      for (const templateMinute of bucketTemplates[bucket]) {
+        if (assignedMinutes.length >= count) break;
+        if (isAvailable(templateMinute, 45)) {
+          assignedMinutes.push(templateMinute);
+        }
+      }
+      if (assignedMinutes.length >= count) break;
+    }
+
+    for (let minute = earliestMinute; minute <= 23 * 60 && assignedMinutes.length < count; minute += 30) {
+      if (isAvailable(minute, 45)) {
+        assignedMinutes.push(minute);
+      }
+    }
+
+    for (let minute = earliestMinute; minute <= 23 * 60 && assignedMinutes.length < count; minute += 30) {
+      if (isAvailable(minute, 30)) {
+        assignedMinutes.push(minute);
+      }
+    }
+
+    return assignedMinutes.slice(0, count).map(formatMinutesToTime);
   };
 
   useEffect(() => {
@@ -294,7 +445,6 @@ export default function HomeScreen() {
 
     await cancelTaskNotifications(taskId);
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
-    await syncMorningSummaryNotification(uid);
   };
 
   const openEditModal = (task: Task) => {
@@ -339,7 +489,6 @@ export default function HomeScreen() {
       await cancelTaskNotifications(editingTask.id);
     }
 
-    await syncMorningSummaryNotification(uid);
     closeEditModal();
   };
 
@@ -347,21 +496,25 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const remainingTasks = todayTasks.filter(
-      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
-    );
+    const remainingTasks = todayTasks
+      .filter(
+        (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+      )
+      .sort((a, b) => {
+        const rankA = priorityRank[a.priority ?? "Medium"];
+        const rankB = priorityRank[b.priority ?? "Medium"];
+        if (rankA !== rankB) return rankA - rankB;
+        return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+      });
+
     if (remainingTasks.length === 0) return;
 
-    const base = new Date();
-    base.setMinutes(base.getMinutes() + 30);
-    base.setSeconds(0);
-    base.setMilliseconds(0);
+    const excludedIds = new Set(remainingTasks.map((task) => task.id));
+    const suggestedTimes = buildAdaptiveTimes(remainingTasks.length, excludedIds);
 
     for (let i = 0; i < remainingTasks.length; i++) {
       const task = remainingTasks[i];
-      const nextTime = new Date(base);
-      nextTime.setMinutes(base.getMinutes() + i * 60);
-      const updatedTime = formatTimeFromDate(nextTime);
+      const updatedTime = suggestedTimes[i] ?? task.time;
 
       await updateDoc(doc(db, "users", uid, "tasks", task.id), {
         time: updatedTime,
@@ -386,22 +539,24 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const missedTasks = getMissedTasksForToday();
+    const missedTasks = getMissedTasksForToday().sort((a, b) => {
+      const rankA = priorityRank[a.priority ?? "Medium"];
+      const rankB = priorityRank[b.priority ?? "Medium"];
+      if (rankA !== rankB) return rankA - rankB;
+      return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+    });
+
     if (missedTasks.length === 0) {
       setMissedTaskPromptVisible(false);
       return;
     }
 
-    const base = new Date();
-    base.setMinutes(base.getMinutes() + 30);
-    base.setSeconds(0);
-    base.setMilliseconds(0);
+    const excludedIds = new Set(missedTasks.map((task) => task.id));
+    const suggestedTimes = buildAdaptiveTimes(missedTasks.length, excludedIds);
 
     for (let i = 0; i < missedTasks.length; i++) {
       const task = missedTasks[i];
-      const nextTime = new Date(base);
-      nextTime.setMinutes(base.getMinutes() + i * 60);
-      const updatedTime = formatTimeFromDate(nextTime);
+      const updatedTime = suggestedTimes[i] ?? task.time;
 
       await updateDoc(doc(db, "users", uid, "tasks", task.id), {
         time: updatedTime,
@@ -508,7 +663,9 @@ export default function HomeScreen() {
               ]}
             >
               {item.completed && <Text style={styles.checkmark}>✓</Text>}
-              {isSkipped && <Text style={[styles.skipMark, { color: colors.warning }]}>»</Text>}
+              {isSkipped && (
+                <Text style={[styles.skipMark, { color: colors.warning }]}>»</Text>
+              )}
             </View>
           </TouchableOpacity>
 
@@ -657,20 +814,38 @@ export default function HomeScreen() {
           {todayTasks.some(
             (task) => !task.completed && (task.status ?? "pending") !== "skipped"
           ) && (
-            <TouchableOpacity
-              style={[
-                styles.resetButton,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-              onPress={resetMyDay}
-            >
-              <Text style={[styles.resetButtonText, { color: colors.text }]}>
-                Reset My Day
-              </Text>
-              <Text style={[styles.resetButtonHint, { color: colors.subtle }]}>
-                Redistribute your remaining tasks into fresh time slots
-              </Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.resetButton,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+                onPress={resetMyDay}
+              >
+                <Text style={[styles.resetButtonText, { color: colors.text }]}>
+                  Reset My Day
+                </Text>
+                <Text style={[styles.resetButtonHint, { color: colors.subtle }]}>
+                  Redistribute your remaining tasks into stronger time slots
+                </Text>
+              </TouchableOpacity>
+
+              <View
+                style={[
+                  styles.rescheduleInsightCard,
+                  { backgroundColor: colors.card, borderColor: colors.tint },
+                ]}
+              >
+                <Text style={[styles.rescheduleInsightTitle, { color: colors.text }]}>
+                  Adaptive Reschedule
+                </Text>
+                <Text
+                  style={[styles.rescheduleInsightText, { color: colors.subtle }]}
+                >
+                  {adaptiveReschedule.message}
+                </Text>
+              </View>
+            </>
           )}
 
           {hasMissedTasks() && (
@@ -974,6 +1149,10 @@ export default function HomeScreen() {
               reschedule them to later today?
             </Text>
 
+            <Text style={[styles.missedPromptSubtext, { color: colors.subtle }]}>
+              {adaptiveReschedule.message}
+            </Text>
+
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[
@@ -1087,7 +1266,7 @@ const styles = StyleSheet.create({
   },
   resetButton: {
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
@@ -1100,6 +1279,22 @@ const styles = StyleSheet.create({
   resetButtonHint: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  rescheduleInsightCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+  },
+  rescheduleInsightTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  rescheduleInsightText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   missedBanner: {
     marginHorizontal: 16,
@@ -1258,6 +1453,11 @@ const styles = StyleSheet.create({
   missedPromptText: {
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 10,
+  },
+  missedPromptSubtext: {
+    fontSize: 13,
+    lineHeight: 19,
     marginBottom: 20,
   },
   modalInput: {
