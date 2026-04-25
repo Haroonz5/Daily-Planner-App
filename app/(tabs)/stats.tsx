@@ -8,6 +8,7 @@ import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
 type TaskStatus = "pending" | "completed" | "skipped";
+type TimeBucket = "early" | "morning" | "afternoon" | "evening";
 
 type Task = {
   id: string;
@@ -18,9 +19,9 @@ type Task = {
   priority?: Priority;
   notes?: string;
   status?: TaskStatus;
-  completedAt?: Date | string | null;
-  skippedAt?: Date | string | null;
-  lastActionAt?: Date | string | null;
+  completedAt?: any;
+  skippedAt?: any;
+  lastActionAt?: any;
   rescheduledCount?: number;
   originalTime?: string;
 };
@@ -29,6 +30,56 @@ const priorityColors: Record<Priority, string> = {
   Low: "#8dcf9f",
   Medium: "#f2b97f",
   High: "#e58ca8",
+};
+
+const bucketLabels: Record<TimeBucket, string> = {
+  early: "Early Morning",
+  morning: "Morning",
+  afternoon: "Afternoon",
+  evening: "Evening",
+};
+
+const parseTimeToMinutes = (time: string) => {
+  const parts = time.split(" ");
+  if (parts.length !== 2) return null;
+
+  const [timePart, period] = parts;
+  const [hoursStr, minutesStr] = timePart.split(":");
+  const hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+
+  let normalizedHours = hours;
+  if (period === "PM" && hours !== 12) normalizedHours += 12;
+  if (period === "AM" && hours === 12) normalizedHours = 0;
+
+  return normalizedHours * 60 + minutes;
+};
+
+const getBucketFromMinutes = (minutes: number | null): TimeBucket => {
+  if (minutes === null) return "morning";
+  if (minutes < 9 * 60) return "early";
+  if (minutes < 12 * 60) return "morning";
+  if (minutes < 17 * 60) return "afternoon";
+  return "evening";
+};
+
+const toDateSafe = (value: any): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === "function") return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const scheduledDateTime = (date: string, time: string) => {
+  const [year, month, day] = date.split("-").map(Number);
+  const minutes = parseTimeToMinutes(time);
+  if (!year || !month || !day || minutes === null) return null;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return new Date(year, month - 1, day, hours, mins, 0, 0);
 };
 
 export default function StatsScreen() {
@@ -41,9 +92,9 @@ export default function StatsScreen() {
     if (!uid) return;
 
     const unsubscribe = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
-      const fetched = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
+      const fetched = snap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
       })) as Task[];
 
       setTasks(fetched);
@@ -53,7 +104,7 @@ export default function StatsScreen() {
   }, []);
 
   const stats = useMemo(() => {
-    const getTodayDate = () => new Date().toISOString().split("T")[0];
+    const todayDate = new Date().toISOString().split("T")[0];
 
     const getLast7Days = () => {
       const days: string[] = [];
@@ -65,7 +116,6 @@ export default function StatsScreen() {
       return days;
     };
 
-    const todayDate = getTodayDate();
     const todayTasks = tasks.filter((task) => task.date === todayDate);
     const todayCompleted = todayTasks.filter((task) => task.completed).length;
     const todaySkipped = todayTasks.filter(
@@ -99,22 +149,11 @@ export default function StatsScreen() {
       };
     });
 
-    const totalTasks = tasks.length;
-    const totalCompleted = tasks.filter((task) => task.completed).length;
-    const totalSkipped = tasks.filter(
-      (task) => (task.status ?? "pending") === "skipped"
-    ).length;
-    const totalRescheduled = tasks.reduce(
-      (sum, task) => sum + (task.rescheduledCount ?? 0),
-      0
-    );
-
     let streak = 0;
     for (let i = weeklyStats.length - 1; i >= 0; i--) {
       const day = weeklyStats[i];
       if (day.total === 0) break;
-      const allDone = day.completed === day.total;
-      if (allDone) streak++;
+      if (day.completed === day.total) streak += 1;
       else break;
     }
 
@@ -133,31 +172,113 @@ export default function StatsScreen() {
         }
       });
 
-      let topTitle = "None yet";
-      let topCount = 0;
+      let title = "None yet";
+      let count = 0;
 
-      counts.forEach((count, title) => {
-        if (count > topCount) {
-          topTitle = title;
-          topCount = count;
+      counts.forEach((value, key) => {
+        if (value > count) {
+          title = key;
+          count = value;
         }
       });
 
-      return {
-        title: topTitle,
-        count: topCount,
-      };
+      return { title, count };
     })();
 
-    const bestDay = weeklyStats.reduce((best, day) => {
-      if (!best) return day;
-      return day.percent > best.percent ? day : best;
-    }, weeklyStats[0]);
+    const productiveWindowCounts: Record<TimeBucket, number> = {
+      early: 0,
+      morning: 0,
+      afternoon: 0,
+      evening: 0,
+    };
 
-    const worstDay = weeklyStats.reduce((worst, day) => {
-      if (!worst) return day;
-      return day.percent < worst.percent ? day : worst;
-    }, weeklyStats[0]);
+    tasks.forEach((task) => {
+      if (!task.completed) return;
+      const completedAt = toDateSafe(task.completedAt);
+      if (!completedAt) return;
+      const bucket = getBucketFromMinutes(
+        completedAt.getHours() * 60 + completedAt.getMinutes()
+      );
+      productiveWindowCounts[bucket] += 1;
+    });
+
+    const mostProductiveWindow = (Object.keys(productiveWindowCounts) as TimeBucket[]).reduce(
+      (best, bucket) =>
+        productiveWindowCounts[bucket] > productiveWindowCounts[best] ? bucket : best,
+      "morning"
+    );
+
+    const frictionCounts: Record<TimeBucket, number> = {
+      early: 0,
+      morning: 0,
+      afternoon: 0,
+      evening: 0,
+    };
+
+    tasks.forEach((task) => {
+      const sourceTime = task.originalTime ?? task.time;
+      const bucket = getBucketFromMinutes(parseTimeToMinutes(sourceTime));
+      if ((task.status ?? "pending") === "skipped" || (task.rescheduledCount ?? 0) > 0) {
+        frictionCounts[bucket] += 1;
+      }
+    });
+
+    const riskWindow = (Object.keys(frictionCounts) as TimeBucket[]).reduce(
+      (worst, bucket) => (frictionCounts[bucket] > frictionCounts[worst] ? bucket : worst),
+      "morning"
+    );
+
+    const delays = tasks
+      .filter((task) => task.completed)
+      .map((task) => {
+        const completedAt = toDateSafe(task.completedAt);
+        const scheduledAt = scheduledDateTime(task.date, task.originalTime ?? task.time);
+        if (!completedAt || !scheduledAt) return null;
+        return Math.round((completedAt.getTime() - scheduledAt.getTime()) / 60000);
+      })
+      .filter((value): value is number => value !== null);
+
+    const averageDelay =
+      delays.length > 0
+        ? Math.round(
+            delays.reduce((sum, value) => sum + Math.max(value, 0), 0) / delays.length
+          )
+        : 0;
+
+    const onTimeRate =
+      delays.length > 0
+        ? Math.round(
+            (delays.filter((delay) => delay <= 15).length / delays.length) * 100
+          )
+        : 0;
+
+    const totalTasks = tasks.length;
+    const totalCompleted = tasks.filter((task) => task.completed).length;
+    const totalSkipped = tasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+    const totalRescheduled = tasks.reduce(
+      (sum, task) => sum + (task.rescheduledCount ?? 0),
+      0
+    );
+
+    const bestDay =
+      weeklyStats.reduce((best, day) => (day.percent > best.percent ? day : best), weeklyStats[0]) ??
+      null;
+
+    const toughestDay =
+      weeklyStats.reduce((worst, day) => (day.percent < worst.percent ? day : worst), weeklyStats[0]) ??
+      null;
+
+    let recommendation = "Your consistency data is starting to take shape.";
+
+    if (mostSkippedTask.count >= 2) {
+      recommendation = `"${mostSkippedTask.title}" keeps getting skipped. Simplify it or move it out of your weakest window.`;
+    } else if (riskWindow !== mostProductiveWindow) {
+      recommendation = `You seem strongest in the ${bucketLabels[mostProductiveWindow].toLowerCase()} but struggle more in the ${bucketLabels[riskWindow].toLowerCase()}. Move important tasks accordingly.`;
+    } else if (averageDelay > 30) {
+      recommendation = `You finish about ${averageDelay} minutes late on average. Try giving yourself more space between planned tasks.`;
+    }
 
     return {
       todayTasks,
@@ -165,15 +286,20 @@ export default function StatsScreen() {
       todaySkipped,
       todayPercent,
       weeklyStats,
+      streak,
+      priorityCounts,
+      mostSkippedTask,
+      mostProductiveWindow,
+      riskWindow,
+      averageDelay,
+      onTimeRate,
       totalTasks,
       totalCompleted,
       totalSkipped,
       totalRescheduled,
-      streak,
-      priorityCounts,
-      mostSkippedTask,
       bestDay,
-      worstDay,
+      toughestDay,
+      recommendation,
     };
   }, [tasks]);
 
@@ -196,8 +322,7 @@ export default function StatsScreen() {
           {stats.todayPercent}%
         </Text>
         <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
-          {stats.todayCompleted} completed, {stats.todaySkipped} skipped,{" "}
-          {stats.todayTasks.length} total
+          {stats.todayCompleted} completed, {stats.todaySkipped} skipped, {stats.todayTasks.length} total
         </Text>
         <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
           <View
@@ -219,6 +344,29 @@ export default function StatsScreen() {
           {stats.streak === 0
             ? "Complete every task in a day to start a streak."
             : `${stats.streak} perfect day${stats.streak > 1 ? "s" : ""} in a row.`}
+        </Text>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Smart Weekly Report</Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Best day: {stats.bestDay?.label ?? "N/A"} ({stats.bestDay?.percent ?? 0}%)
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Toughest day: {stats.toughestDay?.label ?? "N/A"} ({stats.toughestDay?.percent ?? 0}%)
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Most productive time: {bucketLabels[stats.mostProductiveWindow]}
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Highest-friction window: {bucketLabels[stats.riskWindow]}
+        </Text>
+        <Text style={[styles.insightText, { color: colors.text }]}>
+          Most skipped task: {stats.mostSkippedTask.title}
+          {stats.mostSkippedTask.count > 0 ? ` (${stats.mostSkippedTask.count}x)` : ""}
+        </Text>
+        <Text style={[styles.recommendationText, { color: colors.subtle }]}>
+          {stats.recommendation}
         </Text>
       </View>
 
@@ -250,17 +398,33 @@ export default function StatsScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Weekly Insight</Text>
-        <Text style={[styles.insightText, { color: colors.text }]}>
-          Best day: {stats.bestDay?.label ?? "N/A"} ({stats.bestDay?.percent ?? 0}%)
-        </Text>
-        <Text style={[styles.insightText, { color: colors.text }]}>
-          Toughest day: {stats.worstDay?.label ?? "N/A"} ({stats.worstDay?.percent ?? 0}%)
-        </Text>
-        <Text style={[styles.insightText, { color: colors.text }]}>
-          Most skipped task: {stats.mostSkippedTask.title}
-          {stats.mostSkippedTask.count > 0 ? ` (${stats.mostSkippedTask.count}x)` : ""}
-        </Text>
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Plan vs Reality</Text>
+        <View style={styles.planRealityRow}>
+          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.planRealityNumber, { color: colors.text }]}>
+              {stats.onTimeRate}%
+            </Text>
+            <Text style={[styles.planRealityLabel, { color: colors.subtle }]}>
+              On Time
+            </Text>
+          </View>
+          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.planRealityNumber, { color: colors.text }]}>
+              {stats.averageDelay}m
+            </Text>
+            <Text style={[styles.planRealityLabel, { color: colors.subtle }]}>
+              Avg Delay
+            </Text>
+          </View>
+          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.planRealityNumber, { color: colors.text }]}>
+              {stats.totalRescheduled}
+            </Text>
+            <Text style={[styles.planRealityLabel, { color: colors.subtle }]}>
+              Rescheduled
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
@@ -295,36 +459,28 @@ export default function StatsScreen() {
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalTasks}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
-              Total
-            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Total</Text>
           </View>
           <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalCompleted}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
-              Completed
-            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Completed</Text>
           </View>
           <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalSkipped}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
-              Skipped
-            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Skipped</Text>
           </View>
           <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalRescheduled}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
-              Rescheduled
-            </Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Moved</Text>
           </View>
         </View>
       </View>
@@ -385,8 +541,32 @@ const styles = StyleSheet.create({
   barLabel: { fontSize: 11, marginTop: 6 },
   insightText: {
     fontSize: 15,
-    lineHeight: 24,
+    lineHeight: 23,
     marginBottom: 6,
+  },
+  recommendationText: {
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: 10,
+  },
+  planRealityRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  planRealityStat: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 18,
+    marginHorizontal: 4,
+    alignItems: "center",
+  },
+  planRealityNumber: {
+    fontSize: 24,
+    fontWeight: "700",
+  },
+  planRealityLabel: {
+    fontSize: 12,
+    marginTop: 6,
   },
   priorityStatsRow: {
     flexDirection: "row",
