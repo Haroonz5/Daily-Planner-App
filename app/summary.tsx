@@ -5,11 +5,13 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 
 import { useAppTheme } from "@/constants/appTheme";
 import {
+  getActivePet,
   getPetProgress,
   getTaskXp,
   type Priority,
 } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { auth, db } from "../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -37,6 +39,7 @@ const priorityColors: Record<Priority, string> = {
 export default function SummaryScreen() {
   const router = useRouter();
   const { themeName } = useAppTheme();
+  const { profile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -71,6 +74,7 @@ export default function SummaryScreen() {
     const todayXp = todayTasks.reduce((sum, task) => sum + getTaskXp(task), 0);
     const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
     const petProgress = getPetProgress(totalXp);
+    const activePet = getActivePet(totalXp, profile.activePetKey);
 
     return {
       todayTasks,
@@ -81,9 +85,10 @@ export default function SummaryScreen() {
       allDone,
       todayXp,
       totalXp,
+      activePet,
       petProgress,
     };
-  }, [tasks]);
+  }, [profile.activePetKey, tasks]);
 
   const message =
     summary.total === 0
@@ -119,18 +124,18 @@ export default function SummaryScreen() {
         ]}
       >
         <View style={styles.petHero}>
-          <Text style={styles.petEmoji}>{summary.petProgress.currentPet.emoji}</Text>
+          <Text style={styles.petEmoji}>{summary.activePet.emoji}</Text>
           <View style={styles.petCopy}>
             <Text style={[styles.petName, { color: colors.text }]}>
-              {summary.petProgress.currentPet.name}
+              {summary.activePet.name}
             </Text>
             <Text style={[styles.petDescription, { color: colors.subtle }]}>
-              {summary.petProgress.currentPet.description}
+              {summary.activePet.description}
             </Text>
             <Text style={[styles.petProgressText, { color: colors.subtle }]}>
               {summary.petProgress.nextPet
-                ? `${summary.petProgress.remainingXp} XP until ${summary.petProgress.nextPet.emoji} ${summary.petProgress.nextPet.name}`
-                : "Final companion unlocked"}
+                ? `Collection progress: ${summary.petProgress.remainingXp} XP until ${summary.petProgress.nextPet.emoji} ${summary.petProgress.nextPet.name}`
+                : "Collection complete. Final companion unlocked"}
             </Text>
           </View>
         </View>

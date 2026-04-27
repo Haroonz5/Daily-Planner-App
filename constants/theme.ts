@@ -1,6 +1,13 @@
 import { Platform } from "react-native";
 
-export type AppThemeName = "pastel" | "light" | "dark" | "focus";
+export type AppThemeName =
+  | "pastel"
+  | "light"
+  | "dark"
+  | "focus"
+  | "sunset"
+  | "ocean"
+  | "midnight";
 
 type ThemePalette = {
   text: string;
@@ -16,6 +23,18 @@ type ThemePalette = {
   danger: string;
   success: string;
   warning: string;
+  statusBar: "light" | "dark";
+  navigationTone: "light" | "dark";
+};
+
+export const ThemeLabels: Record<AppThemeName, string> = {
+  pastel: "Pastel",
+  light: "Light",
+  dark: "Dark",
+  focus: "Focus",
+  sunset: "Sunset",
+  ocean: "Ocean",
+  midnight: "Midnight",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -33,6 +52,8 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#e07a9b",
     success: "#8dcf9f",
     warning: "#f2b97f",
+    statusBar: "dark",
+    navigationTone: "light",
   },
   light: {
     text: "#2b2f38",
@@ -48,6 +69,8 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#dc6f7d",
     success: "#5fa97a",
     warning: "#e0a84f",
+    statusBar: "dark",
+    navigationTone: "light",
   },
   dark: {
     text: "#f3f4f6",
@@ -63,6 +86,8 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff8ba0",
     success: "#7ad79d",
     warning: "#f4c27a",
+    statusBar: "light",
+    navigationTone: "dark",
   },
   focus: {
     text: "#1f2a1f",
@@ -78,6 +103,59 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#c96f5d",
     success: "#7aa06a",
     warning: "#c79a4b",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  sunset: {
+    text: "#4b2c2b",
+    background: "#fff4ec",
+    card: "#fffdf8",
+    surface: "#fde6da",
+    tint: "#dd6b4d",
+    icon: "#aa7a69",
+    tabIconDefault: "#c49b88",
+    tabIconSelected: "#dd6b4d",
+    subtle: "#8b6a61",
+    border: "#f1d1c4",
+    danger: "#d95d70",
+    success: "#7aa46d",
+    warning: "#e7a44d",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  ocean: {
+    text: "#163848",
+    background: "#eefbff",
+    card: "#ffffff",
+    surface: "#dff2f6",
+    tint: "#2d8fa3",
+    icon: "#5f8b97",
+    tabIconDefault: "#8db3bc",
+    tabIconSelected: "#2d8fa3",
+    subtle: "#5a7e88",
+    border: "#c9e6ed",
+    danger: "#d56f7b",
+    success: "#58a68b",
+    warning: "#d7a347",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  midnight: {
+    text: "#f4f7ff",
+    background: "#0c1220",
+    card: "#141d31",
+    surface: "#1d2942",
+    tint: "#67d1ff",
+    icon: "#8aa0c0",
+    tabIconDefault: "#53637d",
+    tabIconSelected: "#67d1ff",
+    subtle: "#b3c1d8",
+    border: "#25324b",
+    danger: "#ff8ca2",
+    success: "#6fd3a7",
+    warning: "#f0c36f",
+    statusBar: "light",
+    navigationTone: "dark",
   },
 };
 

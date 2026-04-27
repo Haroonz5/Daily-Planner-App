@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import {
-  getCurrentPet,
+  getActivePet,
   getDisciplineLabel,
   getLevelData,
   getPetProgress,
@@ -14,6 +14,7 @@ import {
   type Priority,
 } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -68,6 +69,7 @@ const scheduledDateTime = (date: string, time: string) => {
 
 export default function StatsScreen() {
   const { themeName } = useAppTheme();
+  const { profile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -252,8 +254,8 @@ export default function StatsScreen() {
     const weeklyXp = weeklyStats.reduce((sum, day) => sum + day.xp, 0);
 
     const levelData = getLevelData(totalXp);
-    const currentPet = getCurrentPet(totalXp);
     const petProgress = getPetProgress(totalXp);
+    const activePet = getActivePet(totalXp, profile.activePetKey);
 
     const completionRate = totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 0;
     const skipRate = totalTasks > 0 ? (totalSkipped / totalTasks) * 100 : 0;
@@ -320,12 +322,12 @@ export default function StatsScreen() {
       todayXp,
       weeklyXp,
       levelData,
-      currentPet,
+      activePet,
       petProgress,
       disciplineScore,
       disciplineLabel,
     };
-  }, [tasks]);
+  }, [profile.activePetKey, tasks]);
 
   return (
     <ScrollView
@@ -347,18 +349,18 @@ export default function StatsScreen() {
         ]}
       >
         <View style={styles.petHero}>
-          <Text style={styles.petEmoji}>{stats.currentPet.emoji}</Text>
+          <Text style={styles.petEmoji}>{stats.activePet.emoji}</Text>
           <View style={styles.petCopy}>
             <Text style={[styles.petName, { color: colors.text }]}>
-              {stats.currentPet.name}
+              {stats.activePet.name}
             </Text>
             <Text style={[styles.petDescription, { color: colors.subtle }]}>
-              {stats.currentPet.description}
+              {stats.activePet.description}
             </Text>
             <Text style={[styles.petProgressText, { color: colors.subtle }]}>
               {stats.petProgress.nextPet
-                ? `${stats.petProgress.remainingXp} XP until ${stats.petProgress.nextPet.emoji} ${stats.petProgress.nextPet.name}`
-                : "Final companion unlocked"}
+                ? `Collection progress: ${stats.petProgress.remainingXp} XP until ${stats.petProgress.nextPet.emoji} ${stats.petProgress.nextPet.name}`
+                : "Collection complete. Final companion unlocked"}
             </Text>
           </View>
         </View>

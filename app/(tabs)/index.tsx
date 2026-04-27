@@ -22,13 +22,17 @@ import {
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 
-import { useAppTheme } from "@/constants/appTheme";
+import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import {
+  PET_TIERS,
+  getActivePet,
   getPetProgress,
   getTaskXp,
+  getUnlockedPets,
   type PetTier,
 } from "@/constants/rewards";
-import { AppThemeName, Colors } from "@/constants/theme";
+import { Colors, ThemeLabels } from "@/constants/theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   cancelTaskNotifications,
   syncTaskNotifications,
@@ -65,13 +69,6 @@ const priorityRank: Record<Priority, number> = {
   High: 0,
   Medium: 1,
   Low: 2,
-};
-
-const themeLabels: Record<AppThemeName, string> = {
-  pastel: "Pastel",
-  light: "Light",
-  dark: "Dark",
-  focus: "Focus",
 };
 
 const bucketLabels: Record<TimeBucket, string> = {
@@ -140,6 +137,7 @@ const formatMinutesToTime = (minutes: number) => {
 export default function HomeScreen() {
   const router = useRouter();
   const { themeName, setThemeName } = useAppTheme();
+  const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -150,6 +148,7 @@ export default function HomeScreen() {
   const [editNotes, setEditNotes] = useState("");
   const [editPriority, setEditPriority] = useState<Priority>("Medium");
   const [themeModalVisible, setThemeModalVisible] = useState(false);
+  const [petCollectionVisible, setPetCollectionVisible] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [missedTaskPromptVisible, setMissedTaskPromptVisible] = useState(false);
   const [unlockedPet, setUnlockedPet] = useState<PetTier | null>(null);
@@ -229,6 +228,9 @@ export default function HomeScreen() {
   const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
   const todayXp = todayTasks.reduce((sum, task) => sum + getTaskXp(task), 0);
   const petProgress = getPetProgress(totalXp);
+  const strongestPet = petProgress.currentPet;
+  const activePet = getActivePet(totalXp, profile.activePetKey);
+  const unlockedPets = getUnlockedPets(totalXp);
 
   const adaptiveReschedule = useMemo(() => {
     const historyTasks = tasks.filter((task) => task.date < today);
@@ -391,7 +393,7 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!tasksLoaded) return;
 
-    const currentPetKey = petProgress.currentPet.key;
+    const currentPetKey = strongestPet.key;
 
     if (!petHydratedRef.current) {
       previousPetKeyRef.current = currentPetKey;
@@ -401,10 +403,10 @@ export default function HomeScreen() {
 
     if (previousPetKeyRef.current !== currentPetKey) {
       previousPetKeyRef.current = currentPetKey;
-      setUnlockedPet(petProgress.currentPet);
+      setUnlockedPet(strongestPet);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-  }, [petProgress.currentPet, tasksLoaded]);
+  }, [strongestPet, tasksLoaded]);
 
   useEffect(() => {
     const missedTasks = getMissedTasksForToday();
@@ -476,6 +478,12 @@ export default function HomeScreen() {
 
     await cancelTaskNotifications(taskId);
     await deleteDoc(doc(db, "users", uid, "tasks", taskId));
+  };
+
+  const handleSetActivePet = async (pet: PetTier) => {
+    await saveProfile({ activePetKey: pet.key });
+    await Haptics.selectionAsync();
+    setPetCollectionVisible(false);
   };
 
   const openEditModal = (task: Task) => {
@@ -830,17 +838,17 @@ export default function HomeScreen() {
           >
             <View style={styles.petCardHeader}>
               <View style={styles.petHero}>
-                <Text style={styles.petEmoji}>{petProgress.currentPet.emoji}</Text>
+                <Text style={styles.petEmoji}>{activePet.emoji}</Text>
 
                 <View style={styles.petCopy}>
                   <Text style={[styles.petEyebrow, { color: colors.subtle }]}>
-                    Companion
+                    Active Companion
                   </Text>
                   <Text style={[styles.petName, { color: colors.text }]}>
-                    {petProgress.currentPet.name}
+                    {activePet.name}
                   </Text>
                   <Text style={[styles.petDescription, { color: colors.subtle }]}>
-                    {petProgress.currentPet.description}
+                    {activePet.description}
                   </Text>
                 </View>
               </View>
@@ -862,8 +870,8 @@ export default function HomeScreen() {
 
             <Text style={[styles.petProgressText, { color: colors.subtle }]}>
               {petProgress.nextPet
-                ? `${petProgress.remainingXp} XP until ${petProgress.nextPet.emoji} ${petProgress.nextPet.name}`
-                : "Final companion unlocked"}
+                ? `Collection progress: ${petProgress.remainingXp} XP until ${petProgress.nextPet.emoji} ${petProgress.nextPet.name}`
+                : `Collection complete. ${strongestPet.emoji} ${strongestPet.name} is fully unlocked.`}
             </Text>
 
             <View
@@ -881,6 +889,27 @@ export default function HomeScreen() {
                   },
                 ]}
               />
+            </View>
+
+            <View style={styles.petCardFooter}>
+              <Text style={[styles.petFooterHint, { color: colors.subtle }]}>
+                {unlockedPets.length} of {PET_TIERS.length} companions unlocked
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.petCollectionButton,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setPetCollectionVisible(true)}
+              >
+                <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
+                  Collection
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -1023,6 +1052,125 @@ export default function HomeScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       </View>
+
+      <Modal
+        visible={petCollectionVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPetCollectionVisible(false)}
+      >
+        <View style={styles.centerModalBackdrop}>
+          <View style={[styles.collectionCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Pet Collection
+            </Text>
+            <Text style={[styles.collectionSubtitle, { color: colors.subtle }]}>
+              Choose which companion follows you through the app.
+            </Text>
+
+            <ScrollView
+              style={styles.collectionScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              {unlockedPets.map((pet) => {
+                const isActive = activePet.key === pet.key;
+
+                return (
+                  <TouchableOpacity
+                    key={pet.key}
+                    style={[
+                      styles.collectionItem,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                      isActive && {
+                        borderColor: colors.tint,
+                        backgroundColor: colors.surface,
+                      },
+                    ]}
+                    onPress={() => handleSetActivePet(pet)}
+                  >
+                    <Text style={styles.collectionEmoji}>{pet.emoji}</Text>
+
+                    <View style={styles.collectionCopy}>
+                      <Text style={[styles.collectionName, { color: colors.text }]}>
+                        {pet.name}
+                      </Text>
+                      <Text
+                        style={[styles.collectionDescription, { color: colors.subtle }]}
+                      >
+                        {pet.description}
+                      </Text>
+                    </View>
+
+                    {isActive && (
+                      <View
+                        style={[
+                          styles.collectionBadge,
+                          { backgroundColor: colors.tint },
+                        ]}
+                      >
+                        <Text style={styles.collectionBadgeText}>Active</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+
+              {unlockedPets.length < PET_TIERS.length && (
+                <View style={styles.lockedSection}>
+                  <Text style={[styles.lockedHeading, { color: colors.text }]}>
+                    Still Locked
+                  </Text>
+
+                  {[
+                    { emoji: "🫥", label: petProgress.nextPet?.name, xp: petProgress.nextPet?.unlockXp },
+                  ]
+                    .filter((item) => item.label && item.xp)
+                    .map((item) => (
+                      <View
+                        key={item.label}
+                        style={[
+                          styles.collectionItem,
+                          styles.collectionLocked,
+                          {
+                            backgroundColor: colors.background,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.collectionEmoji}>{item.emoji}</Text>
+                        <View style={styles.collectionCopy}>
+                          <Text style={[styles.collectionName, { color: colors.text }]}>
+                            {item.label}
+                          </Text>
+                          <Text
+                            style={[styles.collectionDescription, { color: colors.subtle }]}
+                          >
+                            Unlocks at {item.xp} XP
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                </View>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: colors.surface, marginTop: 14, marginRight: 0 },
+              ]}
+              onPress={() => setPetCollectionVisible(false)}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.subtle }]}>
+                Close
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={!!unlockedPet}
@@ -1183,8 +1331,11 @@ export default function HomeScreen() {
               Choose Theme
             </Text>
 
-            {(["pastel", "light", "dark", "focus"] as AppThemeName[]).map(
-              (theme) => {
+            <ScrollView
+              style={styles.themeOptionsScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              {themeOptions.map((theme) => {
                 const preview = Colors[theme];
 
                 return (
@@ -1234,12 +1385,12 @@ export default function HomeScreen() {
                     </View>
 
                     <Text style={[styles.themeLabel, { color: colors.text }]}>
-                      {themeLabels[theme]}
+                      {ThemeLabels[theme]}
                     </Text>
                   </TouchableOpacity>
                 );
-              }
-            )}
+              })}
+            </ScrollView>
 
             <TouchableOpacity
               style={[
@@ -1438,6 +1589,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  petCardFooter: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  petFooterHint: {
+    fontSize: 12,
+    flex: 1,
+    marginRight: 12,
+  },
+  petCollectionButton: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+  },
+  petCollectionButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
   iconButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -1631,6 +1803,65 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 20,
   },
+  collectionCard: {
+    borderRadius: 24,
+    padding: 20,
+    maxHeight: "78%",
+  },
+  collectionSubtitle: {
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 14,
+  },
+  collectionScroll: {
+    maxHeight: 380,
+  },
+  collectionItem: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  collectionLocked: {
+    opacity: 0.75,
+  },
+  collectionEmoji: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  collectionCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  collectionName: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  collectionDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  collectionBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  collectionBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  lockedSection: {
+    marginTop: 8,
+  },
+  lockedHeading: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
   rewardCard: {
     borderRadius: 24,
     padding: 24,
@@ -1758,6 +1989,9 @@ const styles = StyleSheet.create({
   themePreview: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  themeOptionsScroll: {
+    maxHeight: 360,
   },
   themeSwatch: {
     width: 20,

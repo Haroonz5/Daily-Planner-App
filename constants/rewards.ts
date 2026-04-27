@@ -152,6 +152,20 @@ export const getCurrentPet = (xp: number) => {
   }, PET_TIERS[0]);
 };
 
+export const getPetByKey = (key?: string | null) =>
+  PET_TIERS.find((tier) => tier.key === key) ?? null;
+
+export const getUnlockedPets = (xp: number) => {
+  const safeXp = Math.max(0, xp);
+  return PET_TIERS.filter((tier) => tier.unlockXp <= safeXp);
+};
+
+export const getActivePet = (xp: number, preferredKey?: string | null) => {
+  const unlockedPets = getUnlockedPets(xp);
+  const preferredPet = unlockedPets.find((tier) => tier.key === preferredKey);
+  return preferredPet ?? unlockedPets[unlockedPets.length - 1] ?? PET_TIERS[0];
+};
+
 export const getNextPet = (xp: number) => {
   const safeXp = Math.max(0, xp);
   return PET_TIERS.find((tier) => tier.unlockXp > safeXp) ?? null;

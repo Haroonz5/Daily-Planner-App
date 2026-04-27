@@ -10,18 +10,16 @@ export const themeOptions: AppThemeName[] = [
   "light",
   "dark",
   "focus",
+  "sunset",
+  "ocean",
+  "midnight",
 ];
 
 export const getStoredTheme = async (): Promise<AppThemeName> => {
   const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
 
-  if (
-    saved === "pastel" ||
-    saved === "light" ||
-    saved === "dark" ||
-    saved === "focus"
-  ) {
-    return saved;
+  if (saved && themeOptions.includes(saved as AppThemeName)) {
+    return saved as AppThemeName;
   }
 
   return "pastel";
