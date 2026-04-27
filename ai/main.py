@@ -73,6 +73,38 @@ class RealityCheckResponse(BaseModel):
     source: Literal["openai", "local"]
 
 
+class RescheduleTask(BaseModel):
+    id: str
+    title: str
+    date: str
+    time: str
+    priority: Priority = "Medium"
+    duration_minutes: int | None = Field(default=None, ge=1, le=720)
+    completed: bool = False
+    status: Literal["pending", "completed", "skipped"] | None = "pending"
+    rescheduled_count: int = 0
+
+
+class RescheduleRequest(BaseModel):
+    missed_tasks: list[RescheduleTask] = Field(default_factory=list)
+    existing_tasks: list[RescheduleTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class RescheduleSuggestion(BaseModel):
+    task_id: str
+    title: str
+    suggested_time: str
+    reason: str
+
+
+class RescheduleResponse(BaseModel):
+    suggestions: list[RescheduleSuggestion]
+    summary: str
+    source: Literal["openai", "local"]
+
+
 TASK_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -124,6 +156,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _safe_zoneinfo(timezone: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone)
+    except Exception:
+        return ZoneInfo("America/New_York")
+
+
+def _localized_now(timezone: str, now: str | None) -> datetime:
+    zone = _safe_zoneinfo(timezone)
+
+    if now:
+        try:
+            parsed = datetime.fromisoformat(now.replace("Z", "+00:00"))
+            if parsed.tzinfo:
+                return parsed.astimezone(zone)
+            return parsed.replace(tzinfo=zone)
+        except ValueError:
+            pass
+
+    return datetime.now(zone)
 
 
 def _parse_date_key(value: str) -> date:
@@ -243,6 +297,30 @@ def _estimated_minutes(task: RealityTask) -> int:
     if task.priority == "Low":
         return 30
     return 60
+
+
+def _estimated_reschedule_minutes(task: RescheduleTask) -> int:
+    if task.duration_minutes:
+        return task.duration_minutes
+
+    if task.priority == "High":
+        return 90
+    if task.priority == "Low":
+        return 30
+    return 60
+
+
+def _round_up_to_interval(value: int, interval: int) -> int:
+    return ((value + interval - 1) // interval) * interval
+
+
+def _format_minutes_to_time(minutes: int) -> str:
+    normalized = max(0, min(minutes, 23 * 60 + 59))
+    hour = normalized // 60
+    minute = normalized % 60
+    suffix = "AM" if hour < 12 else "PM"
+    display_hour = hour % 12 or 12
+    return f"{display_hour}:{minute:02d} {suffix}"
 
 
 def _clean_title(segment: str) -> str:
@@ -557,6 +635,193 @@ def _openai_reality_check(
         return None
 
 
+def _local_reschedule(request: RescheduleRequest) -> RescheduleResponse:
+    if not request.missed_tasks:
+        return RescheduleResponse(
+            suggestions=[],
+            summary="No missed tasks need rescheduling right now.",
+            source="local",
+        )
+
+    now = _localized_now(request.timezone, request.now)
+    today_key = now.date().isoformat()
+    target_date = request.missed_tasks[0].date or today_key
+    missed_ids = {task.id for task in request.missed_tasks}
+
+    active_existing = [
+        task
+        for task in request.existing_tasks
+        if task.date == target_date
+        and task.id not in missed_ids
+        and not task.completed
+        and task.status != "skipped"
+    ]
+
+    occupied_minutes = [
+        minutes
+        for task in active_existing
+        if (minutes := _time_to_minutes(task.time)) is not None
+    ]
+    assigned_minutes: list[int] = []
+
+    if target_date == today_key:
+        current_minutes = now.hour * 60 + now.minute
+        earliest_minute = _round_up_to_interval(current_minutes + 30, 15)
+    else:
+        earliest_minute = 8 * 60
+
+    preferred_templates = [
+        13 * 60,
+        14 * 60 + 30,
+        16 * 60,
+        18 * 60,
+        19 * 60 + 30,
+        21 * 60,
+    ]
+
+    def is_available(minute: int, gap: int) -> bool:
+        if minute < earliest_minute or minute > 23 * 60:
+            return False
+
+        blocked_minutes = occupied_minutes + assigned_minutes
+        return all(abs(existing - minute) >= gap for existing in blocked_minutes)
+
+    def pick_slot(task: RescheduleTask) -> int:
+        gap = min(max(_estimated_reschedule_minutes(task), 45), 90)
+
+        for candidate in preferred_templates:
+            if is_available(candidate, gap):
+                return candidate
+
+        for candidate in range(earliest_minute, 23 * 60 + 1, 30):
+            if is_available(candidate, gap):
+                return candidate
+
+        for candidate in range(earliest_minute, 23 * 60 + 1, 15):
+            if is_available(candidate, 30):
+                return candidate
+
+        return min(max(earliest_minute, 21 * 60), 23 * 60)
+
+    priority_rank = {"High": 0, "Medium": 1, "Low": 2}
+    sorted_missed = sorted(
+        request.missed_tasks,
+        key=lambda task: (
+            priority_rank[task.priority],
+            _time_to_minutes(task.time) or 0,
+            task.rescheduled_count,
+        ),
+    )
+
+    suggestions: list[RescheduleSuggestion] = []
+    for task in sorted_missed:
+        minute = pick_slot(task)
+        assigned_minutes.append(minute)
+        suggested_time = _format_minutes_to_time(minute)
+
+        if active_existing:
+            reason = "Moved later today with breathing room around your existing tasks."
+        else:
+            reason = "Moved to the next realistic open slot so it is still doable today."
+
+        if task.rescheduled_count >= 2:
+            reason = "This one has slipped a few times, so it gets a focused later slot."
+
+        suggestions.append(
+            RescheduleSuggestion(
+                task_id=task.id,
+                title=task.title,
+                suggested_time=suggested_time,
+                reason=reason,
+            )
+        )
+
+    summary = (
+        f"I found cleaner slots for {len(suggestions)} missed "
+        f"task{'s' if len(suggestions) != 1 else ''}."
+    )
+
+    return RescheduleResponse(suggestions=suggestions, summary=summary, source="local")
+
+
+def _openai_reschedule(
+    request: RescheduleRequest,
+    baseline: RescheduleResponse,
+) -> RescheduleResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or not baseline.suggestions:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        now = request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat()
+        prompt = {
+            "now": now,
+            "timezone": request.timezone,
+            "missed_tasks": [task.model_dump() for task in request.missed_tasks],
+            "existing_tasks": [task.model_dump() for task in request.existing_tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are the AI rescheduler for Daily Discipline. "
+                        "Use the baseline suggested_time values as the safe schedule unless "
+                        "there is a clear conflict. Return only JSON with: "
+                        '{"summary":"one direct sentence","suggestions":[{"task_id":"id",'
+                        '"title":"task title","suggested_time":"7:30 PM","reason":"short reason"}]}. '
+                        "Keep every missed task id exactly once. Be practical, not fluffy."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        baseline_by_id = {
+            suggestion.task_id: suggestion for suggestion in baseline.suggestions
+        }
+        suggestions: list[RescheduleSuggestion] = []
+
+        for item in data.get("suggestions", []):
+            task_id = str(item.get("task_id", ""))
+            baseline_item = baseline_by_id.get(task_id)
+            if not baseline_item:
+                continue
+
+            suggested_time = str(item.get("suggested_time") or baseline_item.suggested_time)
+            if _time_to_minutes(suggested_time) is None:
+                suggested_time = baseline_item.suggested_time
+
+            suggestions.append(
+                RescheduleSuggestion(
+                    task_id=task_id,
+                    title=str(item.get("title") or baseline_item.title),
+                    suggested_time=suggested_time,
+                    reason=str(item.get("reason") or baseline_item.reason),
+                )
+            )
+
+        if len(suggestions) != len(baseline.suggestions):
+            return None
+
+        return RescheduleResponse(
+            suggestions=suggestions,
+            summary=str(data.get("summary") or baseline.summary),
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -575,3 +840,10 @@ def reality_check(request: RealityCheckRequest):
     baseline = _local_reality_check(request)
     checked = _openai_reality_check(request, baseline)
     return checked or baseline
+
+
+@app.post("/v1/reschedule", response_model=RescheduleResponse)
+def reschedule(request: RescheduleRequest):
+    baseline = _local_reschedule(request)
+    ai_suggestion = _openai_reschedule(request, baseline)
+    return ai_suggestion or baseline

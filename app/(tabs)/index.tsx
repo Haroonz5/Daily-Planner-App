@@ -44,6 +44,11 @@ import {
   type RecurrenceRule,
 } from "../../utils/task-helpers";
 import {
+  runAiReschedule,
+  type AiRescheduleResult,
+  type AiRescheduleTask,
+} from "../../utils/ai";
+import {
   cancelTaskNotifications,
   syncMorningSummaryNotification,
   syncTaskNotifications,
@@ -109,7 +114,19 @@ const confettiPalette = [
   "#f7d56b",
 ];
 
-const { width: screenWidth } = Dimensions.get("window");
+const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+
+const completionBurstPieces = Array.from({ length: 32 }, (_, index) => {
+  const angle = (index / 32) * Math.PI * 2;
+  const distance = 72 + (index % 5) * 18;
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance,
+    size: 7 + (index % 4) * 2,
+    rotation: index * 23,
+    color: confettiPalette[index % confettiPalette.length],
+  };
+});
 
 const roundUpToInterval = (value: number, interval: number) =>
   Math.ceil(value / interval) * interval;
@@ -122,6 +139,17 @@ const formatMinutesToTime = (minutes: number) => {
     minute: "2-digit",
   });
 };
+
+const toAiRescheduleTask = (task: Task): AiRescheduleTask => ({
+  id: task.id,
+  title: task.title,
+  date: task.date,
+  time: task.time,
+  priority: task.priority ?? "Medium",
+  completed: task.completed,
+  status: task.status ?? "pending",
+  rescheduledCount: task.rescheduledCount ?? 0,
+});
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -140,7 +168,12 @@ export default function HomeScreen() {
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [petCollectionVisible, setPetCollectionVisible] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [completionBurstVisible, setCompletionBurstVisible] = useState(false);
+  const [completionBurstTitle, setCompletionBurstTitle] = useState("");
   const [missedTaskPromptVisible, setMissedTaskPromptVisible] = useState(false);
+  const [aiRescheduleResult, setAiRescheduleResult] =
+    useState<AiRescheduleResult | null>(null);
+  const [aiRescheduleBusy, setAiRescheduleBusy] = useState(false);
   const [unlockedPet, setUnlockedPet] = useState<PetTier | null>(null);
   const [dismissedMissedPromptDate, setDismissedMissedPromptDate] = useState<string | null>(null);
   const [tasksLoaded, setTasksLoaded] = useState(false);
@@ -148,6 +181,7 @@ export default function HomeScreen() {
   const confettiValues = useRef(
     Array.from({ length: 18 }, () => new Animated.Value(-40))
   ).current;
+  const completionBurstValue = useRef(new Animated.Value(0)).current;
   const hasCelebratedRef = useRef(false);
   const petHydratedRef = useRef(false);
   const previousPetKeyRef = useRef<string | null>(null);
@@ -204,8 +238,15 @@ export default function HomeScreen() {
   }, []);
 
   const today = getTodayDate();
-  const todayTasks = tasks.filter((t) => t.date === today);
-  const futureTasks = tasks.filter((t) => t.date > today);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const todayTasks = useMemo(
+    () => tasks.filter((task) => task.date === today),
+    [tasks, today]
+  );
+  const futureTasks = useMemo(
+    () => tasks.filter((task) => task.date > today),
+    [tasks, today]
+  );
   const completed = todayTasks.filter((t) => t.completed).length;
   const progressPercent =
     todayTasks.length > 0 ? (completed / todayTasks.length) * 100 : 0;
@@ -287,7 +328,7 @@ export default function HomeScreen() {
     };
   }, [tasks, today]);
 
-  const getMissedTasksForToday = () => {
+  const missedTasksToday = useMemo(() => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
@@ -297,9 +338,7 @@ export default function HomeScreen() {
       const taskMinutes = parseTimeToMinutes(task.time);
       return taskMinutes !== null && taskMinutes + 60 < currentMinutes;
     });
-  };
-
-  const missedTasksToday = getMissedTasksForToday();
+  }, [todayTasks]);
 
   const buildAdaptiveTimes = (count: number, excludedIds: Set<string>) => {
     const now = new Date();
@@ -347,6 +386,26 @@ export default function HomeScreen() {
     }
 
     return assignedMinutes.slice(0, count).map(formatMinutesToTime);
+  };
+
+  const loadAiRescheduleSuggestions = async () => {
+    if (missedTasksToday.length === 0) {
+      setAiRescheduleResult(null);
+      return;
+    }
+
+    setAiRescheduleBusy(true);
+
+    try {
+      const result = await runAiReschedule({
+        missedTasks: missedTasksToday.map(toAiRescheduleTask),
+        existingTasks: todayTasks.map(toAiRescheduleTask),
+        timezone,
+      });
+      setAiRescheduleResult(result);
+    } finally {
+      setAiRescheduleBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -402,8 +461,24 @@ export default function HomeScreen() {
       !missedTaskPromptVisible
     ) {
       setMissedTaskPromptVisible(true);
+      setAiRescheduleResult(null);
+      setAiRescheduleBusy(true);
+      void runAiReschedule({
+        missedTasks: missedTasksToday.map(toAiRescheduleTask),
+        existingTasks: todayTasks.map(toAiRescheduleTask),
+        timezone,
+      })
+        .then(setAiRescheduleResult)
+        .finally(() => setAiRescheduleBusy(false));
     }
-  }, [dismissedMissedPromptDate, missedTaskPromptVisible, missedTasksToday.length, today]);
+  }, [
+    dismissedMissedPromptDate,
+    missedTaskPromptVisible,
+    missedTasksToday,
+    today,
+    todayTasks,
+    timezone,
+  ]);
 
   const isRecurringSeriesTask = (task?: Task | null) =>
     !!task?.recurrenceGroupId &&
@@ -498,6 +573,21 @@ export default function HomeScreen() {
     closeEditModal();
   };
 
+  const triggerCompletionBurst = (taskTitle: string) => {
+    completionBurstValue.stopAnimation();
+    completionBurstValue.setValue(0);
+    setCompletionBurstTitle(taskTitle);
+    setCompletionBurstVisible(true);
+
+    Animated.timing(completionBurstValue, {
+      toValue: 1,
+      duration: 900,
+      useNativeDriver: true,
+    }).start(() => {
+      setCompletionBurstVisible(false);
+    });
+  };
+
   const toggleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -515,6 +605,8 @@ export default function HomeScreen() {
     });
 
     if (nextCompleted) {
+      triggerCompletionBurst(task.title);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await cancelTaskNotifications(task.id);
     } else {
       await syncTaskNotifications({
@@ -714,10 +806,17 @@ export default function HomeScreen() {
 
     const excludedIds = new Set(missedTasks.map((task) => task.id));
     const suggestedTimes = buildAdaptiveTimes(missedTasks.length, excludedIds);
+    const aiSuggestedTimes = new Map(
+      (aiRescheduleResult?.suggestions ?? []).map((suggestion) => [
+        suggestion.taskId,
+        suggestion.suggestedTime,
+      ])
+    );
 
     for (let i = 0; i < missedTasks.length; i++) {
       const task = missedTasks[i];
-      const updatedTime = suggestedTimes[i] ?? task.time;
+      const updatedTime =
+        aiSuggestedTimes.get(task.id) ?? suggestedTimes[i] ?? task.time;
 
       await updateDoc(doc(db, "users", uid, "tasks", task.id), {
         time: updatedTime,
@@ -738,11 +837,15 @@ export default function HomeScreen() {
     }
 
     setMissedTaskPromptVisible(false);
+    setAiRescheduleResult(null);
+    setAiRescheduleBusy(false);
     setDismissedMissedPromptDate(today);
   };
 
   const dismissMissedPrompt = () => {
     setMissedTaskPromptVisible(false);
+    setAiRescheduleResult(null);
+    setAiRescheduleBusy(false);
     setDismissedMissedPromptDate(today);
   };
 
@@ -919,6 +1022,105 @@ export default function HomeScreen() {
                 ]}
               />
             ))}
+          </View>
+        )}
+
+        {completionBurstVisible && (
+          <View pointerEvents="none" style={styles.completionBurstLayer}>
+            <View
+              style={[
+                styles.completionBurstOrigin,
+                {
+                  left: screenWidth / 2,
+                  top: screenHeight * 0.34,
+                },
+              ]}
+            >
+              {completionBurstPieces.map((piece, index) => {
+                const translateX = completionBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, piece.x],
+                });
+                const translateY = completionBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, piece.y],
+                });
+                const rotate = completionBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [
+                    `${piece.rotation}deg`,
+                    `${piece.rotation + 220}deg`,
+                  ],
+                });
+                const scale = completionBurstValue.interpolate({
+                  inputRange: [0, 0.18, 1],
+                  outputRange: [0.25, 1, 0.55],
+                });
+                const opacity = completionBurstValue.interpolate({
+                  inputRange: [0, 0.7, 1],
+                  outputRange: [1, 0.95, 0],
+                });
+
+                return (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.completionBurstPiece,
+                      {
+                        width: piece.size,
+                        height: piece.size + 8,
+                        backgroundColor: piece.color,
+                        opacity,
+                        transform: [
+                          { translateX },
+                          { translateY },
+                          { rotate },
+                          { scale },
+                        ],
+                      },
+                    ]}
+                  />
+                );
+              })}
+
+              <Animated.View
+                style={[
+                  styles.completionBurstBadge,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.tint,
+                    opacity: completionBurstValue.interpolate({
+                      inputRange: [0, 0.2, 0.82, 1],
+                      outputRange: [0, 1, 1, 0],
+                    }),
+                    transform: [
+                      {
+                        translateY: completionBurstValue.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [12, -20],
+                        }),
+                      },
+                      {
+                        scale: completionBurstValue.interpolate({
+                          inputRange: [0, 0.2, 1],
+                          outputRange: [0.86, 1, 0.96],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <Text style={[styles.completionBurstLabel, { color: colors.tint }]}>
+                  Task Complete
+                </Text>
+                <Text
+                  style={[styles.completionBurstTitle, { color: colors.text }]}
+                  numberOfLines={1}
+                >
+                  {completionBurstTitle}
+                </Text>
+              </Animated.View>
+            </View>
           </View>
         )}
 
@@ -1730,9 +1932,75 @@ export default function HomeScreen() {
               reschedule them to later today?
             </Text>
 
-            <Text style={[styles.missedPromptSubtext, { color: colors.subtle }]}>
-              {adaptiveReschedule.message}
-            </Text>
+            {aiRescheduleBusy ? (
+              <View
+                style={[
+                  styles.aiRescheduleCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.aiRescheduleTitle, { color: colors.text }]}>
+                  AI is finding cleaner slots...
+                </Text>
+                <Text style={[styles.aiRescheduleReason, { color: colors.subtle }]}>
+                  It is checking your remaining schedule before moving anything.
+                </Text>
+              </View>
+            ) : aiRescheduleResult ? (
+              <View
+                style={[
+                  styles.aiRescheduleCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.tint,
+                  },
+                ]}
+              >
+                <Text style={[styles.aiRescheduleTitle, { color: colors.text }]}>
+                  AI Reschedule
+                </Text>
+                <Text style={[styles.aiRescheduleSummary, { color: colors.subtle }]}>
+                  {aiRescheduleResult.summary}
+                </Text>
+
+                {aiRescheduleResult.suggestions.map((suggestion) => (
+                  <View key={suggestion.taskId} style={styles.aiRescheduleItem}>
+                    <Text style={[styles.aiRescheduleTask, { color: colors.text }]}>
+                      {suggestion.title}
+                    </Text>
+                    <Text style={[styles.aiRescheduleTime, { color: colors.tint }]}>
+                      {suggestion.suggestedTime}
+                    </Text>
+                    <Text style={[styles.aiRescheduleReason, { color: colors.subtle }]}>
+                      {suggestion.reason}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={[styles.missedPromptSubtext, { color: colors.subtle }]}>
+                {adaptiveReschedule.message}
+              </Text>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.refreshAiButton,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={loadAiRescheduleSuggestions}
+              disabled={aiRescheduleBusy}
+            >
+              <Text style={[styles.refreshAiButtonText, { color: colors.text }]}>
+                {aiRescheduleBusy ? "Checking..." : "Refresh AI Suggestion"}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.modalActions}>
               <TouchableOpacity
@@ -2266,6 +2534,53 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 20,
   },
+  aiRescheduleCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  aiRescheduleTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  aiRescheduleSummary: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
+  },
+  aiRescheduleItem: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(120, 105, 130, 0.2)",
+    paddingTop: 10,
+    marginTop: 8,
+  },
+  aiRescheduleTask: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  aiRescheduleTime: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  aiRescheduleReason: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  refreshAiButton: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  refreshAiButtonText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
   modalInput: {
     borderRadius: 14,
     borderWidth: 1,
@@ -2376,5 +2691,48 @@ const styles = StyleSheet.create({
     width: 10,
     height: 18,
     borderRadius: 3,
+  },
+  completionBurstLayer: {
+    ...StyleSheet.absoluteFillObject,
+    pointerEvents: "none",
+    zIndex: 30,
+  },
+  completionBurstOrigin: {
+    position: "absolute",
+    width: 0,
+    height: 0,
+  },
+  completionBurstPiece: {
+    position: "absolute",
+    left: -4,
+    top: -4,
+    borderRadius: 999,
+  },
+  completionBurstBadge: {
+    position: "absolute",
+    left: -96,
+    top: -24,
+    width: 192,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  completionBurstLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  completionBurstTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 3,
   },
 });

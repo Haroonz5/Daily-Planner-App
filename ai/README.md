@@ -1,6 +1,7 @@
 # Daily Discipline AI Backend
 
-This FastAPI service powers natural-language task parsing for the Expo app.
+This FastAPI service powers natural-language task parsing, reality checks, and
+AI-assisted rescheduling for the Expo app.
 
 ## Setup
 
@@ -33,5 +34,7 @@ Use your Mac LAN IP when testing on a physical phone. `localhost` only works for
 - `GET /health`
 - `POST /v1/parse-tasks`
 - `POST /v1/reality-check`
+- `POST /v1/reschedule`
 
-If `OPENAI_API_KEY` is missing, the backend uses a basic local parser so development can continue.
+If `OPENAI_API_KEY` is missing, the backend uses local fallbacks so development
+can continue.

@@ -40,6 +40,24 @@ export type RealityCheckResult = {
   source: "openai" | "local" | "offline";
 };
 
+export type AiRescheduleTask = AiExistingTask & {
+  id: string;
+  rescheduledCount?: number | null;
+};
+
+export type AiRescheduleSuggestion = {
+  taskId: string;
+  title: string;
+  suggestedTime: string;
+  reason: string;
+};
+
+export type AiRescheduleResult = {
+  suggestions: AiRescheduleSuggestion[];
+  summary: string;
+  source: "openai" | "local" | "offline";
+};
+
 const getAiApiUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_AI_API_URL;
   return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
@@ -103,6 +121,18 @@ const getTimeMinutes = (time: string) => {
   const date = parseTimeToDate(time);
   if (!date) return null;
   return date.getHours() * 60 + date.getMinutes();
+};
+
+const roundUpToInterval = (value: number, interval: number) =>
+  Math.ceil(value / interval) * interval;
+
+const formatMinutesToTaskTime = (minutes: number) => {
+  const date = new Date();
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 const cleanLocalTitle = (segment: string) => {
@@ -424,6 +454,174 @@ export const runRealityCheck = async ({
         data.suggestedTrimTitles ??
         []
       ).map(String),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localAiReschedule = ({
+  missedTasks,
+  existingTasks,
+}: {
+  missedTasks: AiRescheduleTask[];
+  existingTasks: AiRescheduleTask[];
+}): AiRescheduleResult => {
+  if (missedTasks.length === 0) {
+    return {
+      suggestions: [],
+      summary: "No missed tasks need rescheduling right now.",
+      source: "offline",
+    };
+  }
+
+  const today = formatDateKey(new Date());
+  const targetDate = missedTasks[0]?.date ?? today;
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const earliestMinute =
+    targetDate === today ? roundUpToInterval(currentMinutes + 30, 15) : 8 * 60;
+  const missedIds = new Set(missedTasks.map((task) => task.id));
+  const occupiedMinutes = existingTasks
+    .filter(
+      (task) =>
+        task.date === targetDate &&
+        !missedIds.has(task.id) &&
+        !task.completed &&
+        task.status !== "skipped"
+    )
+    .map((task) => getTimeMinutes(task.time))
+    .filter((value): value is number => value !== null);
+  const assignedMinutes: number[] = [];
+  const preferredSlots = [
+    13 * 60,
+    14 * 60 + 30,
+    16 * 60,
+    18 * 60,
+    19 * 60 + 30,
+    21 * 60,
+  ];
+
+  const isAvailable = (minute: number, gap: number) => {
+    if (minute < earliestMinute || minute > 23 * 60) return false;
+    return [...occupiedMinutes, ...assignedMinutes].every(
+      (existing) => Math.abs(existing - minute) >= gap
+    );
+  };
+
+  const pickSlot = (task: AiRescheduleTask) => {
+    const gap = Math.min(Math.max(estimateTaskMinutes(task), 45), 90);
+
+    for (const slot of preferredSlots) {
+      if (isAvailable(slot, gap)) return slot;
+    }
+
+    for (let minute = earliestMinute; minute <= 23 * 60; minute += 30) {
+      if (isAvailable(minute, gap)) return minute;
+    }
+
+    for (let minute = earliestMinute; minute <= 23 * 60; minute += 15) {
+      if (isAvailable(minute, 30)) return minute;
+    }
+
+    return Math.min(Math.max(earliestMinute, 21 * 60), 23 * 60);
+  };
+
+  const priorityRank: Record<AiTaskPriority, number> = {
+    High: 0,
+    Medium: 1,
+    Low: 2,
+  };
+  const sortedMissedTasks = [...missedTasks].sort((a, b) => {
+    const rankA = priorityRank[a.priority ?? "Medium"];
+    const rankB = priorityRank[b.priority ?? "Medium"];
+    if (rankA !== rankB) return rankA - rankB;
+    return (getTimeMinutes(a.time) ?? 0) - (getTimeMinutes(b.time) ?? 0);
+  });
+
+  const suggestions = sortedMissedTasks.map((task): AiRescheduleSuggestion => {
+    const minute = pickSlot(task);
+    assignedMinutes.push(minute);
+
+    return {
+      taskId: task.id,
+      title: task.title,
+      suggestedTime: formatMinutesToTaskTime(minute),
+      reason:
+        (task.rescheduledCount ?? 0) >= 2
+          ? "This has slipped before, so it gets a focused later slot."
+          : "Moved to a realistic open slot with breathing room.",
+    };
+  });
+
+  return {
+    suggestions,
+    summary: `I found cleaner slots for ${suggestions.length} missed ${
+      suggestions.length === 1 ? "task" : "tasks"
+    }.`,
+    source: "offline",
+  };
+};
+
+export const runAiReschedule = async ({
+  missedTasks,
+  existingTasks,
+  timezone,
+}: {
+  missedTasks: AiRescheduleTask[];
+  existingTasks: AiRescheduleTask[];
+  timezone: string;
+}): Promise<AiRescheduleResult> => {
+  const fallback = () => localAiReschedule({ missedTasks, existingTasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/reschedule`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        missed_tasks: missedTasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority ?? "Medium",
+          duration_minutes: task.durationMinutes ?? null,
+          completed: task.completed ?? false,
+          status: task.status ?? "pending",
+          rescheduled_count: task.rescheduledCount ?? 0,
+        })),
+        existing_tasks: existingTasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority ?? "Medium",
+          duration_minutes: task.durationMinutes ?? null,
+          completed: task.completed ?? false,
+          status: task.status ?? "pending",
+          rescheduled_count: task.rescheduledCount ?? 0,
+        })),
+        timezone,
+        now: new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      suggestions: (data.suggestions ?? []).map((suggestion: any) => ({
+        taskId: String(suggestion.task_id ?? suggestion.taskId ?? ""),
+        title: String(suggestion.title ?? "Task"),
+        suggestedTime: String(
+          suggestion.suggested_time ?? suggestion.suggestedTime ?? "9:00 PM"
+        ),
+        reason: String(suggestion.reason ?? "Moved to a better open slot."),
+      })),
+      summary: String(data.summary ?? "I found cleaner reschedule slots."),
       source: data.source === "openai" ? "openai" : "local",
     };
   } catch {
