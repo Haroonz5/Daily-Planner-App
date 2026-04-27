@@ -211,15 +211,6 @@ The next possible improvements would be:
 - More companion customization
 - Production deployment
 
-## Screenshots
-
-Add screenshots here later:
-
-```md
-![Today Screen](./screenshots/today.png)
-![Add Task Screen](./screenshots/add-task.png)
-![Stats Screen](./screenshots/stats.png)
-```
 
 ## Purpose
 
