@@ -3,10 +3,19 @@ import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import {
+  getCurrentPet,
+  getDisciplineLabel,
+  getLevelData,
+  getPetProgress,
+  getTaskXp,
+  parseTimeToMinutes,
+  toDateSafe,
+  type Priority,
+} from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { auth, db } from "../../constants/firebaseConfig";
 
-type Priority = "Low" | "Medium" | "High";
 type TaskStatus = "pending" | "completed" | "skipped";
 type TimeBucket = "early" | "morning" | "afternoon" | "evening";
 
@@ -39,24 +48,6 @@ const bucketLabels: Record<TimeBucket, string> = {
   evening: "Evening",
 };
 
-const parseTimeToMinutes = (time: string) => {
-  const parts = time.split(" ");
-  if (parts.length !== 2) return null;
-
-  const [timePart, period] = parts;
-  const [hoursStr, minutesStr] = timePart.split(":");
-  const hours = parseInt(hoursStr, 10);
-  const minutes = parseInt(minutesStr, 10);
-
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-
-  let normalizedHours = hours;
-  if (period === "PM" && hours !== 12) normalizedHours += 12;
-  if (period === "AM" && hours === 12) normalizedHours = 0;
-
-  return normalizedHours * 60 + minutes;
-};
-
 const getBucketFromMinutes = (minutes: number | null): TimeBucket => {
   if (minutes === null) return "morning";
   if (minutes < 9 * 60) return "early";
@@ -65,18 +56,11 @@ const getBucketFromMinutes = (minutes: number | null): TimeBucket => {
   return "evening";
 };
 
-const toDateSafe = (value: any): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value?.toDate === "function") return value.toDate();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
 const scheduledDateTime = (date: string, time: string) => {
   const [year, month, day] = date.split("-").map(Number);
   const minutes = parseTimeToMinutes(time);
   if (!year || !month || !day || minutes === null) return null;
+
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return new Date(year, month - 1, day, hours, mins, 0, 0);
@@ -116,6 +100,8 @@ export default function StatsScreen() {
       return days;
     };
 
+    const last7Days = getLast7Days();
+
     const todayTasks = tasks.filter((task) => task.date === todayDate);
     const todayCompleted = todayTasks.filter((task) => task.completed).length;
     const todaySkipped = todayTasks.filter(
@@ -125,8 +111,6 @@ export default function StatsScreen() {
       todayTasks.length > 0
         ? Math.round((todayCompleted / todayTasks.length) * 100)
         : 0;
-
-    const last7Days = getLast7Days();
 
     const weeklyStats = last7Days.map((date) => {
       const dayTasks = tasks.filter((task) => task.date === date);
@@ -146,6 +130,7 @@ export default function StatsScreen() {
         completed,
         skipped,
         percent,
+        xp: dayTasks.reduce((sum, task) => sum + getTaskXp(task), 0),
       };
     });
 
@@ -262,13 +247,44 @@ export default function StatsScreen() {
       0
     );
 
-    const bestDay =
-      weeklyStats.reduce((best, day) => (day.percent > best.percent ? day : best), weeklyStats[0]) ??
-      null;
+    const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+    const todayXp = todayTasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+    const weeklyXp = weeklyStats.reduce((sum, day) => sum + day.xp, 0);
 
-    const toughestDay =
-      weeklyStats.reduce((worst, day) => (day.percent < worst.percent ? day : worst), weeklyStats[0]) ??
-      null;
+    const levelData = getLevelData(totalXp);
+    const currentPet = getCurrentPet(totalXp);
+    const petProgress = getPetProgress(totalXp);
+
+    const completionRate = totalTasks > 0 ? (totalCompleted / totalTasks) * 100 : 0;
+    const skipRate = totalTasks > 0 ? (totalSkipped / totalTasks) * 100 : 0;
+    const rescheduleRate =
+      totalTasks > 0
+        ? (tasks.filter((task) => (task.rescheduledCount ?? 0) > 0).length / totalTasks) *
+          100
+        : 0;
+
+    const disciplineScore = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          completionRate * 0.5 +
+            onTimeRate * 0.3 +
+            (100 - skipRate) * 0.15 +
+            (100 - rescheduleRate) * 0.05
+        )
+      )
+    );
+
+    const disciplineLabel = getDisciplineLabel(disciplineScore);
+
+    const bestDay = weeklyStats.length
+      ? weeklyStats.reduce((best, day) => (day.percent > best.percent ? day : best), weeklyStats[0])
+      : null;
+
+    const toughestDay = weeklyStats.length
+      ? weeklyStats.reduce((worst, day) => (day.percent < worst.percent ? day : worst), weeklyStats[0])
+      : null;
 
     let recommendation = "Your consistency data is starting to take shape.";
 
@@ -285,8 +301,8 @@ export default function StatsScreen() {
       todayCompleted,
       todaySkipped,
       todayPercent,
-      weeklyStats,
       streak,
+      weeklyStats,
       priorityCounts,
       mostSkippedTask,
       mostProductiveWindow,
@@ -300,6 +316,14 @@ export default function StatsScreen() {
       bestDay,
       toughestDay,
       recommendation,
+      totalXp,
+      todayXp,
+      weeklyXp,
+      levelData,
+      currentPet,
+      petProgress,
+      disciplineScore,
+      disciplineLabel,
     };
   }, [tasks]);
 
@@ -316,15 +340,135 @@ export default function StatsScreen() {
         </Text>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Today's Progress</Text>
+      <View
+        style={[
+          styles.petCard,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <View style={styles.petHero}>
+          <Text style={styles.petEmoji}>{stats.currentPet.emoji}</Text>
+          <View style={styles.petCopy}>
+            <Text style={[styles.petName, { color: colors.text }]}>
+              {stats.currentPet.name}
+            </Text>
+            <Text style={[styles.petDescription, { color: colors.subtle }]}>
+              {stats.currentPet.description}
+            </Text>
+            <Text style={[styles.petProgressText, { color: colors.subtle }]}>
+              {stats.petProgress.nextPet
+                ? `${stats.petProgress.remainingXp} XP until ${stats.petProgress.nextPet.emoji} ${stats.petProgress.nextPet.name}`
+                : "Final companion unlocked"}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.progressBarContainer,
+            { backgroundColor: colors.border, marginTop: 16 },
+          ]}
+        >
+          <View
+            style={[
+              styles.progressBarFill,
+              {
+                width: `${stats.petProgress.progressPercent}%`,
+                backgroundColor: colors.tint,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
+      <View style={styles.topRow}>
+        <View
+          style={[
+            styles.topCard,
+            { backgroundColor: colors.card, shadowColor: colors.tint },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+            Discipline Score
+          </Text>
+          <Text style={[styles.scoreNumber, { color: colors.text }]}>
+            {stats.disciplineScore}
+          </Text>
+          <Text style={[styles.scoreLabel, { color: colors.subtle }]}>
+            {stats.disciplineLabel}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.topCard,
+            { backgroundColor: colors.card, shadowColor: colors.tint },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: colors.subtle }]}>Level</Text>
+          <Text style={[styles.scoreNumber, { color: colors.text }]}>
+            {stats.levelData.level}
+          </Text>
+          <Text style={[styles.scoreLabel, { color: colors.subtle }]}>
+            {stats.totalXp} total XP
+          </Text>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          XP Progress
+        </Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>
+          {stats.levelData.currentLevelProgress}/100
+        </Text>
+        <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
+          {stats.weeklyXp} XP this week • {stats.todayXp} XP today
+        </Text>
+        <View
+          style={[
+            styles.progressBarContainer,
+            { backgroundColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.progressBarFill,
+              {
+                width: `${stats.levelData.progressPercent}%`,
+                backgroundColor: colors.tint,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Today's Progress
+        </Text>
         <Text style={[styles.bigNumber, { color: colors.text }]}>
           {stats.todayPercent}%
         </Text>
         <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
           {stats.todayCompleted} completed, {stats.todaySkipped} skipped, {stats.todayTasks.length} total
         </Text>
-        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
+        <View
+          style={[
+            styles.progressBarContainer,
+            { backgroundColor: colors.border },
+          ]}
+        >
           <View
             style={[
               styles.progressBarFill,
@@ -337,9 +481,18 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Current Streak 🔥</Text>
-        <Text style={[styles.bigNumber, { color: colors.text }]}>{stats.streak}</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Current Streak 🔥
+        </Text>
+        <Text style={[styles.bigNumber, { color: colors.text }]}>
+          {stats.streak}
+        </Text>
         <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
           {stats.streak === 0
             ? "Complete every task in a day to start a streak."
@@ -347,8 +500,15 @@ export default function StatsScreen() {
         </Text>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Smart Weekly Report</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Smart Weekly Report
+        </Text>
         <Text style={[styles.insightText, { color: colors.text }]}>
           Best day: {stats.bestDay?.label ?? "N/A"} ({stats.bestDay?.percent ?? 0}%)
         </Text>
@@ -370,15 +530,24 @@ export default function StatsScreen() {
         </Text>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>This Week</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          This Week
+        </Text>
         <View style={styles.barChart}>
           {stats.weeklyStats.map((day) => (
             <View key={day.date} style={styles.barColumn}>
               <Text style={[styles.barPercent, { color: colors.subtle }]}>
                 {day.total > 0 ? `${day.percent}%` : ""}
               </Text>
-              <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+              <View
+                style={[styles.barTrack, { backgroundColor: colors.border }]}
+              >
                 <View
                   style={[
                     styles.barFill,
@@ -397,10 +566,19 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Plan vs Reality</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Plan vs Reality
+        </Text>
         <View style={styles.planRealityRow}>
-          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+          <View
+            style={[styles.planRealityStat, { backgroundColor: colors.surface }]}
+          >
             <Text style={[styles.planRealityNumber, { color: colors.text }]}>
               {stats.onTimeRate}%
             </Text>
@@ -408,7 +586,9 @@ export default function StatsScreen() {
               On Time
             </Text>
           </View>
-          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+          <View
+            style={[styles.planRealityStat, { backgroundColor: colors.surface }]}
+          >
             <Text style={[styles.planRealityNumber, { color: colors.text }]}>
               {stats.averageDelay}m
             </Text>
@@ -416,7 +596,9 @@ export default function StatsScreen() {
               Avg Delay
             </Text>
           </View>
-          <View style={[styles.planRealityStat, { backgroundColor: colors.surface }]}>
+          <View
+            style={[styles.planRealityStat, { backgroundColor: colors.surface }]}
+          >
             <Text style={[styles.planRealityNumber, { color: colors.text }]}>
               {stats.totalRescheduled}
             </Text>
@@ -427,8 +609,15 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Task Mix</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Task Mix
+        </Text>
         <View style={styles.priorityStatsRow}>
           {(["Low", "Medium", "High"] as Priority[]).map((priority) => (
             <View
@@ -452,8 +641,15 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>All Time</Text>
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          All Time
+        </Text>
         <View style={styles.allTimeRow}>
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
@@ -461,26 +657,36 @@ export default function StatsScreen() {
             </Text>
             <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Total</Text>
           </View>
-          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
+          <View
+            style={[styles.allTimeDivider, { backgroundColor: colors.border }]}
+          />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalCompleted}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Completed</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Completed
+            </Text>
           </View>
-          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
+          <View
+            style={[styles.allTimeDivider, { backgroundColor: colors.border }]}
+          />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
               {stats.totalSkipped}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Skipped</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>
+              Skipped
+            </Text>
           </View>
-          <View style={[styles.allTimeDivider, { backgroundColor: colors.border }]} />
+          <View
+            style={[styles.allTimeDivider, { backgroundColor: colors.border }]}
+          />
           <View style={styles.allTimeStat}>
             <Text style={[styles.allTimeNumber, { color: colors.text }]}>
-              {stats.totalRescheduled}
+              {stats.totalXp}
             </Text>
-            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>Moved</Text>
+            <Text style={[styles.allTimeLabel, { color: colors.subtle }]}>XP</Text>
           </View>
         </View>
       </View>
@@ -496,6 +702,64 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 48, marginBottom: 12 },
   title: { fontSize: 32, fontWeight: "700" },
   subtitle: { fontSize: 14, marginTop: 6 },
+  petCard: {
+    borderRadius: 22,
+    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  petHero: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  petEmoji: {
+    fontSize: 54,
+    marginRight: 16,
+  },
+  petCopy: {
+    flex: 1,
+  },
+  petName: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  petDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  petProgressText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  topRow: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  topCard: {
+    flex: 1,
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  scoreNumber: {
+    fontSize: 42,
+    fontWeight: "700",
+  },
+  scoreLabel: {
+    fontSize: 14,
+    marginTop: 6,
+  },
   card: {
     borderRadius: 20,
     padding: 20,

@@ -1,13 +1,18 @@
 import { useRouter } from "expo-router";
 import { collection, onSnapshot } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import {
+  getPetProgress,
+  getTaskXp,
+  type Priority,
+} from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { auth, db } from "../constants/firebaseConfig";
 
-type Priority = "Low" | "Medium" | "High";
+type TaskStatus = "pending" | "completed" | "skipped";
 
 type Task = {
   id: string;
@@ -17,6 +22,10 @@ type Task = {
   time?: string;
   priority?: Priority;
   notes?: string;
+  status?: TaskStatus;
+  completedAt?: any;
+  rescheduledCount?: number;
+  originalTime?: string;
 };
 
 const priorityColors: Record<Priority, string> = {
@@ -49,18 +58,39 @@ export default function SummaryScreen() {
     return unsubscribe;
   }, []);
 
-  const todayTasks = tasks.filter((task) => task.date === getTodayDate());
-  const completed = todayTasks.filter((task) => task.completed).length;
-  const total = todayTasks.length;
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const allDone = completed === total && total > 0;
+  const summary = useMemo(() => {
+    const todayTasks = tasks.filter((task) => task.date === getTodayDate());
+    const completed = todayTasks.filter((task) => task.completed).length;
+    const skipped = todayTasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+    const total = todayTasks.length;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const allDone = completed === total && total > 0;
+
+    const todayXp = todayTasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+    const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+    const petProgress = getPetProgress(totalXp);
+
+    return {
+      todayTasks,
+      completed,
+      skipped,
+      total,
+      percent,
+      allDone,
+      todayXp,
+      totalXp,
+      petProgress,
+    };
+  }, [tasks]);
 
   const message =
-    total === 0
+    summary.total === 0
       ? "No tasks were scheduled for today. A fresh reset is waiting for you tomorrow."
-      : allDone
+      : summary.allDone
         ? "You completed all your tasks today. Amazing work!"
-        : `You completed ${completed} out of ${total} tasks (${percent}%). Tomorrow is a new chance!`;
+        : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
 
   return (
     <ScrollView
@@ -69,36 +99,113 @@ export default function SummaryScreen() {
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.emoji}>
-        {total === 0 ? "🌙" : allDone ? "🎉" : "💪"}
+        {summary.total === 0 ? "🌙" : summary.allDone ? "🎉" : "💪"}
       </Text>
 
       <Text style={[styles.title, { color: colors.text }]}>
-        {total === 0
+        {summary.total === 0
           ? "Quiet day"
-          : allDone
+          : summary.allDone
             ? "You did it!"
             : "Let's try changing it up tomorrow"}
       </Text>
 
       <Text style={[styles.subtitle, { color: colors.subtle }]}>{message}</Text>
 
-      <View style={[styles.progressCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.progressLabel, { color: colors.subtle }]}>Today's Score</Text>
-        <Text style={[styles.progressNumber, { color: colors.text }]}>{percent}%</Text>
-        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
+      <View
+        style={[
+          styles.petCard,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <View style={styles.petHero}>
+          <Text style={styles.petEmoji}>{summary.petProgress.currentPet.emoji}</Text>
+          <View style={styles.petCopy}>
+            <Text style={[styles.petName, { color: colors.text }]}>
+              {summary.petProgress.currentPet.name}
+            </Text>
+            <Text style={[styles.petDescription, { color: colors.subtle }]}>
+              {summary.petProgress.currentPet.description}
+            </Text>
+            <Text style={[styles.petProgressText, { color: colors.subtle }]}>
+              {summary.petProgress.nextPet
+                ? `${summary.petProgress.remainingXp} XP until ${summary.petProgress.nextPet.emoji} ${summary.petProgress.nextPet.name}`
+                : "Final companion unlocked"}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.progressBarContainer,
+            { backgroundColor: colors.border, marginTop: 16 },
+          ]}
+        >
           <View
             style={[
               styles.progressBarFill,
-              { width: `${percent}%`, backgroundColor: colors.tint },
+              {
+                width: `${summary.petProgress.progressPercent}%`,
+                backgroundColor: colors.tint,
+              },
             ]}
           />
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Today's Tasks</Text>
+      <View
+        style={[
+          styles.xpCard,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.xpLabel, { color: colors.subtle }]}>Today's XP</Text>
+        <Text style={[styles.xpNumber, { color: colors.text }]}>
+          {summary.todayXp >= 0 ? `+${summary.todayXp}` : summary.todayXp}
+        </Text>
+        <Text style={[styles.xpSubtext, { color: colors.subtle }]}>
+          {summary.completed} completed • {summary.skipped} skipped • {summary.totalXp} total XP
+        </Text>
+      </View>
 
-        {todayTasks.length === 0 ? (
+      <View
+        style={[
+          styles.progressCard,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.progressLabel, { color: colors.subtle }]}>
+          Today's Score
+        </Text>
+        <Text style={[styles.progressNumber, { color: colors.text }]}>
+          {summary.percent}%
+        </Text>
+        <View
+          style={[
+            styles.progressBarContainer,
+            { backgroundColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: `${summary.percent}%`, backgroundColor: colors.tint },
+            ]}
+          />
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Today's Tasks
+        </Text>
+
+        {summary.todayTasks.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>📭</Text>
             <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -109,19 +216,24 @@ export default function SummaryScreen() {
             </Text>
           </View>
         ) : (
-          todayTasks.map((task) => {
+          summary.todayTasks.map((task) => {
             const priority = task.priority ?? "Medium";
+            const xp = getTaskXp(task);
 
             return (
               <View key={task.id} style={styles.taskRow}>
-                <Text style={styles.taskDot}>{task.completed ? "✅" : "❌"}</Text>
+                <Text style={styles.taskDot}>
+                  {task.completed ? "✅" : (task.status ?? "pending") === "skipped" ? "⏭️" : "❌"}
+                </Text>
 
                 <View style={styles.taskInfo}>
                   <Text
                     style={[
                       styles.taskTitle,
                       { color: colors.text },
-                      !task.completed && { color: colors.subtle },
+                      !task.completed && (task.status ?? "pending") !== "skipped"
+                        ? { color: colors.subtle }
+                        : null,
                     ]}
                   >
                     {task.title}
@@ -148,6 +260,22 @@ export default function SummaryScreen() {
                       />
                       <Text style={[styles.priorityText, { color: colors.subtle }]}>
                         {priority}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.xpBadge,
+                        { backgroundColor: xp >= 0 ? colors.surface : "#ffe8f0" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.xpBadgeText,
+                          { color: xp >= 0 ? colors.text : colors.danger },
+                        ]}
+                      >
+                        {xp >= 0 ? `+${xp} XP` : `${xp} XP`}
                       </Text>
                     </View>
                   </View>
@@ -198,6 +326,66 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 24,
     paddingHorizontal: 16,
+  },
+  petCard: {
+    borderRadius: 22,
+    padding: 20,
+    width: "100%",
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  petHero: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  petEmoji: {
+    fontSize: 52,
+    marginRight: 16,
+  },
+  petCopy: {
+    flex: 1,
+  },
+  petName: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  petDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  petProgressText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  xpCard: {
+    borderRadius: 20,
+    padding: 20,
+    width: "100%",
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  xpLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  xpNumber: {
+    fontSize: 40,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  xpSubtext: {
+    fontSize: 14,
   },
   progressCard: {
     borderRadius: 20,
@@ -280,6 +468,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
+    marginRight: 8,
+    marginTop: 6,
   },
   priorityDot: {
     width: 8,
@@ -290,6 +480,16 @@ const styles = StyleSheet.create({
   priorityText: {
     fontSize: 12,
     fontWeight: "600",
+  },
+  xpBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 6,
+  },
+  xpBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   taskNotes: {
     fontSize: 13,
