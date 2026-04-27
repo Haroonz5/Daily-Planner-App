@@ -45,6 +45,34 @@ class ParseTasksResponse(BaseModel):
     source: Literal["openai", "local"]
 
 
+class RealityTask(BaseModel):
+    title: str
+    date: str
+    time: str
+    priority: Priority = "Medium"
+    duration_minutes: int | None = Field(default=None, ge=1, le=720)
+    completed: bool = False
+    status: Literal["pending", "completed", "skipped"] | None = "pending"
+
+
+class RealityCheckRequest(BaseModel):
+    proposed_tasks: list[RealityTask] = Field(default_factory=list)
+    existing_tasks: list[RealityTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class RealityCheckResponse(BaseModel):
+    severity: Literal["clear", "watch", "overloaded"]
+    summary: str
+    total_minutes: int
+    task_count: int
+    warnings: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    suggested_trim_titles: list[str] = Field(default_factory=list)
+    source: Literal["openai", "local"]
+
+
 TASK_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -186,6 +214,37 @@ def _duration_from_text(text: str) -> int | None:
     return int(value)
 
 
+def _time_to_minutes(time_value: str) -> int | None:
+    match = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$", time_value.strip(), re.I)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2) or "0")
+    period = match.group(3).lower()
+
+    if hour > 12 or minute > 59:
+        return None
+
+    if period == "pm" and hour != 12:
+        hour += 12
+    if period == "am" and hour == 12:
+        hour = 0
+
+    return hour * 60 + minute
+
+
+def _estimated_minutes(task: RealityTask) -> int:
+    if task.duration_minutes:
+        return task.duration_minutes
+
+    if task.priority == "High":
+        return 90
+    if task.priority == "Low":
+        return 30
+    return 60
+
+
 def _clean_title(segment: str) -> str:
     cleaned = re.sub(
         r"\b(today|tomorrow|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
@@ -309,6 +368,195 @@ def _openai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
         return None
 
 
+def _local_reality_check(request: RealityCheckRequest) -> RealityCheckResponse:
+    active_existing = [
+        task
+        for task in request.existing_tasks
+        if not task.completed and task.status != "skipped"
+    ]
+    active_tasks = active_existing + request.proposed_tasks
+    warnings: list[str] = []
+    suggestions: list[str] = []
+
+    if not active_tasks:
+        return RealityCheckResponse(
+            severity="clear",
+            summary="No pressure detected yet. This plan has room to breathe.",
+            total_minutes=0,
+            task_count=0,
+            warnings=[],
+            suggestions=["Add one meaningful task before adding filler."],
+            suggested_trim_titles=[],
+            source="local",
+        )
+
+    dates = sorted({task.date for task in request.proposed_tasks} or {task.date for task in active_tasks})
+    busiest_date = max(
+        dates,
+        key=lambda date_key: sum(_estimated_minutes(task) for task in active_tasks if task.date == date_key),
+    )
+    day_tasks = [task for task in active_tasks if task.date == busiest_date]
+    proposed_day_tasks = [
+        task for task in request.proposed_tasks if task.date == busiest_date
+    ]
+    total_minutes = sum(_estimated_minutes(task) for task in day_tasks)
+    high_priority_count = sum(1 for task in day_tasks if task.priority == "High")
+    task_count = len(day_tasks)
+
+    if total_minutes >= 9 * 60 or task_count >= 10:
+        severity: Literal["clear", "watch", "overloaded"] = "overloaded"
+    elif total_minutes >= 6 * 60 or task_count >= 7 or high_priority_count >= 4:
+        severity = "watch"
+    else:
+        severity = "clear"
+
+    if total_minutes >= 9 * 60:
+        warnings.append(
+            f"{busiest_date} has about {round(total_minutes / 60, 1)} hours of planned work."
+        )
+    elif total_minutes >= 6 * 60:
+        warnings.append(
+            f"{busiest_date} has about {round(total_minutes / 60, 1)} hours of planned work."
+        )
+
+    if task_count >= 10:
+        warnings.append(f"{busiest_date} has {task_count} active tasks.")
+    elif task_count >= 7:
+        warnings.append(f"{busiest_date} is getting crowded with {task_count} tasks.")
+
+    if high_priority_count >= 4:
+        warnings.append(
+            f"{busiest_date} has {high_priority_count} high-priority tasks, which makes priority less meaningful."
+        )
+
+    scheduled = sorted(
+        [
+            (minutes, task)
+            for task in day_tasks
+            if (minutes := _time_to_minutes(task.time)) is not None
+        ],
+        key=lambda item: item[0],
+    )
+    crowded_pairs = [
+        (first, second)
+        for (_, first), (second_minutes, second) in zip(scheduled, scheduled[1:])
+        if second_minutes - (_time_to_minutes(first.time) or 0) <= 45
+    ]
+
+    if crowded_pairs:
+        warnings.append("Some tasks are less than 45 minutes apart.")
+
+    trim_candidates = sorted(
+        proposed_day_tasks,
+        key=lambda task: ({"Low": 0, "Medium": 1, "High": 2}[task.priority], -_estimated_minutes(task)),
+    )
+    suggested_trim_titles: list[str] = []
+    trim_minutes = total_minutes
+
+    for task in trim_candidates:
+        if severity == "clear" or trim_minutes <= 6 * 60:
+            break
+        suggested_trim_titles.append(task.title)
+        trim_minutes -= _estimated_minutes(task)
+
+    if severity == "overloaded":
+        summary = "This plan is likely too heavy to execute cleanly."
+        suggestions.append("Trim or move at least one lower-priority task before committing.")
+    elif severity == "watch":
+        summary = "This plan can work, but it is close to the edge."
+        suggestions.append("Protect the high-priority work and leave buffer around it.")
+    else:
+        summary = "This plan looks realistic enough to try."
+        suggestions.append("Keep the task list focused and avoid adding filler.")
+
+    if crowded_pairs:
+        suggestions.append("Add more space between close tasks or combine them into one block.")
+
+    if suggested_trim_titles:
+        suggestions.append(
+            f"Best trim candidates: {', '.join(suggested_trim_titles[:3])}."
+        )
+
+    return RealityCheckResponse(
+        severity=severity,
+        summary=summary,
+        total_minutes=total_minutes,
+        task_count=task_count,
+        warnings=warnings,
+        suggestions=suggestions,
+        suggested_trim_titles=suggested_trim_titles[:3],
+        source="local",
+    )
+
+
+def _openai_reality_check(
+    request: RealityCheckRequest,
+    baseline: RealityCheckResponse,
+) -> RealityCheckResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        now = request.now or datetime.now(ZoneInfo(request.timezone)).isoformat()
+        prompt = {
+            "now": now,
+            "timezone": request.timezone,
+            "proposed_tasks": [task.model_dump() for task in request.proposed_tasks],
+            "existing_tasks": [task.model_dump() for task in request.existing_tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are the reality-check coach for Daily Discipline. "
+                        "Use the baseline numbers as truth. Return only JSON with: "
+                        '{"severity":"clear|watch|overloaded","summary":"short direct sentence",'
+                        '"warnings":["specific issue"],"suggestions":["specific action"],'
+                        '"suggested_trim_titles":["task title"]}. '
+                        "Be honest, practical, and concise. Do not be motivational fluff."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        severity = data.get("severity", baseline.severity)
+        if severity not in ("clear", "watch", "overloaded"):
+            severity = baseline.severity
+
+        return RealityCheckResponse(
+            severity=severity,
+            summary=str(data.get("summary") or baseline.summary),
+            total_minutes=baseline.total_minutes,
+            task_count=baseline.task_count,
+            warnings=[str(item) for item in data.get("warnings", baseline.warnings)],
+            suggestions=[
+                str(item) for item in data.get("suggestions", baseline.suggestions)
+            ],
+            suggested_trim_titles=[
+                str(item)
+                for item in data.get(
+                    "suggested_trim_titles",
+                    baseline.suggested_trim_titles,
+                )
+            ][:3],
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -320,3 +568,10 @@ def parse_tasks(request: ParseTasksRequest):
     if parsed:
         return parsed
     return _local_parse(request)
+
+
+@app.post("/v1/reality-check", response_model=RealityCheckResponse)
+def reality_check(request: RealityCheckRequest):
+    baseline = _local_reality_check(request)
+    checked = _openai_reality_check(request, baseline)
+    return checked or baseline

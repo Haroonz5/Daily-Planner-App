@@ -32,5 +32,6 @@ Use your Mac LAN IP when testing on a physical phone. `localhost` only works for
 
 - `GET /health`
 - `POST /v1/parse-tasks`
+- `POST /v1/reality-check`
 
 If `OPENAI_API_KEY` is missing, the backend uses a basic local parser so development can continue.

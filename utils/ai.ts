@@ -7,6 +7,9 @@ export type AiExistingTask = {
   date: string;
   time: string;
   priority?: AiTaskPriority;
+  durationMinutes?: number | null;
+  completed?: boolean;
+  status?: "pending" | "completed" | "skipped";
 };
 
 export type ParsedAiTask = {
@@ -21,6 +24,19 @@ export type ParsedAiTask = {
 export type ParseNaturalTasksResult = {
   tasks: ParsedAiTask[];
   warnings: string[];
+  source: "openai" | "local" | "offline";
+};
+
+export type RealityCheckSeverity = "clear" | "watch" | "overloaded";
+
+export type RealityCheckResult = {
+  severity: RealityCheckSeverity;
+  summary: string;
+  totalMinutes: number;
+  taskCount: number;
+  warnings: string[];
+  suggestions: string[];
+  suggestedTrimTitles: string[];
   source: "openai" | "local" | "offline";
 };
 
@@ -71,6 +87,22 @@ const getLocalDuration = (text: string) => {
   return unit.startsWith("hour") || unit.startsWith("hr")
     ? Math.round(value * 60)
     : Math.round(value);
+};
+
+const estimateTaskMinutes = (task: {
+  durationMinutes?: number | null;
+  priority?: AiTaskPriority;
+}) => {
+  if (task.durationMinutes) return task.durationMinutes;
+  if (task.priority === "High") return 90;
+  if (task.priority === "Low") return 30;
+  return 60;
+};
+
+const getTimeMinutes = (time: string) => {
+  const date = parseTimeToDate(time);
+  if (!date) return null;
+  return date.getHours() * 60 + date.getMinutes();
 };
 
 const cleanLocalTitle = (segment: string) => {
@@ -195,6 +227,203 @@ export const parseNaturalTasks = async ({
         notes: String(task.notes ?? ""),
       })),
       warnings: (data.warnings ?? []).map(String),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localRealityCheck = ({
+  proposedTasks,
+  existingTasks,
+}: {
+  proposedTasks: ParsedAiTask[];
+  existingTasks: AiExistingTask[];
+}): RealityCheckResult => {
+  const activeExistingTasks = existingTasks.filter(
+    (task) => !task.completed && task.status !== "skipped"
+  );
+  const activeTasks = [...activeExistingTasks, ...proposedTasks];
+
+  if (activeTasks.length === 0) {
+    return {
+      severity: "clear",
+      summary: "No pressure detected yet. This plan has room to breathe.",
+      totalMinutes: 0,
+      taskCount: 0,
+      warnings: [],
+      suggestions: ["Add one meaningful task before adding filler."],
+      suggestedTrimTitles: [],
+      source: "offline",
+    };
+  }
+
+  const proposedDates = new Set(proposedTasks.map((task) => task.date));
+  const dates = proposedDates.size
+    ? [...proposedDates]
+    : [...new Set(activeTasks.map((task) => task.date))];
+  const busiestDate = dates.reduce((busiest, date) => {
+    const busiestMinutes = activeTasks
+      .filter((task) => task.date === busiest)
+      .reduce((sum, task) => sum + estimateTaskMinutes(task), 0);
+    const dateMinutes = activeTasks
+      .filter((task) => task.date === date)
+      .reduce((sum, task) => sum + estimateTaskMinutes(task), 0);
+    return dateMinutes > busiestMinutes ? date : busiest;
+  }, dates[0]);
+
+  const dayTasks = activeTasks.filter((task) => task.date === busiestDate);
+  const proposedDayTasks = proposedTasks.filter((task) => task.date === busiestDate);
+  const totalMinutes = dayTasks.reduce(
+    (sum, task) => sum + estimateTaskMinutes(task),
+    0
+  );
+  const taskCount = dayTasks.length;
+  const highPriorityCount = dayTasks.filter((task) => task.priority === "High").length;
+  const warnings: string[] = [];
+  const suggestions: string[] = [];
+
+  const severity: RealityCheckSeverity =
+    totalMinutes >= 9 * 60 || taskCount >= 10
+      ? "overloaded"
+      : totalMinutes >= 6 * 60 || taskCount >= 7 || highPriorityCount >= 4
+        ? "watch"
+        : "clear";
+
+  if (totalMinutes >= 6 * 60) {
+    warnings.push(
+      `${busiestDate} has about ${Math.round((totalMinutes / 60) * 10) / 10} hours of planned work.`
+    );
+  }
+
+  if (taskCount >= 7) {
+    warnings.push(`${busiestDate} has ${taskCount} active tasks.`);
+  }
+
+  if (highPriorityCount >= 4) {
+    warnings.push(`${busiestDate} has ${highPriorityCount} high-priority tasks.`);
+  }
+
+  const scheduled = dayTasks
+    .map((task) => ({ task, minutes: getTimeMinutes(task.time) }))
+    .filter((item): item is { task: ParsedAiTask | AiExistingTask; minutes: number } =>
+      item.minutes !== null
+    )
+    .sort((a, b) => a.minutes - b.minutes);
+  const crowded = scheduled.some(
+    (item, index) => index > 0 && item.minutes - scheduled[index - 1].minutes <= 45
+  );
+
+  if (crowded) {
+    warnings.push("Some tasks are less than 45 minutes apart.");
+  }
+
+  const suggestedTrimTitles: string[] = [];
+  let trimMinutes = totalMinutes;
+  const trimCandidates = [...proposedDayTasks].sort(
+    (a, b) =>
+      ({ Low: 0, Medium: 1, High: 2 })[a.priority] -
+      ({ Low: 0, Medium: 1, High: 2 })[b.priority]
+  );
+
+  for (const task of trimCandidates) {
+    if (severity === "clear" || trimMinutes <= 6 * 60) break;
+    suggestedTrimTitles.push(task.title);
+    trimMinutes -= estimateTaskMinutes(task);
+  }
+
+  if (severity === "overloaded") {
+    suggestions.push("Move or remove at least one lower-priority task before committing.");
+  } else if (severity === "watch") {
+    suggestions.push("Protect the most important work and leave buffer around it.");
+  } else {
+    suggestions.push("This plan looks realistic enough to try.");
+  }
+
+  if (crowded) {
+    suggestions.push("Space close tasks farther apart or combine them into one block.");
+  }
+
+  if (suggestedTrimTitles.length > 0) {
+    suggestions.push(`Best trim candidates: ${suggestedTrimTitles.slice(0, 3).join(", ")}.`);
+  }
+
+  return {
+    severity,
+    summary:
+      severity === "overloaded"
+        ? "This plan is likely too heavy to execute cleanly."
+        : severity === "watch"
+          ? "This plan can work, but it is close to the edge."
+          : "This plan looks realistic enough to try.",
+    totalMinutes,
+    taskCount,
+    warnings,
+    suggestions,
+    suggestedTrimTitles: suggestedTrimTitles.slice(0, 3),
+    source: "offline",
+  };
+};
+
+export const runRealityCheck = async ({
+  proposedTasks,
+  existingTasks,
+  timezone,
+}: {
+  proposedTasks: ParsedAiTask[];
+  existingTasks: AiExistingTask[];
+  timezone: string;
+}): Promise<RealityCheckResult> => {
+  const fallback = () => localRealityCheck({ proposedTasks, existingTasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/reality-check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        proposed_tasks: proposedTasks.map((task) => ({
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority,
+          duration_minutes: task.durationMinutes ?? null,
+          completed: false,
+          status: "pending",
+        })),
+        existing_tasks: existingTasks.map((task) => ({
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority ?? "Medium",
+          duration_minutes: task.durationMinutes ?? null,
+          completed: task.completed ?? false,
+          status: task.status ?? "pending",
+        })),
+        timezone,
+        now: new Date().toISOString(),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      severity: (["clear", "watch", "overloaded"].includes(data.severity)
+        ? data.severity
+        : "watch") as RealityCheckSeverity,
+      summary: String(data.summary ?? "Reality check complete."),
+      totalMinutes: Number(data.total_minutes ?? data.totalMinutes ?? 0),
+      taskCount: Number(data.task_count ?? data.taskCount ?? 0),
+      warnings: (data.warnings ?? []).map(String),
+      suggestions: (data.suggestions ?? []).map(String),
+      suggestedTrimTitles: (
+        data.suggested_trim_titles ??
+        data.suggestedTrimTitles ??
+        []
+      ).map(String),
       source: data.source === "openai" ? "openai" : "local",
     };
   } catch {

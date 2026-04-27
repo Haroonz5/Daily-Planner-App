@@ -22,7 +22,9 @@ import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
   parseNaturalTasks,
+  runRealityCheck,
   type ParsedAiTask,
+  type RealityCheckResult,
 } from "../../utils/ai";
 import {
   buildRecurringDates,
@@ -106,6 +108,7 @@ export default function AddTask() {
   const [parsedTasks, setParsedTasks] = useState<ParsedAiTask[]>([]);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiSource, setAiSource] = useState<"openai" | "local" | "offline" | null>(null);
+  const [realityCheck, setRealityCheck] = useState<RealityCheckResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -320,6 +323,8 @@ export default function AddTask() {
           date: task.date,
           time: task.time,
           priority: task.priority,
+          completed: task.completed,
+          status: task.status,
         })),
       });
 
@@ -328,7 +333,22 @@ export default function AddTask() {
       setAiSource(result.source);
 
       if (result.tasks.length === 0) {
+        setRealityCheck(null);
         setError("I could not turn that into tasks yet. Try adding times with 'at'.");
+      } else {
+        const check = await runRealityCheck({
+          proposedTasks: result.tasks,
+          existingTasks: tasks.map((task) => ({
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority,
+            completed: task.completed,
+            status: task.status,
+          })),
+          timezone,
+        });
+        setRealityCheck(check);
       }
     } catch (e: any) {
       setError(e.message ?? "The AI parser could not read that yet.");
@@ -418,6 +438,7 @@ export default function AddTask() {
       setParsedTasks([]);
       setAiWarnings([]);
       setAiSource(null);
+      setRealityCheck(null);
       setError("");
       setSuccessMessage(`${createdTasks.length} AI-parsed task${createdTasks.length === 1 ? "" : "s"} added.`);
       setTimeout(() => setSuccessMessage(""), 2600);
@@ -562,6 +583,7 @@ export default function AddTask() {
                 setParsedTasks([]);
                 setAiWarnings([]);
                 setAiSource(null);
+                setRealityCheck(null);
               }}
               disabled={aiBusy}
             >
@@ -629,13 +651,127 @@ export default function AddTask() {
                 </Text>
               ))}
 
+              {realityCheck && (
+                <View
+                  style={[
+                    styles.realityCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor:
+                        realityCheck.severity === "overloaded"
+                          ? colors.danger
+                          : realityCheck.severity === "watch"
+                            ? colors.warning
+                            : colors.success,
+                    },
+                  ]}
+                >
+                  <View style={styles.realityHeader}>
+                    <Text style={[styles.realityTitle, { color: colors.text }]}>
+                      Reality Check
+                    </Text>
+                    <Text
+                      style={[
+                        styles.realityBadge,
+                        {
+                          color:
+                            realityCheck.severity === "overloaded"
+                              ? colors.danger
+                              : realityCheck.severity === "watch"
+                                ? colors.warning
+                                : colors.success,
+                        },
+                      ]}
+                    >
+                      {realityCheck.severity === "overloaded"
+                        ? "Too Heavy"
+                        : realityCheck.severity === "watch"
+                          ? "Watch"
+                          : "Clear"}
+                    </Text>
+                  </View>
+
+                  <Text style={[styles.realitySummary, { color: colors.text }]}>
+                    {realityCheck.summary}
+                  </Text>
+                  <Text style={[styles.realityMeta, { color: colors.subtle }]}>
+                    {Math.round((realityCheck.totalMinutes / 60) * 10) / 10} hours
+                    planned • {realityCheck.taskCount} active task
+                    {realityCheck.taskCount === 1 ? "" : "s"}
+                  </Text>
+
+                  {realityCheck.warnings.map((warning) => (
+                    <Text
+                      key={warning}
+                      style={[styles.realityLine, { color: colors.subtle }]}
+                    >
+                      {warning}
+                    </Text>
+                  ))}
+
+                  {realityCheck.suggestions.map((suggestion) => (
+                    <Text
+                      key={suggestion}
+                      style={[styles.realityLine, { color: colors.text }]}
+                    >
+                      {suggestion}
+                    </Text>
+                  ))}
+
+                  {realityCheck.suggestedTrimTitles.length > 0 && (
+                    <TouchableOpacity
+                      style={[
+                        styles.trimButton,
+                        { backgroundColor: colors.background },
+                      ]}
+                      onPress={() => {
+                        const trimSet = new Set(realityCheck.suggestedTrimTitles);
+                        const trimmedTasks = parsedTasks.filter(
+                          (task) => !trimSet.has(task.title)
+                        );
+
+                        setParsedTasks(trimmedTasks);
+                        setRealityCheck(
+                          trimmedTasks.length === 0
+                            ? null
+                            : {
+                                ...realityCheck,
+                                summary:
+                                  "Trim candidates removed. Parse again if you want a fresh check.",
+                                warnings: [],
+                                suggestions: [
+                                  "Review the remaining tasks before adding them.",
+                                ],
+                                suggestedTrimTitles: [],
+                                severity: "watch",
+                              }
+                        );
+                      }}
+                    >
+                      <Text style={[styles.trimButtonText, { color: colors.text }]}>
+                        Remove suggested trim candidates
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
               <TouchableOpacity
-                style={[styles.aiAddButton, { backgroundColor: colors.tint }]}
+                style={[
+                  styles.aiAddButton,
+                  {
+                    backgroundColor:
+                      realityCheck?.severity === "overloaded"
+                        ? colors.warning
+                        : colors.tint,
+                  },
+                ]}
                 onPress={handleAddParsedTasks}
               >
                 <Text style={styles.aiPrimaryText}>
-                  Add {parsedTasks.length} Parsed Task
-                  {parsedTasks.length === 1 ? "" : "s"}
+                  {realityCheck?.severity === "overloaded"
+                    ? "Add Anyway"
+                    : `Add ${parsedTasks.length} Parsed Task${parsedTasks.length === 1 ? "" : "s"}`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1134,6 +1270,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 4,
+  },
+  realityCard: {
+    borderWidth: 1.5,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  realityHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  realityTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  realityBadge: {
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  realitySummary: {
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  realityMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  realityLine: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+  },
+  trimButton: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  trimButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
   aiAddButton: {
     borderRadius: 14,
