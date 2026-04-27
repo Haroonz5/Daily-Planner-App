@@ -19,6 +19,7 @@ export default function TabLayout() {
         tabBarButton: HapticTab,
         tabBarActiveTintColor: colors.tabIconSelected,
         tabBarInactiveTintColor: colors.tabIconDefault,
+        tabBarActiveBackgroundColor: colors.surface,
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: "800",

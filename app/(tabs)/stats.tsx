@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import { AmbientBackground } from "@/components/ambient-background";
 import { PetSprite } from "@/components/pet-sprite";
 import {
   getActivePet,
@@ -331,17 +332,45 @@ export default function StatsScreen() {
   }, [profile.activePetKey, tasks]);
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.header}>
-        <Text style={styles.emoji}>📊</Text>
-        <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
-        <Text style={[styles.subtitle, { color: colors.subtle }]}>
-          See how your discipline is shaping up.
-        </Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <AmbientBackground colors={colors} variant="calm" />
+
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.emoji}>📊</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
+          <Text style={[styles.subtitle, { color: colors.subtle }]}>
+            See how your discipline is shaping up.
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.dashboardHero,
+            { backgroundColor: colors.tint, shadowColor: colors.tint },
+          ]}
+        >
+          <View
+            style={[
+              styles.dashboardHeroOrb,
+              { backgroundColor: colors.warning },
+            ]}
+          />
+          <Text style={styles.dashboardKicker}>Progress Dashboard</Text>
+          <View style={styles.dashboardHeroRow}>
+            <View>
+              <Text style={styles.dashboardScore}>{stats.disciplineScore}</Text>
+              <Text style={styles.dashboardLabel}>{stats.disciplineLabel}</Text>
+            </View>
+            <View style={styles.dashboardPill}>
+              <Text style={styles.dashboardPillValue}>+{stats.weeklyXp}</Text>
+              <Text style={styles.dashboardPillLabel}>week XP</Text>
+            </View>
+          </View>
+          <Text style={styles.dashboardBody}>
+            Best window: {bucketLabels[stats.mostProductiveWindow]} • Watch: {bucketLabels[stats.riskWindow]}
+          </Text>
+        </View>
 
       <View
         style={[
@@ -695,7 +724,8 @@ export default function StatsScreen() {
       </View>
 
       <View style={{ height: 120 }} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -705,6 +735,76 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 48, marginBottom: 12 },
   title: { fontSize: 32, fontWeight: "700" },
   subtitle: { fontSize: 14, marginTop: 6 },
+  dashboardHero: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 30,
+    padding: 22,
+    overflow: "hidden",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    elevation: 8,
+  },
+  dashboardHeroOrb: {
+    position: "absolute",
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    right: -62,
+    top: -72,
+    opacity: 0.3,
+  },
+  dashboardKicker: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+  dashboardHeroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dashboardScore: {
+    color: "#fff",
+    fontSize: 56,
+    fontWeight: "900",
+    lineHeight: 62,
+  },
+  dashboardLabel: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  dashboardPill: {
+    minWidth: 96,
+    borderRadius: 22,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  dashboardPillValue: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  dashboardPillLabel: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
+  dashboardBody: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 14,
+  },
   petCard: {
     borderRadius: 22,
     padding: 20,

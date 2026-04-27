@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import { AmbientBackground } from "@/components/ambient-background";
 import { PetSprite } from "@/components/pet-sprite";
 import {
   getActivePet,
@@ -151,11 +152,13 @@ export default function SummaryScreen() {
   }, [summary.todayTasks, todayDate, timezone]);
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <AmbientBackground colors={colors} variant="calm" />
+
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={styles.emoji}>
         {summary.total === 0 ? "🌙" : summary.allDone ? "🎉" : "💪"}
       </Text>
@@ -428,7 +431,8 @@ export default function SummaryScreen() {
       >
         <Text style={styles.buttonText}>Back to Today</Text>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 

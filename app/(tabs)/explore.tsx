@@ -19,6 +19,7 @@ import {
 } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import { AmbientBackground } from "@/components/ambient-background";
 import { Colors } from "@/constants/theme";
 import {
   breakDownTask,
@@ -677,12 +678,36 @@ export default function AddTask() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <AmbientBackground colors={colors} variant="focus" />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
           <Text style={styles.emoji}>📝</Text>
           <Text style={[styles.title, { color: colors.text }]}>Plan Your Tasks</Text>
           <Text style={[styles.subtitle, { color: colors.subtle }]}>
             Add something for later today, tomorrow, or weeks ahead.
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.plannerHero,
+            { backgroundColor: colors.tint, shadowColor: colors.tint },
+          ]}
+        >
+          <View
+            style={[
+              styles.plannerHeroGlow,
+              { backgroundColor: colors.warning },
+            ]}
+          />
+          <Text style={styles.plannerHeroKicker}>Smart Planning</Text>
+          <Text style={styles.plannerHeroTitle}>Make it doable before you start</Text>
+          <Text style={styles.plannerHeroBody}>
+            Parse messy ideas, break big tasks into steps, and reality-check the day before it gets overloaded.
           </Text>
         </View>
 
@@ -1403,12 +1428,56 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     paddingHorizontal: 30,
   },
+  plannerHero: {
+    marginHorizontal: 24,
+    marginBottom: 18,
+    borderRadius: 28,
+    padding: 20,
+    overflow: "hidden",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 7,
+  },
+  plannerHeroGlow: {
+    position: "absolute",
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    right: -54,
+    top: -62,
+    opacity: 0.3,
+  },
+  plannerHeroKicker: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  plannerHeroTitle: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 29,
+    marginBottom: 8,
+  },
+  plannerHeroBody: {
+    color: "rgba(255,255,255,0.84)",
+    fontSize: 14,
+    lineHeight: 21,
+  },
   aiCard: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 22,
     padding: 16,
     marginHorizontal: 24,
     marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
   },
   aiTitle: {
     fontSize: 18,
@@ -1559,10 +1628,14 @@ const styles = StyleSheet.create({
   },
   breakdownCard: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 22,
     padding: 16,
     marginHorizontal: 24,
     marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
   },
   breakdownHeader: {
     flexDirection: "row",

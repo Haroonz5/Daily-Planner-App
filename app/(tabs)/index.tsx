@@ -23,6 +23,7 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
+import { AmbientBackground } from "@/components/ambient-background";
 import { PetSprite } from "@/components/pet-sprite";
 import {
   PET_TIERS,
@@ -248,6 +249,9 @@ export default function HomeScreen() {
     [tasks, today]
   );
   const completed = todayTasks.filter((t) => t.completed).length;
+  const openTodayTasks = todayTasks.filter(
+    (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+  ).length;
   const progressPercent =
     todayTasks.length > 0 ? (completed / todayTasks.length) * 100 : 0;
   const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
@@ -257,6 +261,18 @@ export default function HomeScreen() {
   const activePet = getActivePet(totalXp, profile.activePetKey);
   const unlockedPets = getUnlockedPets(totalXp);
   const behaviorCallout = getBehaviorCallout(tasks, today);
+  const momentumTitle =
+    todayTasks.length === 0
+      ? "Build a clean target"
+      : progressPercent === 100
+        ? "Perfect day locked"
+        : `${openTodayTasks} move${openTodayTasks === 1 ? "" : "s"} left`;
+  const momentumCopy =
+    todayTasks.length === 0
+      ? "Add one meaningful task and give the day a direction."
+      : progressPercent === 100
+        ? "Your companion felt that. Stack another clean day tomorrow."
+        : "Small wins count. Clear the next task, then let momentum do the rest.";
 
   const adaptiveReschedule = useMemo(() => {
     const historyTasks = tasks.filter((task) => task.date < today);
@@ -906,6 +922,13 @@ export default function HomeScreen() {
               ],
           ]}
         >
+          <View
+            style={[
+              styles.taskPriorityRail,
+              { backgroundColor: priorityColors[item.priority ?? "Medium"] },
+            ]}
+          />
+
           <TouchableOpacity
             onPress={() => toggleComplete(item)}
             style={styles.checkboxWrap}
@@ -1003,6 +1026,8 @@ export default function HomeScreen() {
   return (
     <>
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <AmbientBackground colors={colors} variant="energy" />
+
         {showConfetti && (
           <View pointerEvents="none" style={styles.confettiLayer}>
             {confettiValues.map((value, index) => (
@@ -1151,6 +1176,61 @@ export default function HomeScreen() {
                   Settings
                 </Text>
               </TouchableOpacity>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.momentumCard,
+              {
+                backgroundColor: colors.tint,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.momentumOrb,
+                { backgroundColor: colors.warning },
+              ]}
+            />
+            <View
+              style={[
+                styles.momentumOrbSmall,
+                { backgroundColor: colors.success },
+              ]}
+            />
+
+            <Text style={styles.momentumEyebrow}>Today&apos;s Momentum</Text>
+            <Text style={styles.momentumTitle}>{momentumTitle}</Text>
+            <Text style={styles.momentumBody}>{momentumCopy}</Text>
+
+            <View style={styles.momentumStats}>
+              <View style={styles.momentumStat}>
+                <Text style={styles.momentumStatValue}>{completed}</Text>
+                <Text style={styles.momentumStatLabel}>done</Text>
+              </View>
+              <View style={styles.momentumDivider} />
+              <View style={styles.momentumStat}>
+                <Text style={styles.momentumStatValue}>+{todayXp}</Text>
+                <Text style={styles.momentumStatLabel}>XP</Text>
+              </View>
+              <View style={styles.momentumDivider} />
+              <View style={styles.momentumStat}>
+                <Text style={styles.momentumStatValue}>
+                  {Math.round(progressPercent)}%
+                </Text>
+                <Text style={styles.momentumStatLabel}>flow</Text>
+              </View>
+            </View>
+
+            <View style={styles.momentumTrack}>
+              <View
+                style={[
+                  styles.momentumFill,
+                  { width: `${progressPercent}%` },
+                ]}
+              />
             </View>
           </View>
 
@@ -2095,6 +2175,96 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: 14, marginBottom: 4 },
   title: { fontSize: 32, fontWeight: "700" },
+  momentumCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 30,
+    padding: 22,
+    overflow: "hidden",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    elevation: 8,
+  },
+  momentumOrb: {
+    position: "absolute",
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+    right: -58,
+    top: -66,
+    opacity: 0.32,
+  },
+  momentumOrbSmall: {
+    position: "absolute",
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    left: -34,
+    bottom: -42,
+    opacity: 0.22,
+  },
+  momentumEyebrow: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  momentumTitle: {
+    color: "#fff",
+    fontSize: 30,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  momentumBody: {
+    color: "rgba(255,255,255,0.84)",
+    fontSize: 14,
+    lineHeight: 21,
+    maxWidth: "90%",
+  },
+  momentumStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    marginBottom: 14,
+    borderRadius: 20,
+    paddingVertical: 12,
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  momentumStat: {
+    flex: 1,
+    alignItems: "center",
+  },
+  momentumStatValue: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  momentumStatLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
+  momentumDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  momentumTrack: {
+    height: 9,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.24)",
+    overflow: "hidden",
+  },
+  momentumFill: {
+    height: 9,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
   petCard: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -2275,6 +2445,13 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     paddingVertical: 16,
     borderBottomWidth: 1,
+  },
+  taskPriorityRail: {
+    width: 4,
+    alignSelf: "stretch",
+    borderRadius: 999,
+    marginRight: 12,
+    opacity: 0.95,
   },
   currentTask: {
     borderLeftWidth: 3,
