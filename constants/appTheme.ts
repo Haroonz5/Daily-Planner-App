@@ -13,6 +13,8 @@ export const themeOptions: AppThemeName[] = [
   "sunset",
   "ocean",
   "midnight",
+  "obsidian",
+  "emberNight",
 ];
 
 export const getStoredTheme = async (): Promise<AppThemeName> => {

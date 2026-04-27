@@ -58,6 +58,34 @@ export type AiRescheduleResult = {
   source: "openai" | "local" | "offline";
 };
 
+export type AiHistoryTask = AiExistingTask & {
+  id?: string;
+  rescheduledCount?: number | null;
+  completedAt?: string | null;
+  skippedAt?: string | null;
+};
+
+export type DailyFeedbackResult = {
+  headline: string;
+  message: string;
+  wins: string[];
+  adjustments: string[];
+  source: "openai" | "local" | "offline";
+};
+
+export type TaskBreakdownStep = {
+  title: string;
+  durationMinutes: number;
+  priority: AiTaskPriority;
+  notes: string;
+};
+
+export type TaskBreakdownResult = {
+  steps: TaskBreakdownStep[];
+  summary: string;
+  source: "openai" | "local" | "offline";
+};
+
 const getAiApiUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_AI_API_URL;
   return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
@@ -622,6 +650,326 @@ export const runAiReschedule = async ({
         reason: String(suggestion.reason ?? "Moved to a better open slot."),
       })),
       summary: String(data.summary ?? "I found cleaner reschedule slots."),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localDailyFeedback = ({
+  date,
+  tasks,
+}: {
+  date: string;
+  tasks: AiHistoryTask[];
+}): DailyFeedbackResult => {
+  const dayTasks = tasks.filter((task) => task.date === date);
+  const total = dayTasks.length;
+  const completedTasks = dayTasks.filter((task) => task.completed);
+  const skippedTasks = dayTasks.filter((task) => task.status === "skipped");
+  const pendingTasks = dayTasks.filter(
+    (task) => !task.completed && task.status !== "skipped"
+  );
+  const rescheduledTasks = dayTasks.filter(
+    (task) => (task.rescheduledCount ?? 0) > 0
+  );
+
+  if (total === 0) {
+    return {
+      headline: "Quiet day",
+      message:
+        "Nothing was scheduled today, so the best move is to set one clear priority for tomorrow.",
+      wins: [],
+      adjustments: [
+        "Plan tomorrow before the day starts so discipline has a target.",
+      ],
+      source: "offline",
+    };
+  }
+
+  const completed = completedTasks.length;
+  const percent = Math.round((completed / total) * 100);
+  const wins: string[] = [];
+  const adjustments: string[] = [];
+  const highCompleted = completedTasks.filter(
+    (task) => task.priority === "High"
+  ).length;
+
+  if (completed > 0) wins.push(`You completed ${completed} of ${total} tasks.`);
+  if (highCompleted > 0) {
+    wins.push(
+      `${highCompleted} high-priority task${highCompleted === 1 ? "" : "s"} got handled.`
+    );
+  }
+  if (skippedTasks.length > 0) {
+    adjustments.push(
+      `${skippedTasks.length} task${skippedTasks.length === 1 ? "" : "s"} got skipped. Make those smaller or move them earlier.`
+    );
+  }
+  if (pendingTasks.length > 0) {
+    adjustments.push(
+      `${pendingTasks.length} task${pendingTasks.length === 1 ? "" : "s"} stayed open. Reschedule only what still matters.`
+    );
+  }
+  if (rescheduledTasks.length >= 2) {
+    adjustments.push("Multiple tasks moved today. Add more buffer tomorrow.");
+  }
+
+  const plannedMinutes = dayTasks.reduce(
+    (sum, task) => sum + estimateTaskMinutes(task),
+    0
+  );
+  if (plannedMinutes >= 8 * 60) {
+    adjustments.push(
+      "Today carried a heavy workload. Keep tomorrow closer to 3-5 serious blocks."
+    );
+  }
+
+  const headline =
+    percent === 100
+      ? "Clean sweep"
+      : percent >= 70
+        ? "Strong day"
+        : percent >= 40
+          ? "Mixed execution"
+          : completed > 0
+            ? "Small win banked"
+            : "Reset needed";
+  const message =
+    percent === 100
+      ? "You finished the whole plan. Keep tomorrow honest so the streak has room to continue."
+      : percent >= 70
+        ? "You got most of the important work done. Tighten the leftover friction tomorrow."
+        : percent >= 40
+          ? "There was real progress, but the plan needs fewer moving parts or better timing."
+          : completed > 0
+            ? "You did not blank the day. Tomorrow needs a lighter, more focused plan."
+            : "Today did not convert into action. Pick one important task tomorrow and protect it.";
+
+  return {
+    headline,
+    message,
+    wins: wins.length ? wins.slice(0, 3) : ["You still learned what did not work."],
+    adjustments: adjustments.length
+      ? adjustments.slice(0, 3)
+      : ["Repeat this structure tomorrow, but do not add filler tasks."],
+    source: "offline",
+  };
+};
+
+export const getDailyFeedback = async ({
+  date,
+  tasks,
+  timezone,
+}: {
+  date: string;
+  tasks: AiHistoryTask[];
+  timezone: string;
+}): Promise<DailyFeedbackResult> => {
+  const fallback = () => localDailyFeedback({ date, tasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/daily-feedback`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        date,
+        timezone,
+        now: new Date().toISOString(),
+        tasks: tasks.map((task) => ({
+          id: task.id ?? null,
+          title: task.title,
+          date: task.date,
+          time: task.time ?? null,
+          priority: task.priority ?? "Medium",
+          completed: task.completed ?? false,
+          status: task.status ?? "pending",
+          rescheduled_count: task.rescheduledCount ?? 0,
+          completed_at: task.completedAt ?? null,
+          skipped_at: task.skippedAt ?? null,
+        })),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      headline: String(data.headline ?? "Daily feedback"),
+      message: String(data.message ?? "Review your day and adjust tomorrow."),
+      wins: (data.wins ?? []).map(String),
+      adjustments: (data.adjustments ?? []).map(String),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localTaskBreakdown = ({
+  title,
+  notes,
+  priority,
+}: {
+  title: string;
+  notes: string;
+  priority: AiTaskPriority;
+}): TaskBreakdownResult => {
+  const lower = `${title} ${notes}`.toLowerCase();
+
+  const makeStep = (
+    stepTitle: string,
+    durationMinutes: number,
+    stepPriority: AiTaskPriority = priority,
+    stepNotes = ""
+  ): TaskBreakdownStep => ({
+    title: stepTitle,
+    durationMinutes,
+    priority: stepPriority,
+    notes: stepNotes,
+  });
+
+  const steps = /study|exam|test|quiz|class/.test(lower)
+    ? [
+        makeStep(`Review notes for ${title}`, 25, priority, "Mark the weak spots."),
+        makeStep(
+          `Practice active recall for ${title}`,
+          35,
+          priority,
+          "Use questions, flashcards, or blank-page recall."
+        ),
+        makeStep(
+          `Summarize weak spots from ${title}`,
+          20,
+          "Medium",
+          "Write what to review next."
+        ),
+      ]
+    : /code|build|project|app|write/.test(lower)
+      ? [
+          makeStep(
+            `Define the finish line for ${title}`,
+            15,
+            priority,
+            "Write what done looks like."
+          ),
+          makeStep(
+            `Work the first focused block of ${title}`,
+            45,
+            priority,
+            "Make the smallest useful version work."
+          ),
+          makeStep(
+            `Test and clean up ${title}`,
+            25,
+            "Medium",
+            "Check the result and remove rough edges."
+          ),
+        ]
+      : /clean|room|laundry|organize/.test(lower)
+        ? [
+            makeStep(
+              `Clear the obvious mess for ${title}`,
+              15,
+              priority,
+              "Start with visible clutter."
+            ),
+            makeStep(
+              `Handle the main reset for ${title}`,
+              30,
+              priority,
+              "Do the core cleaning block."
+            ),
+            makeStep(
+              `Finish and reset supplies for ${title}`,
+              10,
+              "Low",
+              "Put tools away."
+            ),
+          ]
+        : [
+            makeStep(
+              `Define the next action for ${title}`,
+              10,
+              priority,
+              "Turn the vague task into a first move."
+            ),
+            makeStep(
+              `Do the focused work for ${title}`,
+              40,
+              priority,
+              "Protect one uninterrupted block."
+            ),
+            makeStep(
+              `Review and close ${title}`,
+              15,
+              "Medium",
+              "Capture what remains."
+            ),
+          ];
+
+  return {
+    steps,
+    summary: `I split ${title} into ${steps.length} doable steps.`,
+    source: "offline",
+  };
+};
+
+export const breakDownTask = async ({
+  title,
+  notes,
+  date,
+  time,
+  priority,
+  timezone,
+  existingTasks,
+}: {
+  title: string;
+  notes: string;
+  date: string;
+  time: string;
+  priority: AiTaskPriority;
+  timezone: string;
+  existingTasks: AiExistingTask[];
+}): Promise<TaskBreakdownResult> => {
+  const fallback = () => localTaskBreakdown({ title, notes, priority });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/breakdown-task`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title,
+        notes,
+        date,
+        time,
+        priority,
+        timezone,
+        now: new Date().toISOString(),
+        existing_tasks: existingTasks,
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      steps: (data.steps ?? []).map((step: any) => ({
+        title: String(step.title ?? title),
+        durationMinutes: Number(
+          step.duration_minutes ?? step.durationMinutes ?? 30
+        ),
+        priority: (["Low", "Medium", "High"].includes(step.priority)
+          ? step.priority
+          : priority) as AiTaskPriority,
+        notes: String(step.notes ?? ""),
+      })),
+      summary: String(data.summary ?? "Task breakdown ready."),
       source: data.source === "openai" ? "openai" : "local",
     };
   } catch {

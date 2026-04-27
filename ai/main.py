@@ -105,6 +105,58 @@ class RescheduleResponse(BaseModel):
     source: Literal["openai", "local"]
 
 
+class FeedbackTask(BaseModel):
+    id: str | None = None
+    title: str
+    date: str
+    time: str | None = None
+    priority: Priority = "Medium"
+    completed: bool = False
+    status: Literal["pending", "completed", "skipped"] | None = "pending"
+    rescheduled_count: int = 0
+    completed_at: str | None = None
+    skipped_at: str | None = None
+
+
+class DailyFeedbackRequest(BaseModel):
+    date: str
+    tasks: list[FeedbackTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class DailyFeedbackResponse(BaseModel):
+    headline: str
+    message: str
+    wins: list[str] = Field(default_factory=list)
+    adjustments: list[str] = Field(default_factory=list)
+    source: Literal["openai", "local"]
+
+
+class BreakdownRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    notes: str = ""
+    date: str
+    time: str
+    priority: Priority = "Medium"
+    timezone: str = "America/New_York"
+    now: str | None = None
+    existing_tasks: list[ExistingTask] = Field(default_factory=list)
+
+
+class BreakdownStep(BaseModel):
+    title: str
+    duration_minutes: int = Field(ge=5, le=180)
+    priority: Priority = "Medium"
+    notes: str = ""
+
+
+class BreakdownResponse(BaseModel):
+    steps: list[BreakdownStep]
+    summary: str
+    source: Literal["openai", "local"]
+
+
 TASK_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -321,6 +373,14 @@ def _format_minutes_to_time(minutes: int) -> str:
     suffix = "AM" if hour < 12 else "PM"
     display_hour = hour % 12 or 12
     return f"{display_hour}:{minute:02d} {suffix}"
+
+
+def _feedback_task_minutes(task: FeedbackTask) -> int:
+    if task.priority == "High":
+        return 90
+    if task.priority == "Low":
+        return 30
+    return 60
 
 
 def _clean_title(segment: str) -> str:
@@ -822,6 +882,308 @@ def _openai_reschedule(
         return None
 
 
+def _local_daily_feedback(request: DailyFeedbackRequest) -> DailyFeedbackResponse:
+    day_tasks = [task for task in request.tasks if task.date == request.date]
+    total = len(day_tasks)
+    completed_tasks = [task for task in day_tasks if task.completed]
+    skipped_tasks = [
+        task for task in day_tasks if (task.status or "pending") == "skipped"
+    ]
+    pending_tasks = [
+        task
+        for task in day_tasks
+        if not task.completed and (task.status or "pending") != "skipped"
+    ]
+    rescheduled_tasks = [
+        task for task in day_tasks if (task.rescheduled_count or 0) > 0
+    ]
+    completed = len(completed_tasks)
+    skipped = len(skipped_tasks)
+    pending = len(pending_tasks)
+    percent = round((completed / total) * 100) if total else 0
+    high_completed = sum(1 for task in completed_tasks if task.priority == "High")
+
+    if total == 0:
+        return DailyFeedbackResponse(
+            headline="Quiet day",
+            message="Nothing was scheduled today, so the best move is to set one clear priority for tomorrow.",
+            wins=[],
+            adjustments=["Plan tomorrow before the day starts so discipline has a target."],
+            source="local",
+        )
+
+    wins: list[str] = []
+    adjustments: list[str] = []
+
+    if completed:
+        wins.append(f"You completed {completed} of {total} tasks.")
+    if high_completed:
+        wins.append(f"{high_completed} high-priority task{'s' if high_completed != 1 else ''} got handled.")
+
+    if skipped:
+        adjustments.append(f"{skipped} task{'s' if skipped != 1 else ''} got skipped. Make those smaller or move them earlier.")
+    if pending:
+        adjustments.append(f"{pending} task{'s' if pending != 1 else ''} stayed open. Reschedule only what still matters.")
+    if len(rescheduled_tasks) >= 2:
+        adjustments.append("Multiple tasks moved today. Add more buffer tomorrow.")
+
+    planned_minutes = sum(_feedback_task_minutes(task) for task in day_tasks)
+    if planned_minutes >= 8 * 60:
+        adjustments.append("Today carried a heavy workload. Keep tomorrow closer to 3-5 serious blocks.")
+
+    if percent == 100:
+        headline = "Clean sweep"
+        message = "You finished the whole plan. Keep tomorrow honest so the streak has room to continue."
+    elif percent >= 70:
+        headline = "Strong day"
+        message = "You got most of the important work done. Tighten the leftover friction tomorrow."
+    elif percent >= 40:
+        headline = "Mixed execution"
+        message = "There was real progress, but the plan needs fewer moving parts or better timing."
+    elif completed > 0:
+        headline = "Small win banked"
+        message = "You did not blank the day. Tomorrow needs a lighter, more focused plan."
+    else:
+        headline = "Reset needed"
+        message = "Today did not convert into action. Pick one important task tomorrow and protect it."
+
+    if not wins:
+        wins.append("You still collected useful data about what did not work.")
+    if not adjustments:
+        adjustments.append("Repeat this structure tomorrow, but do not add filler tasks.")
+
+    return DailyFeedbackResponse(
+        headline=headline,
+        message=message,
+        wins=wins[:3],
+        adjustments=adjustments[:3],
+        source="local",
+    )
+
+
+def _openai_daily_feedback(
+    request: DailyFeedbackRequest,
+    baseline: DailyFeedbackResponse,
+) -> DailyFeedbackResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        prompt = {
+            "date": request.date,
+            "timezone": request.timezone,
+            "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
+            "tasks": [task.model_dump() for task in request.tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You write Daily Discipline end-of-day feedback. "
+                        "Use the task data and baseline as truth. Return only JSON with: "
+                        '{"headline":"short title","message":"2 concise sentences max",'
+                        '"wins":["specific win"],"adjustments":["specific next adjustment"]}. '
+                        "Be direct, personal, and practical. No generic motivational fluff."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        return DailyFeedbackResponse(
+            headline=str(data.get("headline") or baseline.headline),
+            message=str(data.get("message") or baseline.message),
+            wins=[str(item) for item in data.get("wins", baseline.wins)][:3],
+            adjustments=[
+                str(item) for item in data.get("adjustments", baseline.adjustments)
+            ][:3],
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
+def _local_breakdown(request: BreakdownRequest) -> BreakdownResponse:
+    lower = f"{request.title} {request.notes}".lower()
+
+    if any(word in lower for word in ("study", "exam", "test", "quiz", "class")):
+        steps = [
+            BreakdownStep(
+                title=f"Review notes for {request.title}",
+                duration_minutes=25,
+                priority=request.priority,
+                notes="Skim the material and mark weak spots.",
+            ),
+            BreakdownStep(
+                title=f"Practice active recall for {request.title}",
+                duration_minutes=35,
+                priority=request.priority,
+                notes="Use questions, flashcards, or a blank-page recall drill.",
+            ),
+            BreakdownStep(
+                title=f"Summarize weak spots from {request.title}",
+                duration_minutes=20,
+                priority="Medium",
+                notes="Write the 3 things to review next.",
+            ),
+        ]
+    elif any(word in lower for word in ("code", "build", "project", "app", "write")):
+        steps = [
+            BreakdownStep(
+                title=f"Define the finish line for {request.title}",
+                duration_minutes=15,
+                priority=request.priority,
+                notes="Write what done looks like before starting.",
+            ),
+            BreakdownStep(
+                title=f"Work the first focused block of {request.title}",
+                duration_minutes=45,
+                priority=request.priority,
+                notes="Make the smallest useful version work.",
+            ),
+            BreakdownStep(
+                title=f"Test and clean up {request.title}",
+                duration_minutes=25,
+                priority="Medium",
+                notes="Check the result and remove rough edges.",
+            ),
+        ]
+    elif any(word in lower for word in ("clean", "room", "laundry", "organize")):
+        steps = [
+            BreakdownStep(
+                title=f"Clear the obvious mess for {request.title}",
+                duration_minutes=15,
+                priority=request.priority,
+                notes="Start with surfaces and visible clutter.",
+            ),
+            BreakdownStep(
+                title=f"Handle the main reset for {request.title}",
+                duration_minutes=30,
+                priority=request.priority,
+                notes="Do the core cleaning or organizing block.",
+            ),
+            BreakdownStep(
+                title=f"Finish and reset supplies for {request.title}",
+                duration_minutes=10,
+                priority="Low",
+                notes="Put tools away and make the space easy to maintain.",
+            ),
+        ]
+    else:
+        steps = [
+            BreakdownStep(
+                title=f"Define the next action for {request.title}",
+                duration_minutes=10,
+                priority=request.priority,
+                notes="Turn the vague task into a visible first move.",
+            ),
+            BreakdownStep(
+                title=f"Do the focused work for {request.title}",
+                duration_minutes=40,
+                priority=request.priority,
+                notes="Protect one uninterrupted block.",
+            ),
+            BreakdownStep(
+                title=f"Review and close {request.title}",
+                duration_minutes=15,
+                priority="Medium",
+                notes="Capture what remains and decide if it needs another task.",
+            ),
+        ]
+
+    return BreakdownResponse(
+        steps=steps,
+        summary=f"I split {request.title} into {len(steps)} doable steps.",
+        source="local",
+    )
+
+
+def _openai_breakdown(
+    request: BreakdownRequest,
+    baseline: BreakdownResponse,
+) -> BreakdownResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        prompt = {
+            "title": request.title,
+            "notes": request.notes,
+            "date": request.date,
+            "time": request.time,
+            "priority": request.priority,
+            "timezone": request.timezone,
+            "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
+            "existing_tasks": [task.model_dump() for task in request.existing_tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You break one vague productivity task into 2-5 concrete subtasks. "
+                        "Return only JSON with: "
+                        '{"summary":"short sentence","steps":[{"title":"specific action",'
+                        '"duration_minutes":25,"priority":"Low|Medium|High","notes":"short note"}]}. '
+                        "Each title must be action-oriented and short. Do not create filler."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        raw_steps = data.get("steps", [])
+        steps = []
+
+        for item in raw_steps[:5]:
+            priority = item.get("priority", request.priority)
+            if priority not in ("Low", "Medium", "High"):
+                priority = request.priority
+
+            duration = int(item.get("duration_minutes", 30))
+            duration = min(max(duration, 5), 180)
+            steps.append(
+                BreakdownStep(
+                    title=str(item.get("title") or request.title),
+                    duration_minutes=duration,
+                    priority=priority,
+                    notes=str(item.get("notes") or ""),
+                )
+            )
+
+        if len(steps) < 2:
+            return None
+
+        return BreakdownResponse(
+            steps=steps,
+            summary=str(data.get("summary") or baseline.summary),
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -847,3 +1209,17 @@ def reschedule(request: RescheduleRequest):
     baseline = _local_reschedule(request)
     ai_suggestion = _openai_reschedule(request, baseline)
     return ai_suggestion or baseline
+
+
+@app.post("/v1/daily-feedback", response_model=DailyFeedbackResponse)
+def daily_feedback(request: DailyFeedbackRequest):
+    baseline = _local_daily_feedback(request)
+    ai_feedback = _openai_daily_feedback(request, baseline)
+    return ai_feedback or baseline
+
+
+@app.post("/v1/breakdown-task", response_model=BreakdownResponse)
+def breakdown_task(request: BreakdownRequest):
+    baseline = _local_breakdown(request)
+    ai_breakdown = _openai_breakdown(request, baseline)
+    return ai_breakdown or baseline

@@ -13,6 +13,10 @@ import {
 } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import {
+  getDailyFeedback,
+  type DailyFeedbackResult,
+} from "@/utils/ai";
 import { auth, db } from "../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -37,14 +41,26 @@ const priorityColors: Record<Priority, string> = {
   High: "#e58ca8",
 };
 
+const serializeDateValue = (value: any) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return null;
+};
+
 export default function SummaryScreen() {
   const router = useRouter();
   const { themeName } = useAppTheme();
   const { profile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [dailyFeedback, setDailyFeedback] =
+    useState<DailyFeedbackResult | null>(null);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
 
-  const getTodayDate = () => new Date().toISOString().split("T")[0];
+  const todayDate = new Date().toISOString().split("T")[0];
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -63,7 +79,7 @@ export default function SummaryScreen() {
   }, []);
 
   const summary = useMemo(() => {
-    const todayTasks = tasks.filter((task) => task.date === getTodayDate());
+    const todayTasks = tasks.filter((task) => task.date === todayDate);
     const completed = todayTasks.filter((task) => task.completed).length;
     const skipped = todayTasks.filter(
       (task) => (task.status ?? "pending") === "skipped"
@@ -89,7 +105,7 @@ export default function SummaryScreen() {
       activePet,
       petProgress,
     };
-  }, [profile.activePetKey, tasks]);
+  }, [profile.activePetKey, tasks, todayDate]);
 
   const message =
     summary.total === 0
@@ -97,6 +113,42 @@ export default function SummaryScreen() {
       : summary.allDone
         ? "You completed all your tasks today. Amazing work!"
         : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
+
+  useEffect(() => {
+    let active = true;
+
+    const loadFeedback = async () => {
+      setFeedbackBusy(true);
+
+      try {
+        const result = await getDailyFeedback({
+          date: todayDate,
+          timezone,
+          tasks: summary.todayTasks.map((task) => ({
+            id: task.id,
+            title: task.title,
+            date: task.date,
+            time: task.time ?? "9:00 PM",
+            priority: task.priority ?? "Medium",
+            completed: task.completed,
+            status: task.status ?? "pending",
+            rescheduledCount: task.rescheduledCount ?? 0,
+            completedAt: serializeDateValue(task.completedAt),
+          })),
+        });
+
+        if (active) setDailyFeedback(result);
+      } finally {
+        if (active) setFeedbackBusy(false);
+      }
+    };
+
+    loadFeedback();
+
+    return () => {
+      active = false;
+    };
+  }, [summary.todayTasks, todayDate, timezone]);
 
   return (
     <ScrollView
@@ -117,6 +169,73 @@ export default function SummaryScreen() {
       </Text>
 
       <Text style={[styles.subtitle, { color: colors.subtle }]}>{message}</Text>
+
+      <View
+        style={[
+          styles.feedbackCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <View style={styles.feedbackHeader}>
+          <Text style={[styles.feedbackEyebrow, { color: colors.tint }]}>
+            AI Daily Feedback
+          </Text>
+          <Text style={[styles.feedbackSource, { color: colors.subtle }]}>
+            {feedbackBusy
+              ? "Checking"
+              : dailyFeedback?.source === "openai"
+                ? "AI"
+                : "Local"}
+          </Text>
+        </View>
+
+        <Text style={[styles.feedbackTitle, { color: colors.text }]}>
+          {feedbackBusy
+            ? "Reading your day..."
+            : dailyFeedback?.headline ?? "Daily feedback"}
+        </Text>
+        <Text style={[styles.feedbackBody, { color: colors.subtle }]}>
+          {feedbackBusy
+            ? "Turning your completion data into one useful next move."
+            : dailyFeedback?.message ?? "Review your day and adjust tomorrow."}
+        </Text>
+
+        {!!dailyFeedback?.wins.length && (
+          <View style={styles.feedbackList}>
+            <Text style={[styles.feedbackListTitle, { color: colors.text }]}>
+              Wins
+            </Text>
+            {dailyFeedback.wins.map((win) => (
+              <Text
+                key={win}
+                style={[styles.feedbackLine, { color: colors.subtle }]}
+              >
+                {win}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {!!dailyFeedback?.adjustments.length && (
+          <View style={styles.feedbackList}>
+            <Text style={[styles.feedbackListTitle, { color: colors.text }]}>
+              Tomorrow&apos;s Adjustment
+            </Text>
+            {dailyFeedback.adjustments.map((adjustment) => (
+              <Text
+                key={adjustment}
+                style={[styles.feedbackLine, { color: colors.subtle }]}
+              >
+                {adjustment}
+              </Text>
+            ))}
+          </View>
+        )}
+      </View>
 
       <View
         style={[
@@ -334,6 +453,55 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 24,
     paddingHorizontal: 16,
+  },
+  feedbackCard: {
+    borderRadius: 22,
+    padding: 18,
+    width: "100%",
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  feedbackHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  feedbackEyebrow: {
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  feedbackSource: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  feedbackTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  feedbackBody: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  feedbackList: {
+    marginTop: 14,
+  },
+  feedbackListTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  feedbackLine: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 5,
   },
   petCard: {
     borderRadius: 22,

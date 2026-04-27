@@ -7,7 +7,9 @@ export type AppThemeName =
   | "focus"
   | "sunset"
   | "ocean"
-  | "midnight";
+  | "midnight"
+  | "obsidian"
+  | "emberNight";
 
 type ThemePalette = {
   text: string;
@@ -35,6 +37,8 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   sunset: "Sunset",
   ocean: "Ocean",
   midnight: "Midnight",
+  obsidian: "Obsidian",
+  emberNight: "Ember Night",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -154,6 +158,40 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff8ca2",
     success: "#6fd3a7",
     warning: "#f0c36f",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  obsidian: {
+    text: "#f6f1e8",
+    background: "#070707",
+    card: "#111111",
+    surface: "#1c1a17",
+    tint: "#d7b46a",
+    icon: "#9a9286",
+    tabIconDefault: "#676059",
+    tabIconSelected: "#d7b46a",
+    subtle: "#b7aa9a",
+    border: "#2a2620",
+    danger: "#ff7d7d",
+    success: "#87d99a",
+    warning: "#f0bd62",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  emberNight: {
+    text: "#fff3eb",
+    background: "#150c0a",
+    card: "#22130f",
+    surface: "#321c16",
+    tint: "#ff8a4c",
+    icon: "#b78978",
+    tabIconDefault: "#7e5b50",
+    tabIconSelected: "#ff8a4c",
+    subtle: "#d4ab9b",
+    border: "#43271f",
+    danger: "#ff7a93",
+    success: "#8ed69d",
+    warning: "#ffc46b",
     statusBar: "light",
     navigationTone: "dark",
   },

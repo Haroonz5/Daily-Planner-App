@@ -694,7 +694,7 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 120 }} />
     </ScrollView>
   );
 }

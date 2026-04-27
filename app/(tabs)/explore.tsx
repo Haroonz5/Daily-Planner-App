@@ -21,10 +21,12 @@ import {
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
+  breakDownTask,
   parseNaturalTasks,
   runRealityCheck,
   type ParsedAiTask,
   type RealityCheckResult,
+  type TaskBreakdownResult,
 } from "../../utils/ai";
 import {
   buildRecurringDates,
@@ -109,7 +111,9 @@ export default function AddTask() {
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiSource, setAiSource] = useState<"openai" | "local" | "offline" | null>(null);
   const [realityCheck, setRealityCheck] = useState<RealityCheckResult | null>(null);
+  const [breakdown, setBreakdown] = useState<TaskBreakdownResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const [breakdownBusy, setBreakdownBusy] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -280,6 +284,7 @@ export default function AddTask() {
     setTime(new Date());
     setFutureDraftDate(getDefaultFutureDate());
     setFutureDraftTime(new Date());
+    setBreakdown(null);
   };
 
   const openFutureScheduler = () => {
@@ -364,6 +369,144 @@ export default function AddTask() {
     ].filter(Boolean);
 
     return noteParts.join("\n");
+  };
+
+  const formatMinutesAsTaskTime = (minutes: number) => {
+    const date = new Date();
+    date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return formatTimeFromDate(date);
+  };
+
+  const handleBreakDownTask = async () => {
+    if (!title.trim()) {
+      setError("Add a task title first, like: Study for biology exam.");
+      return;
+    }
+
+    setBreakdownBusy(true);
+    setError("");
+    setSuccessMessage("");
+
+    try {
+      const result = await breakDownTask({
+        title: title.trim(),
+        notes: notes.trim(),
+        date: selectedDateKey,
+        time: formattedTime,
+        priority,
+        timezone,
+        existingTasks: tasks.map((task) => ({
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority,
+          completed: task.completed,
+          status: task.status,
+        })),
+      });
+
+      setBreakdown(result);
+    } catch (e: any) {
+      setError(e.message ?? "Could not break this task down yet.");
+    } finally {
+      setBreakdownBusy(false);
+    }
+  };
+
+  const handleAddBreakdownTasks = async () => {
+    if (!breakdown || breakdown.steps.length === 0) {
+      setError("Break the task into steps first.");
+      return;
+    }
+
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        setError("You need to be logged in to add tasks.");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      const startMinutes =
+        parseTimeToMinutes(formattedTime) ??
+        time.getHours() * 60 + time.getMinutes();
+      let cursorMinutes = startMinutes;
+      const createdTasks: {
+        id: string;
+        title: string;
+        time: string;
+        date: string;
+        priority: TaskPriority;
+      }[] = [];
+
+      breakdown.steps.forEach((step) => {
+        const taskRef = doc(collection(db, "users", uid, "tasks"));
+        const stepTime = formatMinutesAsTaskTime(
+          Math.min(cursorMinutes, 23 * 60 + 45)
+        );
+        const stepNotes = [
+          step.notes,
+          `Part of: ${title.trim()}`,
+          `Estimated duration: ${step.durationMinutes} minutes`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        batch.set(taskRef, {
+          title: step.title.trim(),
+          notes: stepNotes,
+          priority: step.priority,
+          time: stepTime,
+          date: selectedDateKey,
+          completed: false,
+          status: "pending",
+          createdAt: new Date(),
+          completedAt: null,
+          skippedAt: null,
+          lastActionAt: new Date(),
+          rescheduledCount: 0,
+          originalTime: stepTime,
+          recurrence: "none",
+          recurrenceGroupId: null,
+          aiCreated: true,
+          breakdownCreated: true,
+          parentTaskTitle: title.trim(),
+        });
+
+        createdTasks.push({
+          id: taskRef.id,
+          title: step.title.trim(),
+          time: stepTime,
+          date: selectedDateKey,
+          priority: step.priority,
+        });
+
+        cursorMinutes += step.durationMinutes + 10;
+      });
+
+      await batch.commit();
+
+      await Promise.all(
+        createdTasks.map((task) =>
+          syncTaskNotifications({
+            ...task,
+            completed: false,
+            status: "pending",
+          })
+        )
+      );
+
+      await syncMorningSummaryNotification(uid);
+
+      resetForm();
+      setError("");
+      setSuccessMessage(
+        `${createdTasks.length} breakdown step${createdTasks.length === 1 ? "" : "s"} scheduled for ${selectedDateLabel}.`
+      );
+      setTimeout(() => setSuccessMessage(""), 2600);
+    } catch (e: any) {
+      setError(e.message ?? "Something went wrong while adding the breakdown.");
+    }
   };
 
   const handleAddParsedTasks = async () => {
@@ -810,6 +953,94 @@ export default function AddTask() {
           multiline
         />
 
+        <View
+          style={[
+            styles.breakdownCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.breakdownHeader}>
+            <View>
+              <Text style={[styles.breakdownTitle, { color: colors.text }]}>
+                Task Breakdown
+              </Text>
+              <Text style={[styles.breakdownSubtitle, { color: colors.subtle }]}>
+                Turn a big task into smaller scheduled steps.
+              </Text>
+            </View>
+
+            {breakdown ? (
+              <Text style={[styles.breakdownSource, { color: colors.subtle }]}>
+                {breakdown.source === "openai" ? "AI" : "Local"}
+              </Text>
+            ) : null}
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.breakdownButton,
+              { backgroundColor: colors.surface },
+            ]}
+            onPress={handleBreakDownTask}
+            disabled={breakdownBusy}
+          >
+            <Text style={[styles.breakdownButtonText, { color: colors.text }]}>
+              {breakdownBusy ? "Breaking it down..." : "Break Into Steps"}
+            </Text>
+          </TouchableOpacity>
+
+          {breakdown && (
+            <View style={styles.breakdownPreview}>
+              <Text style={[styles.breakdownSummary, { color: colors.subtle }]}>
+                {breakdown.summary}
+              </Text>
+
+              {breakdown.steps.map((step, index) => (
+                <View
+                  key={`${step.title}-${index}`}
+                  style={[
+                    styles.breakdownStep,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.breakdownStepTop}>
+                    <Text style={[styles.breakdownStepNumber, { color: colors.tint }]}>
+                      {index + 1}
+                    </Text>
+                    <Text style={[styles.breakdownStepTitle, { color: colors.text }]}>
+                      {step.title}
+                    </Text>
+                  </View>
+                  <Text style={[styles.breakdownStepMeta, { color: colors.subtle }]}>
+                    {step.durationMinutes} min • {step.priority}
+                  </Text>
+                  {!!step.notes && (
+                    <Text style={[styles.breakdownStepNotes, { color: colors.subtle }]}>
+                      {step.notes}
+                    </Text>
+                  )}
+                </View>
+              ))}
+
+              <TouchableOpacity
+                style={[styles.breakdownAddButton, { backgroundColor: colors.tint }]}
+                onPress={handleAddBreakdownTasks}
+              >
+                <Text style={styles.aiPrimaryText}>
+                  Add {breakdown.steps.length} Step
+                  {breakdown.steps.length === 1 ? "" : "s"} as Tasks
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: colors.subtle }]}>
             Target Day
@@ -1154,7 +1385,7 @@ export default function AddTask() {
           </Text>
         </TouchableOpacity>
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -1325,6 +1556,92 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 12,
+  },
+  breakdownCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginHorizontal: 24,
+    marginBottom: 18,
+  },
+  breakdownHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  breakdownTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 5,
+  },
+  breakdownSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  breakdownSource: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  breakdownButton: {
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  breakdownButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  breakdownPreview: {
+    marginTop: 14,
+  },
+  breakdownSummary: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
+  },
+  breakdownStep: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+  },
+  breakdownStepTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  breakdownStepNumber: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "center",
+    lineHeight: 22,
+    marginRight: 9,
+  },
+  breakdownStepTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  breakdownStepMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 31,
+  },
+  breakdownStepNotes: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 5,
+    marginLeft: 31,
+  },
+  breakdownAddButton: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 6,
   },
   input: {
     borderWidth: 1,
