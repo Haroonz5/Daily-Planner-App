@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
+  ImageBackground,
   Modal,
   ScrollView,
   StyleSheet,
@@ -108,6 +109,8 @@ const confettiPalette = [
   "#87c3ff",
   "#f7d56b",
 ];
+
+const homeCoverImage = require("../../assets/images/home-cover.png");
 
 const { width: screenWidth } = Dimensions.get("window");
 
@@ -952,6 +955,41 @@ export default function HomeScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+
+          <View
+            style={[
+              styles.heroCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <ImageBackground
+              source={homeCoverImage}
+              resizeMode="cover"
+              imageStyle={styles.heroImage}
+              style={styles.heroImageWrap}
+            >
+              <View style={styles.heroOverlay} />
+              <View style={styles.heroContent}>
+                <View
+                  style={[
+                    styles.heroBadge,
+                    { backgroundColor: "rgba(255,255,255,0.16)" },
+                  ]}
+                >
+                  <Text style={styles.heroBadgeText}>Daily Discipline</Text>
+                </View>
+                <Text style={styles.heroTitle}>Shape the day before it shapes you.</Text>
+                <Text style={styles.heroSubtitle}>
+                  Plan clearly, protect your focus, and let your companion grow
+                  with your consistency.
+                </Text>
+              </View>
+            </ImageBackground>
           </View>
 
           <View
@@ -1829,6 +1867,61 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: 14, marginBottom: 4 },
   title: { fontSize: 32, fontWeight: "700" },
+  heroCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  heroImageWrap: {
+    minHeight: 208,
+    justifyContent: "flex-end",
+  },
+  heroImage: {
+    borderRadius: 24,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(14, 18, 59, 0.36)",
+  },
+  heroContent: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 20,
+  },
+  heroBadge: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 12,
+  },
+  heroBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+  },
+  heroTitle: {
+    color: "#fff",
+    fontSize: 25,
+    fontWeight: "700",
+    lineHeight: 30,
+    maxWidth: 240,
+    marginBottom: 8,
+  },
+  heroSubtitle: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 13,
+    lineHeight: 19,
+    maxWidth: 290,
+  },
   petCard: {
     marginHorizontal: 16,
     marginBottom: 16,
