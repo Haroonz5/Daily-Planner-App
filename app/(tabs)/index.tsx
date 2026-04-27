@@ -1,12 +1,12 @@
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { signOut } from "firebase/auth";
 import {
   collection,
   deleteDoc,
   doc,
   onSnapshot,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,6 +23,7 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
+import { PetSprite } from "@/components/pet-sprite";
 import {
   PET_TIERS,
   getActivePet,
@@ -34,7 +35,17 @@ import {
 import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
+  formatDateKey,
+  getBehaviorCallout,
+  getTimeBucket,
+  parseTimeToMinutes,
+  recurrenceLabels,
+  sortTasksBySchedule,
+  type RecurrenceRule,
+} from "../../utils/task-helpers";
+import {
   cancelTaskNotifications,
+  syncMorningSummaryNotification,
   syncTaskNotifications,
 } from "../../utils/notifications";
 import { auth, db } from "../../constants/firebaseConfig";
@@ -57,7 +68,11 @@ type Task = {
   lastActionAt?: Date | string | null;
   rescheduledCount?: number;
   originalTime?: string;
+  recurrence?: RecurrenceRule;
+  recurrenceGroupId?: string | null;
 };
+
+type EditScope = "single" | "future";
 
 const priorityColors: Record<Priority, string> = {
   Low: "#8dcf9f",
@@ -99,32 +114,6 @@ const { width: screenWidth } = Dimensions.get("window");
 const roundUpToInterval = (value: number, interval: number) =>
   Math.ceil(value / interval) * interval;
 
-const parseTimeToMinutes = (time: string) => {
-  const parts = time.split(" ");
-  if (parts.length !== 2) return null;
-
-  const [timePart, period] = parts;
-  const [hoursStr, minutesStr] = timePart.split(":");
-  const hours = parseInt(hoursStr, 10);
-  const minutes = parseInt(minutesStr, 10);
-
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-
-  let normalizedHours = hours;
-  if (period === "PM" && hours !== 12) normalizedHours += 12;
-  if (period === "AM" && hours === 12) normalizedHours = 0;
-
-  return normalizedHours * 60 + minutes;
-};
-
-const getTimeBucket = (minutes: number | null): TimeBucket => {
-  if (minutes === null) return "morning";
-  if (minutes < 9 * 60) return "early";
-  if (minutes < 12 * 60) return "morning";
-  if (minutes < 17 * 60) return "afternoon";
-  return "evening";
-};
-
 const formatMinutesToTime = (minutes: number) => {
   const date = new Date();
   date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
@@ -142,6 +131,7 @@ export default function HomeScreen() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Task | null>(null);
   const [skipCandidate, setSkipCandidate] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editTime, setEditTime] = useState("");
@@ -162,7 +152,7 @@ export default function HomeScreen() {
   const petHydratedRef = useRef(false);
   const previousPetKeyRef = useRef<string | null>(null);
 
-  const getTodayDate = () => new Date().toISOString().split("T")[0];
+  const getTodayDate = () => formatDateKey(new Date());
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -205,13 +195,7 @@ export default function HomeScreen() {
           });
         }
 
-        const sortedTasks = fetched.sort((a, b) => {
-          const timeA = parseTimeToMinutes(a.time) ?? 0;
-          const timeB = parseTimeToMinutes(b.time) ?? 0;
-          return timeA - timeB;
-        });
-
-        setTasks(sortedTasks);
+        setTasks(sortTasksBySchedule(fetched));
         setTasksLoaded(true);
       }
     );
@@ -231,6 +215,7 @@ export default function HomeScreen() {
   const strongestPet = petProgress.currentPet;
   const activePet = getActivePet(totalXp, profile.activePetKey);
   const unlockedPets = getUnlockedPets(totalXp);
+  const behaviorCallout = getBehaviorCallout(tasks, today);
 
   const adaptiveReschedule = useMemo(() => {
     const historyTasks = tasks.filter((task) => task.date < today);
@@ -420,6 +405,99 @@ export default function HomeScreen() {
     }
   }, [tasks, today, dismissedMissedPromptDate, missedTaskPromptVisible]);
 
+  const isRecurringSeriesTask = (task?: Task | null) =>
+    !!task?.recurrenceGroupId &&
+    !!task?.recurrence &&
+    task.recurrence !== "none";
+
+  const getSeriesTasksFromTask = (
+    task: Task,
+    options?: { includeCurrent?: boolean }
+  ) => {
+    if (!task.recurrenceGroupId) return [task];
+
+    const includeCurrent = options?.includeCurrent ?? true;
+
+    return tasks
+      .filter((candidate) => {
+        if (candidate.recurrenceGroupId !== task.recurrenceGroupId) return false;
+        if (!includeCurrent && candidate.id === task.id) return false;
+        return candidate.date >= task.date;
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+      });
+  };
+
+  const deleteSingleTask = async (task: Task) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    await cancelTaskNotifications(task.id);
+    await deleteDoc(doc(db, "users", uid, "tasks", task.id));
+    await syncMorningSummaryNotification(uid);
+  };
+
+  const deleteTaskAndFutureRepeats = async (task: Task) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const targets = getSeriesTasksFromTask(task);
+    const batch = writeBatch(db);
+
+    await Promise.all(targets.map((candidate) => cancelTaskNotifications(candidate.id)));
+
+    targets.forEach((candidate) => {
+      batch.delete(doc(db, "users", uid, "tasks", candidate.id));
+    });
+
+    await batch.commit();
+    await syncMorningSummaryNotification(uid);
+    setDeleteCandidate(null);
+  };
+
+  const endRecurringSeries = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !editingTask || !isRecurringSeriesTask(editingTask)) return;
+
+    const futureRepeats = getSeriesTasksFromTask(editingTask, {
+      includeCurrent: false,
+    });
+    const batch = writeBatch(db);
+
+    batch.update(doc(db, "users", uid, "tasks", editingTask.id), {
+      recurrence: "none",
+      recurrenceGroupId: null,
+      lastActionAt: new Date(),
+    });
+
+    await Promise.all(
+      futureRepeats.map((candidate) => cancelTaskNotifications(candidate.id))
+    );
+
+    futureRepeats.forEach((candidate) => {
+      batch.delete(doc(db, "users", uid, "tasks", candidate.id));
+    });
+
+    await batch.commit();
+
+    if ((editingTask.status ?? "pending") !== "skipped" && !editingTask.completed) {
+      await syncTaskNotifications({
+        id: editingTask.id,
+        title: editingTask.title,
+        time: editingTask.time,
+        date: editingTask.date,
+        priority: editingTask.priority,
+        completed: false,
+        status: "pending",
+      });
+    }
+
+    await syncMorningSummaryNotification(uid);
+    closeEditModal();
+  };
+
   const toggleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -468,16 +546,13 @@ export default function HomeScreen() {
     setSkipCandidate(null);
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
+  const handleDelete = async (task: Task) => {
+    if (isRecurringSeriesTask(task)) {
+      setDeleteCandidate(task);
+      return;
+    }
 
-  const handleDelete = async (taskId: string) => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-
-    await cancelTaskNotifications(taskId);
-    await deleteDoc(doc(db, "users", uid, "tasks", taskId));
+    await deleteSingleTask(task);
   };
 
   const handleSetActivePet = async (pet: PetTier) => {
@@ -502,32 +577,79 @@ export default function HomeScreen() {
     setEditPriority("Medium");
   };
 
-  const saveTaskEdits = async () => {
+  const saveTaskEdits = async (scope: EditScope = "single") => {
     const uid = auth.currentUser?.uid;
     if (!uid || !editingTask || !editTitle.trim() || !editTime.trim()) return;
 
-    await updateDoc(doc(db, "users", uid, "tasks", editingTask.id), {
-      title: editTitle.trim(),
-      time: editTime.trim(),
-      notes: editNotes.trim(),
-      priority: editPriority,
-      lastActionAt: new Date(),
-    });
+    const nextTitle = editTitle.trim();
+    const nextTime = editTime.trim();
+    const nextNotes = editNotes.trim();
+    const nextOriginalTime =
+      (editingTask.status ?? "pending") === "pending" && !editingTask.completed
+        ? nextTime
+        : editingTask.originalTime ?? editingTask.time;
 
-    if ((editingTask.status ?? "pending") !== "skipped" && !editingTask.completed) {
-      await syncTaskNotifications({
-        id: editingTask.id,
-        title: editTitle.trim(),
-        time: editTime.trim(),
-        date: editingTask.date,
-        priority: editPriority,
-        completed: false,
-        status: "pending",
+    if (scope === "future" && isRecurringSeriesTask(editingTask)) {
+      const targets = getSeriesTasksFromTask(editingTask);
+      const batch = writeBatch(db);
+
+      targets.forEach((task) => {
+        batch.update(doc(db, "users", uid, "tasks", task.id), {
+          title: nextTitle,
+          time: nextTime,
+          notes: nextNotes,
+          priority: editPriority,
+          originalTime:
+            (task.status ?? "pending") === "pending" && !task.completed
+              ? nextTime
+              : task.originalTime ?? task.time,
+          lastActionAt: new Date(),
+        });
       });
+
+      await batch.commit();
+
+      await Promise.all(
+        targets.map((task) =>
+          (task.status ?? "pending") !== "skipped" && !task.completed
+            ? syncTaskNotifications({
+                id: task.id,
+                title: nextTitle,
+                time: nextTime,
+                date: task.date,
+                priority: editPriority,
+                completed: false,
+                status: "pending",
+              })
+            : cancelTaskNotifications(task.id)
+        )
+      );
     } else {
-      await cancelTaskNotifications(editingTask.id);
+      await updateDoc(doc(db, "users", uid, "tasks", editingTask.id), {
+        title: nextTitle,
+        time: nextTime,
+        notes: nextNotes,
+        priority: editPriority,
+        originalTime: nextOriginalTime,
+        lastActionAt: new Date(),
+      });
+
+      if ((editingTask.status ?? "pending") !== "skipped" && !editingTask.completed) {
+        await syncTaskNotifications({
+          id: editingTask.id,
+          title: nextTitle,
+          time: nextTime,
+          date: editingTask.date,
+          priority: editPriority,
+          completed: false,
+          status: "pending",
+        });
+      } else {
+        await cancelTaskNotifications(editingTask.id);
+      }
     }
 
+    await syncMorningSummaryNotification(uid);
     closeEditModal();
   };
 
@@ -651,10 +773,10 @@ export default function HomeScreen() {
     );
   };
 
-  const renderRightActions = (taskId: string) => (
+  const renderRightActions = (task: Task) => (
     <TouchableOpacity
       style={[styles.swipeDelete, { backgroundColor: colors.danger }]}
-      onPress={() => handleDelete(taskId)}
+      onPress={() => handleDelete(task)}
     >
       <Text style={styles.swipeDeleteText}>Delete</Text>
     </TouchableOpacity>
@@ -666,7 +788,7 @@ export default function HomeScreen() {
     return (
       <Swipeable
         key={item.id}
-        renderRightActions={() => renderRightActions(item.id)}
+        renderRightActions={() => renderRightActions(item)}
         overshootRight={false}
       >
         <View
@@ -737,6 +859,12 @@ export default function HomeScreen() {
               {isCurrentTask(item) && !showDate && !isSkipped ? " · Now" : ""}
               {isSkipped && !showDate ? " · Skipped" : ""}
             </Text>
+
+            {item.recurrence && item.recurrence !== "none" && (
+              <Text style={[styles.taskRecurrence, { color: colors.subtle }]}>
+                Repeats {recurrenceLabels[item.recurrence].toLowerCase()}
+              </Text>
+            )}
 
             {renderPriority(item.priority)}
 
@@ -816,11 +944,11 @@ export default function HomeScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={handleLogout}
+                onPress={() => router.push("/settings")}
                 style={[styles.iconButton, { backgroundColor: colors.surface }]}
               >
                 <Text style={[styles.iconButtonText, { color: colors.subtle }]}>
-                  Log Out
+                  Settings
                 </Text>
               </TouchableOpacity>
             </View>
@@ -838,7 +966,11 @@ export default function HomeScreen() {
           >
             <View style={styles.petCardHeader}>
               <View style={styles.petHero}>
-                <Text style={styles.petEmoji}>{activePet.emoji}</Text>
+                <PetSprite
+                  petKey={activePet.key}
+                  size={72}
+                  style={styles.petSprite}
+                />
 
                 <View style={styles.petCopy}>
                   <Text style={[styles.petEyebrow, { color: colors.subtle }]}>
@@ -870,8 +1002,8 @@ export default function HomeScreen() {
 
             <Text style={[styles.petProgressText, { color: colors.subtle }]}>
               {petProgress.nextPet
-                ? `Collection progress: ${petProgress.remainingXp} XP until ${petProgress.nextPet.emoji} ${petProgress.nextPet.name}`
-                : `Collection complete. ${strongestPet.emoji} ${strongestPet.name} is fully unlocked.`}
+                ? `Collection progress: ${petProgress.remainingXp} XP until ${petProgress.nextPet.name}`
+                : `Collection complete. ${strongestPet.name} is fully unlocked.`}
             </Text>
 
             <View
@@ -910,8 +1042,43 @@ export default function HomeScreen() {
                   Collection
                 </Text>
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.petCollectionButton,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                    marginLeft: 8,
+                  },
+                ]}
+                onPress={() => router.push("/focus")}
+              >
+                <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
+                  Focus
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
+
+          {behaviorCallout && (
+            <View
+              style={[
+                styles.calloutCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.calloutTitle, { color: colors.text }]}>
+                {behaviorCallout.title}
+              </Text>
+              <Text style={[styles.calloutBody, { color: colors.subtle }]}>
+                {behaviorCallout.body}
+              </Text>
+            </View>
+          )}
 
           {todayTasks.length > 0 && (
             <View style={styles.progressSection}>
@@ -1091,7 +1258,11 @@ export default function HomeScreen() {
                     ]}
                     onPress={() => handleSetActivePet(pet)}
                   >
-                    <Text style={styles.collectionEmoji}>{pet.emoji}</Text>
+                    <PetSprite
+                      petKey={pet.key}
+                      size={52}
+                      style={styles.collectionSprite}
+                    />
 
                     <View style={styles.collectionCopy}>
                       <Text style={[styles.collectionName, { color: colors.text }]}>
@@ -1124,35 +1295,35 @@ export default function HomeScreen() {
                     Still Locked
                   </Text>
 
-                  {[
-                    { emoji: "🫥", label: petProgress.nextPet?.name, xp: petProgress.nextPet?.unlockXp },
-                  ]
-                    .filter((item) => item.label && item.xp)
-                    .map((item) => (
-                      <View
-                        key={item.label}
-                        style={[
-                          styles.collectionItem,
-                          styles.collectionLocked,
-                          {
-                            backgroundColor: colors.background,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={styles.collectionEmoji}>{item.emoji}</Text>
-                        <View style={styles.collectionCopy}>
-                          <Text style={[styles.collectionName, { color: colors.text }]}>
-                            {item.label}
-                          </Text>
-                          <Text
-                            style={[styles.collectionDescription, { color: colors.subtle }]}
-                          >
-                            Unlocks at {item.xp} XP
-                          </Text>
-                        </View>
+                  {petProgress.nextPet && (
+                    <View
+                      style={[
+                        styles.collectionItem,
+                        styles.collectionLocked,
+                        {
+                          backgroundColor: colors.background,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <PetSprite
+                        petKey={petProgress.nextPet.key}
+                        size={52}
+                        muted
+                        style={styles.collectionSprite}
+                      />
+                      <View style={styles.collectionCopy}>
+                        <Text style={[styles.collectionName, { color: colors.text }]}>
+                          {petProgress.nextPet.name}
+                        </Text>
+                        <Text
+                          style={[styles.collectionDescription, { color: colors.subtle }]}
+                        >
+                          Unlocks at {petProgress.nextPet.unlockXp} XP
+                        </Text>
                       </View>
-                    ))}
+                    </View>
+                  )}
                 </View>
               )}
             </ScrollView>
@@ -1183,7 +1354,13 @@ export default function HomeScreen() {
             <Text style={[styles.rewardTag, { color: colors.tint }]}>
               New Companion Unlocked
             </Text>
-            <Text style={styles.rewardEmoji}>{unlockedPet?.emoji}</Text>
+            {unlockedPet ? (
+              <PetSprite
+                petKey={unlockedPet.key}
+                size={92}
+                style={styles.rewardSprite}
+              />
+            ) : null}
             <Text style={[styles.rewardTitle, { color: colors.text }]}>
               {unlockedPet?.name}
             </Text>
@@ -1290,6 +1467,26 @@ export default function HomeScreen() {
               ))}
             </View>
 
+            {isRecurringSeriesTask(editingTask) && (
+              <View
+                style={[
+                  styles.seriesInfoCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.seriesInfoTitle, { color: colors.text }]}>
+                  Recurring Series
+                </Text>
+                <Text style={[styles.seriesInfoBody, { color: colors.subtle }]}>
+                  Choose whether your changes should affect only this task or this
+                  task and all future repeats.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[
@@ -1310,11 +1507,119 @@ export default function HomeScreen() {
 
               <TouchableOpacity
                 style={[styles.primaryButton, { backgroundColor: colors.tint }]}
-                onPress={saveTaskEdits}
+                onPress={() =>
+                  saveTaskEdits(
+                    isRecurringSeriesTask(editingTask) ? "single" : "single"
+                  )
+                }
               >
-                <Text style={styles.primaryButtonText}>Save</Text>
+                <Text style={styles.primaryButtonText}>
+                  {isRecurringSeriesTask(editingTask) ? "Save Only This" : "Save"}
+                </Text>
               </TouchableOpacity>
             </View>
+
+            {isRecurringSeriesTask(editingTask) && (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.fullWidthPrimaryButton,
+                    { backgroundColor: colors.tint },
+                  ]}
+                  onPress={() => saveTaskEdits("future")}
+                >
+                  <Text style={styles.primaryButtonText}>Save This And Future</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.fullWidthOutlineButton,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.warning,
+                    },
+                  ]}
+                  onPress={endRecurringSeries}
+                >
+                  <Text
+                    style={[
+                      styles.fullWidthOutlineText,
+                      { color: colors.warning },
+                    ]}
+                  >
+                    End Future Repeats
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!deleteCandidate}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setDeleteCandidate(null)}
+      >
+        <View style={styles.centerModalBackdrop}>
+          <View style={[styles.collectionCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Delete Recurring Task
+            </Text>
+            <Text style={[styles.collectionSubtitle, { color: colors.subtle }]}>
+              This task belongs to a recurring series. Keep your history safe by
+              deleting just this one, or remove this task and all future repeats.
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.fullWidthOutlineButton,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={async () => {
+                if (!deleteCandidate) return;
+                await deleteSingleTask(deleteCandidate);
+                setDeleteCandidate(null);
+              }}
+            >
+              <Text
+                style={[
+                  styles.fullWidthOutlineText,
+                  { color: colors.text },
+                ]}
+              >
+                Delete Only This Task
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.fullWidthPrimaryButton,
+                { backgroundColor: colors.danger },
+              ]}
+              onPress={async () => {
+                if (!deleteCandidate) return;
+                await deleteTaskAndFutureRepeats(deleteCandidate);
+              }}
+            >
+              <Text style={styles.primaryButtonText}>Delete This And Future</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: colors.surface, marginTop: 12, marginRight: 0 },
+              ]}
+              onPress={() => setDeleteCandidate(null)}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.subtle }]}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1550,6 +1855,9 @@ const styles = StyleSheet.create({
     fontSize: 42,
     marginRight: 14,
   },
+  petSprite: {
+    marginRight: 14,
+  },
   petCopy: {
     flex: 1,
   },
@@ -1660,6 +1968,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  calloutCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 15,
+    borderWidth: 1,
+  },
+  calloutTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  calloutBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
   missedBanner: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -1713,6 +2037,7 @@ const styles = StyleSheet.create({
   taskTitle: { fontSize: 16, fontWeight: "500" },
   strikethrough: { textDecorationLine: "line-through" },
   taskTime: { fontSize: 13, marginTop: 2 },
+  taskRecurrence: { fontSize: 12, marginTop: 4 },
   priorityRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1831,6 +2156,9 @@ const styles = StyleSheet.create({
     fontSize: 32,
     marginRight: 12,
   },
+  collectionSprite: {
+    marginRight: 12,
+  },
   collectionCopy: {
     flex: 1,
     paddingRight: 10,
@@ -1878,6 +2206,9 @@ const styles = StyleSheet.create({
     fontSize: 64,
     marginBottom: 12,
   },
+  rewardSprite: {
+    marginBottom: 12,
+  },
   rewardTitle: {
     fontSize: 28,
     fontWeight: "700",
@@ -1900,6 +2231,21 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     padding: 24,
     paddingBottom: 32,
+  },
+  seriesInfoCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  seriesInfoTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  seriesInfoBody: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   themeCard: {
     margin: 20,
@@ -1973,8 +2319,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginLeft: 6,
   },
+  fullWidthPrimaryButton: {
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+    marginTop: 12,
+  },
   primaryButtonText: {
     color: "#fff",
+    fontWeight: "700",
+  },
+  fullWidthOutlineButton: {
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+    borderWidth: 1,
+    marginTop: 12,
+  },
+  fullWidthOutlineText: {
+    fontSize: 14,
     fontWeight: "700",
   },
   themeOption: {

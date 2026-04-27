@@ -1,5 +1,13 @@
 export type Priority = "Low" | "Medium" | "High";
 export type TaskStatus = "pending" | "completed" | "skipped";
+export type PetKey =
+  | "rabbit"
+  | "cat"
+  | "fox"
+  | "wolf"
+  | "tiger"
+  | "eagle"
+  | "dragon";
 
 export type RewardTask = {
   completed: boolean;
@@ -13,7 +21,7 @@ export type RewardTask = {
 };
 
 export type PetTier = {
-  key: string;
+  key: PetKey;
   name: string;
   emoji: string;
   unlockXp: number;

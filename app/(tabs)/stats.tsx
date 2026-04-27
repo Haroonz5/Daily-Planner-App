@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
+import { PetSprite } from "@/components/pet-sprite";
 import {
   getActivePet,
   getDisciplineLabel,
@@ -349,7 +350,7 @@ export default function StatsScreen() {
         ]}
       >
         <View style={styles.petHero}>
-          <Text style={styles.petEmoji}>{stats.activePet.emoji}</Text>
+          <PetSprite petKey={stats.activePet.key} size={72} style={styles.petSprite} />
           <View style={styles.petCopy}>
             <Text style={[styles.petName, { color: colors.text }]}>
               {stats.activePet.name}
@@ -359,7 +360,7 @@ export default function StatsScreen() {
             </Text>
             <Text style={[styles.petProgressText, { color: colors.subtle }]}>
               {stats.petProgress.nextPet
-                ? `Collection progress: ${stats.petProgress.remainingXp} XP until ${stats.petProgress.nextPet.emoji} ${stats.petProgress.nextPet.name}`
+                ? `Collection progress: ${stats.petProgress.remainingXp} XP until ${stats.petProgress.nextPet.name}`
                 : "Collection complete. Final companion unlocked"}
             </Text>
           </View>
@@ -720,6 +721,9 @@ const styles = StyleSheet.create({
   },
   petEmoji: {
     fontSize: 54,
+    marginRight: 16,
+  },
+  petSprite: {
     marginRight: 16,
   },
   petCopy: {

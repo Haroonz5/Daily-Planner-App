@@ -1,8 +1,14 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { addDoc, collection, onSnapshot } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  writeBatch,
+} from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,14 +21,24 @@ import {
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
+  buildRecurringDates,
+  formatDateKey,
+  formatTimeFromDate,
+  getRelativeDateLabel,
+  getTimeBucket,
+  parseTimeToMinutes,
+  recurrenceLabels,
+  sortTasksBySchedule,
+  type RecurrenceRule,
+  type TaskPriority,
+  type TaskStatus,
+  type TimeBucket,
+} from "../../utils/task-helpers";
+import {
   syncMorningSummaryNotification,
   syncTaskNotifications,
 } from "../../utils/notifications";
 import { auth, db } from "../../constants/firebaseConfig";
-
-type Priority = "Low" | "Medium" | "High";
-type TaskStatus = "pending" | "completed" | "skipped";
-type TimeBucket = "early" | "morning" | "afternoon" | "evening";
 
 type Task = {
   id: string;
@@ -30,14 +46,15 @@ type Task = {
   time: string;
   date: string;
   completed: boolean;
-  priority?: Priority;
+  priority?: TaskPriority;
   notes?: string;
   status?: TaskStatus;
   rescheduledCount?: number;
   originalTime?: string;
+  recurrence?: RecurrenceRule;
 };
 
-const priorityColors: Record<Priority, string> = {
+const priorityColors: Record<TaskPriority, string> = {
   Low: "#8dcf9f",
   Medium: "#f2b97f",
   High: "#e58ca8",
@@ -57,36 +74,11 @@ const bucketSuggestedTimes: Record<TimeBucket, string> = {
   evening: "6:30 PM",
 };
 
-const getTomorrowDate = () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow.toISOString().split("T")[0];
-};
-
-const parseTimeToMinutes = (time: string) => {
-  const parts = time.split(" ");
-  if (parts.length !== 2) return null;
-
-  const [timePart, period] = parts;
-  const [hoursStr, minutesStr] = timePart.split(":");
-  const hours = parseInt(hoursStr, 10);
-  const minutes = parseInt(minutesStr, 10);
-
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
-
-  let normalizedHours = hours;
-  if (period === "PM" && hours !== 12) normalizedHours += 12;
-  if (period === "AM" && hours === 12) normalizedHours = 0;
-
-  return normalizedHours * 60 + minutes;
-};
-
-const getTimeBucket = (minutes: number | null): TimeBucket => {
-  if (minutes === null) return "morning";
-  if (minutes < 9 * 60) return "early";
-  if (minutes < 12 * 60) return "morning";
-  if (minutes < 17 * 60) return "afternoon";
-  return "evening";
+const getDefaultFutureDate = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 2);
+  date.setHours(12, 0, 0, 0);
+  return date;
 };
 
 export default function AddTask() {
@@ -96,46 +88,70 @@ export default function AddTask() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [priority, setPriority] = useState<Priority>("Medium");
+  const [priority, setPriority] = useState<TaskPriority>("Medium");
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [time, setTime] = useState(new Date());
-  const [showPicker, setShowPicker] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [futureScheduleVisible, setFutureScheduleVisible] = useState(false);
+  const [futureDraftDate, setFutureDraftDate] = useState(getDefaultFutureDate());
+  const [futureDraftTime, setFutureDraftTime] = useState(new Date());
+  const [showFutureDatePicker, setShowFutureDatePicker] = useState(false);
+  const [showFutureTimePicker, setShowFutureTimePicker] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const unsubscribe = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
-      const fetched = snap.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Task[];
+    const unsubscribe = onSnapshot(
+      collection(db, "users", uid, "tasks"),
+      (snap) => {
+        const fetched = snap.docs.map((document) => ({
+          id: document.id,
+          ...document.data(),
+        })) as Task[];
 
-      setTasks(fetched);
-    });
+        setTasks(sortTasksBySchedule(fetched));
+      }
+    );
 
     return unsubscribe;
   }, []);
 
-  const planningInsights = useMemo(() => {
-    const tomorrowDate = getTomorrowDate();
-    const tomorrowTasks = tasks.filter((task) => task.date === tomorrowDate);
-    const historyTasks = tasks.filter((task) => task.date < tomorrowDate);
+  const selectedDateKey = formatDateKey(selectedDate);
+  const selectedDateLabel = getRelativeDateLabel(selectedDateKey);
+  const formattedTime = formatTimeFromDate(time);
+  const recurringDates = buildRecurringDates(selectedDateKey, recurrence);
+  const todayKey = formatDateKey(new Date());
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowKey = formatDateKey(tomorrowDate);
+  const minimumFutureDate = getDefaultFutureDate();
+  minimumFutureDate.setHours(0, 0, 0, 0);
+  const isCustomFutureDate =
+    selectedDateKey !== todayKey && selectedDateKey !== tomorrowKey;
+  const futureChipLabel = isCustomFutureDate
+    ? selectedDateLabel
+    : "Pick Future Day";
+  const futureDraftDateKey = formatDateKey(futureDraftDate);
+  const futureDraftLabel = getRelativeDateLabel(futureDraftDateKey);
+  const futureDraftTimeLabel = formatTimeFromDate(futureDraftTime);
 
-    const selectedTime = time.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const selectedMinutes = parseTimeToMinutes(selectedTime);
+  const planningInsights = useMemo(() => {
+    const selectedDayTasks = tasks.filter((task) => task.date === selectedDateKey);
+    const historyTasks = tasks.filter((task) => task.date < selectedDateKey);
+
+    const selectedMinutes = parseTimeToMinutes(formattedTime);
     const selectedBucket = getTimeBucket(selectedMinutes);
 
-    const projectedTaskCount = tomorrowTasks.length + (title.trim() ? 1 : 0);
+    const projectedTaskCount = selectedDayTasks.length + (title.trim() ? 1 : 0);
     const projectedHighPriorityCount =
-      tomorrowTasks.filter((task) => task.priority === "High").length +
+      selectedDayTasks.filter((task) => task.priority === "High").length +
       (title.trim() && priority === "High" ? 1 : 0);
 
-    const closeTasks = tomorrowTasks.filter((task) => {
+    const closeTasks = selectedDayTasks.filter((task) => {
       const existing = parseTimeToMinutes(task.time);
       if (existing === null || selectedMinutes === null) return false;
       return Math.abs(existing - selectedMinutes) <= 45;
@@ -145,19 +161,29 @@ export default function AddTask() {
 
     if (projectedTaskCount >= 8) {
       warnings.push(
-        `Tomorrow already has ${projectedTaskCount} tasks planned. That may be too much to execute cleanly.`
+        `${selectedDateLabel} already has ${projectedTaskCount} tasks planned. That may be too much to execute cleanly.`
       );
     }
 
     if (projectedHighPriorityCount >= 4) {
       warnings.push(
-        `You already have ${projectedHighPriorityCount} high-priority tasks planned. That may be unrealistic for one day.`
+        `${selectedDateLabel} already has ${projectedHighPriorityCount} high-priority tasks. That may be unrealistic for one day.`
       );
     }
 
     if (closeTasks.length >= 2) {
       warnings.push(
         "This time slot is getting crowded. Give yourself more breathing room between tasks."
+      );
+    }
+
+    if (
+      selectedDateKey === formatDateKey(new Date()) &&
+      selectedMinutes !== null &&
+      selectedMinutes < new Date().getHours() * 60 + new Date().getMinutes()
+    ) {
+      warnings.push(
+        "That time has already passed today. The task will still be created, but it won't feel like a fresh start."
       );
     }
 
@@ -177,7 +203,10 @@ export default function AddTask() {
 
       bucketStats[bucket].total += 1;
       if (task.completed) bucketStats[bucket].completed += 1;
-      if ((task.status ?? "pending") === "skipped" || (task.rescheduledCount ?? 0) > 0) {
+      if (
+        (task.status ?? "pending") === "skipped" ||
+        (task.rescheduledCount ?? 0) > 0
+      ) {
         bucketStats[bucket].friction += 1;
       }
     });
@@ -227,13 +256,38 @@ export default function AddTask() {
     }
 
     return { warnings, suggestion };
-  }, [notes, priority, tasks, time, title]);
+  }, [formattedTime, priority, selectedDateKey, selectedDateLabel, tasks, title]);
 
   const resetForm = () => {
     setTitle("");
     setNotes("");
     setPriority("Medium");
+    setRecurrence("none");
+    setSelectedDate(new Date());
     setTime(new Date());
+    setFutureDraftDate(getDefaultFutureDate());
+    setFutureDraftTime(new Date());
+  };
+
+  const openFutureScheduler = () => {
+    const baseFutureDate =
+      isCustomFutureDate && selectedDate >= minimumFutureDate
+        ? new Date(selectedDate)
+        : getDefaultFutureDate();
+
+    setFutureDraftDate(baseFutureDate);
+    setFutureDraftTime(new Date(time));
+    setShowFutureDatePicker(false);
+    setShowFutureTimePicker(false);
+    setFutureScheduleVisible(true);
+  };
+
+  const applyFutureSchedule = () => {
+    setSelectedDate(new Date(futureDraftDate));
+    setTime(new Date(futureDraftTime));
+    setFutureScheduleVisible(false);
+    setShowFutureDatePicker(false);
+    setShowFutureTimePicker(false);
   };
 
   const handleAddTask = async () => {
@@ -249,44 +303,70 @@ export default function AddTask() {
         return;
       }
 
-      const formattedTime = time.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      const tomorrowDate = getTomorrowDate();
+      const batch = writeBatch(db);
+      const recurrenceGroupId =
+        recurrence === "none" ? null : `${uid}-${Date.now()}`;
+      const createdTasks: {
+        id: string;
+        title: string;
+        time: string;
+        date: string;
+        priority: TaskPriority;
+      }[] = [];
 
-      const docRef = await addDoc(collection(db, "users", uid, "tasks"), {
-        title: title.trim(),
-        notes: notes.trim(),
-        priority,
-        time: formattedTime,
-        date: tomorrowDate,
-        completed: false,
-        status: "pending",
-        createdAt: new Date(),
-        completedAt: null,
-        skippedAt: null,
-        lastActionAt: new Date(),
-        rescheduledCount: 0,
-        originalTime: formattedTime,
+      recurringDates.forEach((dateKey) => {
+        const taskRef = doc(collection(db, "users", uid, "tasks"));
+        batch.set(taskRef, {
+          title: title.trim(),
+          notes: notes.trim(),
+          priority,
+          time: formattedTime,
+          date: dateKey,
+          completed: false,
+          status: "pending",
+          createdAt: new Date(),
+          completedAt: null,
+          skippedAt: null,
+          lastActionAt: new Date(),
+          rescheduledCount: 0,
+          originalTime: formattedTime,
+          recurrence,
+          recurrenceGroupId,
+        });
+
+        createdTasks.push({
+          id: taskRef.id,
+          title: title.trim(),
+          time: formattedTime,
+          date: dateKey,
+          priority,
+        });
       });
 
-      await syncTaskNotifications({
-        id: docRef.id,
-        title: title.trim(),
-        time: formattedTime,
-        date: tomorrowDate,
-        priority,
-        completed: false,
-        status: "pending",
-      });
+      await batch.commit();
+
+      await Promise.all(
+        createdTasks.map((task) =>
+          syncTaskNotifications({
+            ...task,
+            completed: false,
+            status: "pending",
+          })
+        )
+      );
 
       await syncMorningSummaryNotification(uid);
 
       resetForm();
-      setSuccess(true);
       setError("");
-      setTimeout(() => setSuccess(false), 2200);
+
+      const success =
+        recurrence === "none"
+          ? `Task scheduled for ${selectedDateLabel}.`
+          : `${createdTasks.length} ${recurrenceLabels[recurrence].toLowerCase()} tasks scheduled starting ${selectedDateLabel}.`;
+
+      setSuccessMessage(success);
+      setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
       setError(e.message ?? "Something went wrong while adding the task.");
     }
@@ -300,9 +380,9 @@ export default function AddTask() {
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.emoji}>📝</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Plan Tomorrow</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Plan Your Tasks</Text>
           <Text style={[styles.subtitle, { color: colors.subtle }]}>
-            What do you want to get done?
+            Add something for later today, tomorrow, or weeks ahead.
           </Text>
         </View>
 
@@ -338,10 +418,72 @@ export default function AddTask() {
           multiline
         />
 
-        <View style={styles.prioritySection}>
+        <View style={styles.section}>
+          <Text style={[styles.sectionLabel, { color: colors.subtle }]}>
+            Target Day
+          </Text>
+          <View style={styles.chipRow}>
+            {[0, 1].map((offset) => {
+              const date = new Date();
+              date.setDate(date.getDate() + offset);
+              const dateKey = formatDateKey(date);
+              const selected = dateKey === selectedDateKey;
+
+              return (
+                <TouchableOpacity
+                  key={dateKey}
+                  style={[
+                    styles.infoChip,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                    selected && {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.tint,
+                    },
+                  ]}
+                  onPress={() => setSelectedDate(date)}
+                >
+                  <Text style={[styles.infoChipText, { color: colors.text }]}>
+                    {offset === 0 ? "Today" : "Tomorrow"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={[
+                styles.infoChip,
+                styles.longChip,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+                isCustomFutureDate && {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.tint,
+                },
+              ]}
+              onPress={openFutureScheduler}
+            >
+              <Text style={[styles.infoChipText, { color: colors.text }]}>
+                {futureChipLabel}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {isCustomFutureDate && (
+            <Text style={[styles.selectionHint, { color: colors.subtle }]}>
+              Future task locked for {selectedDateLabel} at {formattedTime}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: colors.subtle }]}>Priority</Text>
           <View style={styles.priorityRow}>
-            {(["Low", "Medium", "High"] as Priority[]).map((item) => (
+            {(["Low", "Medium", "High"] as TaskPriority[]).map((item) => (
               <TouchableOpacity
                 key={item}
                 style={[
@@ -379,27 +521,186 @@ export default function AddTask() {
               borderColor: colors.border,
             },
           ]}
-          onPress={() => setShowPicker(true)}
+          onPress={() => setShowTimePicker(true)}
         >
           <Text style={[styles.timeText, { color: colors.text }]}>
-            ⏰{" "}
-            {time.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            ⏰ {formattedTime}
           </Text>
         </TouchableOpacity>
 
-        {showPicker && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionLabel, { color: colors.subtle }]}>
+            Repeat
+          </Text>
+          <View style={styles.recurrenceWrap}>
+            {(["none", "daily", "weekdays", "weekly"] as RecurrenceRule[]).map(
+              (rule) => (
+                <TouchableOpacity
+                  key={rule}
+                  style={[
+                    styles.infoChip,
+                    styles.recurrenceChip,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                    recurrence === rule && {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.tint,
+                    },
+                  ]}
+                  onPress={() => setRecurrence(rule)}
+                >
+                  <Text style={[styles.infoChipText, { color: colors.text }]}>
+                    {recurrenceLabels[rule]}
+                  </Text>
+                </TouchableOpacity>
+              )
+            )}
+          </View>
+        </View>
+
+        {showTimePicker && (
           <DateTimePicker
             value={time}
             mode="time"
             is24Hour={false}
-            onChange={(event, selected) => {
-              setShowPicker(Platform.OS === "ios");
+            onChange={(_, selected) => {
+              setShowTimePicker(Platform.OS === "ios");
               if (selected) setTime(selected);
             }}
           />
+        )}
+
+        <Modal
+          visible={futureScheduleVisible}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setFutureScheduleVisible(false)}
+        >
+          <View style={styles.centerModalBackdrop}>
+            <View style={[styles.futureModalCard, { backgroundColor: colors.card }]}>
+              <Text style={[styles.futureModalTitle, { color: colors.text }]}>
+                Schedule for Later
+              </Text>
+              <Text style={[styles.futureModalBody, { color: colors.subtle }]}>
+                Pick the exact future day and due time for this task.
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.futureSelector,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setShowFutureTimePicker(false);
+                  setShowFutureDatePicker(true);
+                }}
+              >
+                <Text style={[styles.futureSelectorLabel, { color: colors.subtle }]}>
+                  Future day
+                </Text>
+                <Text style={[styles.futureSelectorValue, { color: colors.text }]}>
+                  {futureDraftLabel}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.futureSelector,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => {
+                  setShowFutureDatePicker(false);
+                  setShowFutureTimePicker(true);
+                }}
+              >
+                <Text style={[styles.futureSelectorLabel, { color: colors.subtle }]}>
+                  Due time
+                </Text>
+                <Text style={[styles.futureSelectorValue, { color: colors.text }]}>
+                  {futureDraftTimeLabel}
+                </Text>
+              </TouchableOpacity>
+
+              {showFutureDatePicker && (
+                <DateTimePicker
+                  value={futureDraftDate}
+                  mode="date"
+                  minimumDate={minimumFutureDate}
+                  onChange={(_, selected) => {
+                    setShowFutureDatePicker(Platform.OS === "ios");
+                    if (selected) setFutureDraftDate(selected);
+                  }}
+                />
+              )}
+
+              {showFutureTimePicker && (
+                <DateTimePicker
+                  value={futureDraftTime}
+                  mode="time"
+                  is24Hour={false}
+                  onChange={(_, selected) => {
+                    setShowFutureTimePicker(Platform.OS === "ios");
+                    if (selected) setFutureDraftTime(selected);
+                  }}
+                />
+              )}
+
+              <View style={styles.futureActionRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.futureActionButton,
+                    styles.futureSecondaryButton,
+                    { backgroundColor: colors.surface },
+                  ]}
+                  onPress={() => {
+                    setFutureScheduleVisible(false);
+                    setShowFutureDatePicker(false);
+                    setShowFutureTimePicker(false);
+                  }}
+                >
+                  <Text
+                    style={[styles.futureSecondaryText, { color: colors.subtle }]}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.futureActionButton,
+                    { backgroundColor: colors.tint },
+                  ]}
+                  onPress={applyFutureSchedule}
+                >
+                  <Text style={styles.futurePrimaryText}>Use This Schedule</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {recurrence !== "none" && (
+          <View
+            style={[
+              styles.insightCard,
+              { backgroundColor: colors.card, borderColor: colors.tint },
+            ]}
+          >
+            <Text style={[styles.insightTitle, { color: colors.text }]}>
+              Recurring Plan
+            </Text>
+            <Text style={[styles.insightText, { color: colors.subtle }]}>
+              This will create {recurringDates.length} {recurrenceLabels[recurrence].toLowerCase()} tasks starting {selectedDateLabel}.
+            </Text>
+          </View>
         )}
 
         {planningInsights.warnings.length > 0 && (
@@ -411,7 +712,7 @@ export default function AddTask() {
             ]}
           >
             <Text style={[styles.insightTitle, { color: colors.text }]}>
-              Reality Check 👀
+              Reality Check
             </Text>
             {planningInsights.warnings.map((warning) => (
               <Text
@@ -432,7 +733,7 @@ export default function AddTask() {
             ]}
           >
             <Text style={[styles.insightTitle, { color: colors.text }]}>
-              Suggested Time 🌤️
+              Suggested Time
             </Text>
             <Text style={[styles.insightText, { color: colors.subtle }]}>
               {planningInsights.suggestion}
@@ -440,10 +741,13 @@ export default function AddTask() {
           </View>
         )}
 
-        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
-        {success ? (
+        {error ? (
+          <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
+        ) : null}
+
+        {successMessage ? (
           <Text style={[styles.success, { color: colors.subtle }]}>
-            Task added and tomorrow’s reminders updated 🌸
+            {successMessage}
           </Text>
         ) : null}
 
@@ -451,7 +755,11 @@ export default function AddTask() {
           style={[styles.button, { backgroundColor: colors.tint }]}
           onPress={handleAddTask}
         >
-          <Text style={styles.buttonText}>Add Task</Text>
+          <Text style={styles.buttonText}>
+            {recurrence === "none"
+              ? `Add Task for ${selectedDateLabel}`
+              : `Create ${recurringDates.length} Tasks`}
+          </Text>
         </TouchableOpacity>
 
         <View style={{ height: 40 }} />
@@ -464,8 +772,14 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { alignItems: "center", paddingTop: 60, paddingBottom: 32 },
   emoji: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 32, fontWeight: "700" },
-  subtitle: { fontSize: 14, marginTop: 6 },
+  title: { fontSize: 32, fontWeight: "700", textAlign: "center" },
+  subtitle: {
+    fontSize: 14,
+    marginTop: 6,
+    textAlign: "center",
+    lineHeight: 21,
+    paddingHorizontal: 30,
+  },
   input: {
     borderWidth: 1,
     borderRadius: 14,
@@ -478,7 +792,7 @@ const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: "top",
   },
-  prioritySection: {
+  section: {
     marginHorizontal: 24,
     marginBottom: 16,
   },
@@ -488,6 +802,30 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textTransform: "uppercase",
     letterSpacing: 0.8,
+  },
+  chipRow: {
+    flexDirection: "row",
+  },
+  infoChip: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginRight: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  longChip: {
+    flex: 1,
+  },
+  infoChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  selectionHint: {
+    fontSize: 12,
+    marginTop: 10,
+    lineHeight: 18,
   },
   priorityRow: {
     flexDirection: "row",
@@ -520,6 +858,74 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   timeText: { fontSize: 15 },
+  centerModalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(26, 19, 32, 0.32)",
+  },
+  futureModalCard: {
+    width: "100%",
+    borderRadius: 24,
+    padding: 20,
+  },
+  futureModalTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  futureModalBody: {
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 16,
+  },
+  futureSelector: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+  },
+  futureSelectorLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  futureSelectorValue: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  futureActionRow: {
+    flexDirection: "row",
+    marginTop: 8,
+  },
+  futureActionButton: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+  futureSecondaryButton: {
+    marginRight: 8,
+  },
+  futureSecondaryText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  futurePrimaryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  recurrenceWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  recurrenceChip: {
+    marginBottom: 8,
+  },
   insightCard: {
     marginHorizontal: 24,
     marginBottom: 16,
@@ -558,5 +964,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 14,
     marginHorizontal: 24,
+    lineHeight: 20,
   },
 });

@@ -79,6 +79,8 @@ export default function RootLayout() {
     const firstSegment = segments[0];
     const inProtectedTabs = firstSegment === "(tabs)";
     const inSummary = firstSegment === "summary";
+    const inFocus = firstSegment === "focus";
+    const inSettings = firstSegment === "settings";
     const inOnboarding = firstSegment === "onboarding";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
 
@@ -92,7 +94,7 @@ export default function RootLayout() {
       return;
     }
 
-    if (!user && (inProtectedTabs || inSummary)) {
+    if (!user && (inProtectedTabs || inSummary || inFocus || inSettings)) {
       router.replace("/login");
       return;
     }
@@ -149,6 +151,8 @@ export default function RootLayout() {
             <Stack.Screen name="login" options={{ headerShown: false }} />
             <Stack.Screen name="signup" options={{ headerShown: false }} />
             <Stack.Screen name="summary" options={{ headerShown: false }} />
+            <Stack.Screen name="focus" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ headerShown: false }} />
           </Stack>
           <StatusBar style={palette.statusBar} />
