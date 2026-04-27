@@ -219,11 +219,13 @@ export default function SummaryScreen() {
           summary.todayTasks.map((task) => {
             const priority = task.priority ?? "Medium";
             const xp = getTaskXp(task);
+            const isSkipped = (task.status ?? "pending") === "skipped";
+            const xpLabel = task.completed ? `+${xp} XP` : isSkipped ? "No XP" : "Pending";
 
             return (
               <View key={task.id} style={styles.taskRow}>
                 <Text style={styles.taskDot}>
-                  {task.completed ? "✅" : (task.status ?? "pending") === "skipped" ? "⏭️" : "❌"}
+                  {task.completed ? "✅" : isSkipped ? "⏭️" : "❌"}
                 </Text>
 
                 <View style={styles.taskInfo}>
@@ -266,16 +268,16 @@ export default function SummaryScreen() {
                     <View
                       style={[
                         styles.xpBadge,
-                        { backgroundColor: xp >= 0 ? colors.surface : "#ffe8f0" },
+                        { backgroundColor: colors.surface },
                       ]}
                     >
                       <Text
                         style={[
                           styles.xpBadgeText,
-                          { color: xp >= 0 ? colors.text : colors.danger },
+                          { color: task.completed ? colors.text : colors.subtle },
                         ]}
                       >
-                        {xp >= 0 ? `+${xp} XP` : `${xp} XP`}
+                        {xpLabel}
                       </Text>
                     </View>
                   </View>

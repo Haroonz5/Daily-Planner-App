@@ -124,31 +124,25 @@ export const scheduledDateTime = (date: string, time: string) => {
 export const getTaskXp = (task: RewardTask) => {
   const priority = task.priority ?? "Medium";
 
-  if (task.completed) {
-    let xp = priorityXp[priority];
+  if (!task.completed) return 0;
 
-    const completedAt = toDateSafe(task.completedAt);
-    const plannedAt = scheduledDateTime(task.date, task.originalTime ?? task.time ?? "");
+  let xp = priorityXp[priority];
 
-    if (completedAt && plannedAt) {
-      const delayMinutes = Math.round(
-        (completedAt.getTime() - plannedAt.getTime()) / 60000
-      );
+  const completedAt = toDateSafe(task.completedAt);
+  const plannedAt = scheduledDateTime(task.date, task.originalTime ?? task.time ?? "");
 
-      if (delayMinutes <= 0) xp += 8;
-      else if (delayMinutes <= 15) xp += 5;
-      else if (delayMinutes <= 60) xp += 2;
-    }
+  if (completedAt && plannedAt) {
+    const delayMinutes = Math.round(
+      (completedAt.getTime() - plannedAt.getTime()) / 60000
+    );
 
-    xp -= Math.min((task.rescheduledCount ?? 0) * 2, 8);
-    return Math.max(5, xp);
+    if (delayMinutes <= 0) xp += 8;
+    else if (delayMinutes <= 15) xp += 5;
+    else if (delayMinutes <= 60) xp += 2;
   }
 
-  if ((task.status ?? "pending") === "skipped") {
-    return -skipPenalty[priority];
-  }
-
-  return 0;
+  xp -= Math.min((task.rescheduledCount ?? 0) * 2, 8);
+  return Math.max(5, xp);
 };
 
 export const getCurrentPet = (xp: number) => {

@@ -23,6 +23,11 @@ import {
 import { Swipeable } from "react-native-gesture-handler";
 
 import { useAppTheme } from "@/constants/appTheme";
+import {
+  getPetProgress,
+  getTaskXp,
+  type PetTier,
+} from "@/constants/rewards";
 import { AppThemeName, Colors } from "@/constants/theme";
 import {
   cancelTaskNotifications,
@@ -147,12 +152,16 @@ export default function HomeScreen() {
   const [themeModalVisible, setThemeModalVisible] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [missedTaskPromptVisible, setMissedTaskPromptVisible] = useState(false);
+  const [unlockedPet, setUnlockedPet] = useState<PetTier | null>(null);
   const [dismissedMissedPromptDate, setDismissedMissedPromptDate] = useState<string | null>(null);
+  const [tasksLoaded, setTasksLoaded] = useState(false);
 
   const confettiValues = useRef(
     Array.from({ length: 18 }, () => new Animated.Value(-40))
   ).current;
   const hasCelebratedRef = useRef(false);
+  const petHydratedRef = useRef(false);
+  const previousPetKeyRef = useRef<string | null>(null);
 
   const getTodayDate = () => new Date().toISOString().split("T")[0];
 
@@ -204,6 +213,7 @@ export default function HomeScreen() {
         });
 
         setTasks(sortedTasks);
+        setTasksLoaded(true);
       }
     );
 
@@ -216,6 +226,9 @@ export default function HomeScreen() {
   const completed = todayTasks.filter((t) => t.completed).length;
   const progressPercent =
     todayTasks.length > 0 ? (completed / todayTasks.length) * 100 : 0;
+  const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+  const todayXp = todayTasks.reduce((sum, task) => sum + getTaskXp(task), 0);
+  const petProgress = getPetProgress(totalXp);
 
   const adaptiveReschedule = useMemo(() => {
     const historyTasks = tasks.filter((task) => task.date < today);
@@ -374,6 +387,24 @@ export default function HomeScreen() {
       hasCelebratedRef.current = false;
     }
   }, [completed, confettiValues, todayTasks.length]);
+
+  useEffect(() => {
+    if (!tasksLoaded) return;
+
+    const currentPetKey = petProgress.currentPet.key;
+
+    if (!petHydratedRef.current) {
+      previousPetKeyRef.current = currentPetKey;
+      petHydratedRef.current = true;
+      return;
+    }
+
+    if (previousPetKeyRef.current !== currentPetKey) {
+      previousPetKeyRef.current = currentPetKey;
+      setUnlockedPet(petProgress.currentPet);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [petProgress.currentPet, tasksLoaded]);
 
   useEffect(() => {
     const missedTasks = getMissedTasksForToday();
@@ -787,6 +818,72 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          <View
+            style={[
+              styles.petCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <View style={styles.petCardHeader}>
+              <View style={styles.petHero}>
+                <Text style={styles.petEmoji}>{petProgress.currentPet.emoji}</Text>
+
+                <View style={styles.petCopy}>
+                  <Text style={[styles.petEyebrow, { color: colors.subtle }]}>
+                    Companion
+                  </Text>
+                  <Text style={[styles.petName, { color: colors.text }]}>
+                    {petProgress.currentPet.name}
+                  </Text>
+                  <Text style={[styles.petDescription, { color: colors.subtle }]}>
+                    {petProgress.currentPet.description}
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                style={[
+                  styles.petXpPill,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.petXpValue, { color: colors.text }]}>
+                  +{todayXp}
+                </Text>
+                <Text style={[styles.petXpLabel, { color: colors.subtle }]}>
+                  today XP
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.petProgressText, { color: colors.subtle }]}>
+              {petProgress.nextPet
+                ? `${petProgress.remainingXp} XP until ${petProgress.nextPet.emoji} ${petProgress.nextPet.name}`
+                : "Final companion unlocked"}
+            </Text>
+
+            <View
+              style={[
+                styles.progressBarContainer,
+                { backgroundColor: colors.border, marginTop: 12 },
+              ]}
+            >
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width: `${petProgress.progressPercent}%`,
+                    backgroundColor: colors.tint,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
           {todayTasks.length > 0 && (
             <View style={styles.progressSection}>
               <Text style={[styles.progressLabel, { color: colors.subtle }]}>
@@ -926,6 +1023,36 @@ export default function HomeScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
       </View>
+
+      <Modal
+        visible={!!unlockedPet}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setUnlockedPet(null)}
+      >
+        <View style={styles.centerModalBackdrop}>
+          <View style={[styles.rewardCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.rewardTag, { color: colors.tint }]}>
+              New Companion Unlocked
+            </Text>
+            <Text style={styles.rewardEmoji}>{unlockedPet?.emoji}</Text>
+            <Text style={[styles.rewardTitle, { color: colors.text }]}>
+              {unlockedPet?.name}
+            </Text>
+            <Text style={[styles.rewardBody, { color: colors.subtle }]}>
+              Your consistency earned a new companion. Keep stacking clean days to
+              grow your lineup.
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.rewardButton, { backgroundColor: colors.tint }]}
+              onPress={() => setUnlockedPet(null)}
+            >
+              <Text style={styles.primaryButtonText}>Keep Going</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={!!editingTask}
@@ -1246,6 +1373,71 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: 14, marginBottom: 4 },
   title: { fontSize: 32, fontWeight: "700" },
+  petCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  petCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  petHero: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    paddingRight: 12,
+  },
+  petEmoji: {
+    fontSize: 42,
+    marginRight: 14,
+  },
+  petCopy: {
+    flex: 1,
+  },
+  petEyebrow: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  petName: {
+    fontSize: 22,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  petDescription: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  petXpPill: {
+    minWidth: 84,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  petXpValue: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  petXpLabel: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  petProgressText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
   iconButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -1432,6 +1624,45 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(74, 63, 85, 0.24)",
     justifyContent: "flex-end",
+  },
+  centerModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(74, 63, 85, 0.24)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  rewardCard: {
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+  },
+  rewardTag: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  rewardEmoji: {
+    fontSize: 64,
+    marginBottom: 12,
+  },
+  rewardTitle: {
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  rewardBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  rewardButton: {
+    minWidth: 160,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
   },
   modalCard: {
     borderTopLeftRadius: 28,
