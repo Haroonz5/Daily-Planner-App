@@ -458,7 +458,7 @@ export default function StatsScreen() {
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
-          Today's Progress
+          Today&apos;s Progress
         </Text>
         <Text style={[styles.bigNumber, { color: colors.text }]}>
           {stats.todayPercent}%

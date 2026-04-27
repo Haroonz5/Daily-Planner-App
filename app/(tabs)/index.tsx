@@ -299,6 +299,8 @@ export default function HomeScreen() {
     });
   };
 
+  const missedTasksToday = getMissedTasksForToday();
+
   const buildAdaptiveTimes = (count: number, excludedIds: Set<string>) => {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -394,16 +396,14 @@ export default function HomeScreen() {
   }, [strongestPet, tasksLoaded]);
 
   useEffect(() => {
-    const missedTasks = getMissedTasksForToday();
-
     if (
-      missedTasks.length > 0 &&
+      missedTasksToday.length > 0 &&
       dismissedMissedPromptDate !== today &&
       !missedTaskPromptVisible
     ) {
       setMissedTaskPromptVisible(true);
     }
-  }, [tasks, today, dismissedMissedPromptDate, missedTaskPromptVisible]);
+  }, [dismissedMissedPromptDate, missedTaskPromptVisible, missedTasksToday.length, today]);
 
   const isRecurringSeriesTask = (task?: Task | null) =>
     !!task?.recurrenceGroupId &&
@@ -700,7 +700,7 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const missedTasks = getMissedTasksForToday().sort((a, b) => {
+    const missedTasks = [...missedTasksToday].sort((a, b) => {
       const rankA = priorityRank[a.priority ?? "Medium"];
       const rankB = priorityRank[b.priority ?? "Medium"];
       if (rankA !== rankB) return rankA - rankB;
@@ -753,8 +753,6 @@ export default function HomeScreen() {
     if (taskMinutes === null) return false;
     return taskMinutes <= currentMinutes && currentMinutes < taskMinutes + 60;
   };
-
-  const hasMissedTasks = () => getMissedTasksForToday().length > 0;
 
   const renderPriority = (priority?: Priority) => {
     const value = priority ?? "Medium";
@@ -1141,7 +1139,7 @@ export default function HomeScreen() {
             </>
           )}
 
-          {hasMissedTasks() && (
+          {missedTasksToday.length > 0 && (
             <View
               style={[
                 styles.missedBanner,
@@ -1154,7 +1152,7 @@ export default function HomeScreen() {
               <Text
                 style={[styles.missedBannerText, { color: colors.danger }]}
               >
-                ⚠️ You've missed some tasks today. Stay consistent!
+                ⚠️ You&apos;ve missed some tasks today. Stay consistent!
               </Text>
             </View>
           )}
@@ -1727,8 +1725,8 @@ export default function HomeScreen() {
             </Text>
 
             <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
-              You missed {getMissedTasksForToday().length} task
-              {getMissedTasksForToday().length === 1 ? "" : "s"}. Want to
+              You missed {missedTasksToday.length} task
+              {missedTasksToday.length === 1 ? "" : "s"}. Want to
               reschedule them to later today?
             </Text>
 

@@ -119,6 +119,10 @@ export const cancelTaskNotifications = async (taskId: string) => {
   await saveTaskNotificationMap(notificationMap);
 };
 
+export const cancelManyTaskNotifications = async (taskIds: string[]) => {
+  await Promise.all(taskIds.map((taskId) => cancelTaskNotifications(taskId)));
+};
+
 export const syncTaskNotifications = async (task: NotificationTask) => {
   await cancelTaskNotifications(task.id);
 
@@ -230,4 +234,27 @@ export const syncMorningSummaryNotification = async (uid: string) => {
   });
 
   await AsyncStorage.setItem(MORNING_SUMMARY_NOTIFICATION_KEY, id);
+};
+
+export const refreshNotificationState = async (uid: string) => {
+  await ensureBaseReminders();
+  await syncMorningSummaryNotification(uid);
+};
+
+export const scheduleQuickTestNotification = async () => {
+  const granted = await ensureNotificationPermissions();
+  if (!granted) return null;
+
+  const date = new Date(Date.now() + 5000);
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Daily Discipline Test",
+      body: "If you saw this, your reminders are ready to work.",
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date,
+    },
+  });
 };

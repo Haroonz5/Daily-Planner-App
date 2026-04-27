@@ -165,7 +165,7 @@ export default function SummaryScreen() {
           { backgroundColor: colors.card, shadowColor: colors.tint },
         ]}
       >
-        <Text style={[styles.xpLabel, { color: colors.subtle }]}>Today's XP</Text>
+        <Text style={[styles.xpLabel, { color: colors.subtle }]}>Today&apos;s XP</Text>
         <Text style={[styles.xpNumber, { color: colors.text }]}>
           {summary.todayXp >= 0 ? `+${summary.todayXp}` : summary.todayXp}
         </Text>
@@ -181,7 +181,7 @@ export default function SummaryScreen() {
         ]}
       >
         <Text style={[styles.progressLabel, { color: colors.subtle }]}>
-          Today's Score
+          Today&apos;s Score
         </Text>
         <Text style={[styles.progressNumber, { color: colors.text }]}>
           {summary.percent}%
@@ -208,7 +208,7 @@ export default function SummaryScreen() {
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
-          Today's Tasks
+          Today&apos;s Tasks
         </Text>
 
         {summary.todayTasks.length === 0 ? (

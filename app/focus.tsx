@@ -14,6 +14,7 @@ import { formatDateKey, sortTasksBySchedule } from "../utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
+type TimerState = "idle" | "running" | "paused" | "done";
 
 type Task = {
   id: string;
@@ -31,12 +32,26 @@ type Task = {
   originalTime?: string;
 };
 
+const focusPresets = [15, 25, 45];
+
+const formatClock = (seconds: number) => {
+  const mins = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const secs = (seconds % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
+};
+
 export default function FocusScreen() {
   const router = useRouter();
   const { themeName } = useAppTheme();
-  const { profile } = useUserProfile();
+  const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [sessionMinutes, setSessionMinutes] = useState(25);
+  const [secondsLeft, setSecondsLeft] = useState(25 * 60);
+  const [timerState, setTimerState] = useState<TimerState>("idle");
+  const [completedSessions, setCompletedSessions] = useState(0);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -54,6 +69,34 @@ export default function FocusScreen() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const preferredMinutes = profile.focusDurationMinutes ?? 25;
+    if (timerState === "idle") {
+      setSessionMinutes(preferredMinutes);
+      setSecondsLeft(preferredMinutes * 60);
+    }
+  }, [profile.focusDurationMinutes, timerState]);
+
+  useEffect(() => {
+    if (timerState !== "running") return;
+
+    const interval = setInterval(() => {
+      setSecondsLeft((current) => Math.max(current - 1, 0));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timerState]);
+
+  useEffect(() => {
+    if (timerState === "running" && secondsLeft === 0) {
+      setTimerState("done");
+      setCompletedSessions((current) => current + 1);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {}
+      );
+    }
+  }, [secondsLeft, timerState]);
+
   const today = formatDateKey(new Date());
 
   const focusData = useMemo(() => {
@@ -63,15 +106,28 @@ export default function FocusScreen() {
     const pendingTasks = todayTasks.filter(
       (task) => !task.completed && (task.status ?? "pending") !== "skipped"
     );
+    const completedToday = todayTasks.filter((task) => task.completed).length;
 
     return {
       activePet,
       currentTask: pendingTasks[0] ?? null,
       queue: pendingTasks.slice(1),
-      completed: todayTasks.filter((task) => task.completed).length,
+      completed: completedToday,
       total: todayTasks.length,
+      petLabel: profile.petNickname?.trim() || activePet.name,
+      displayName: profile.displayName?.trim() || "You",
     };
-  }, [profile.activePetKey, tasks, today]);
+  }, [profile.activePetKey, profile.displayName, profile.petNickname, tasks, today]);
+
+  const timerProgress = ((sessionMinutes * 60 - secondsLeft) / (sessionMinutes * 60)) * 100;
+  const timerStatusText =
+    timerState === "running"
+      ? "Stay with this block until the timer ends."
+      : timerState === "paused"
+        ? "Paused. Restart when you are ready to lock back in."
+        : timerState === "done"
+          ? "Session complete. Finish the task or reset for another round."
+          : "Pick a block length and start a clean focus session.";
 
   const handleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
@@ -112,6 +168,35 @@ export default function FocusScreen() {
     });
   };
 
+  const handleSelectPreset = async (minutes: number) => {
+    if (timerState === "running") return;
+
+    setSessionMinutes(minutes);
+    setSecondsLeft(minutes * 60);
+    setTimerState("idle");
+    await saveProfile({ focusDurationMinutes: minutes });
+  };
+
+  const handleStartPause = async () => {
+    await Haptics.selectionAsync();
+    if (timerState === "running") {
+      setTimerState("paused");
+      return;
+    }
+
+    if (timerState === "done") {
+      setSecondsLeft(sessionMinutes * 60);
+    }
+
+    setTimerState("running");
+  };
+
+  const handleResetTimer = async () => {
+    await Haptics.selectionAsync();
+    setTimerState("idle");
+    setSecondsLeft(sessionMinutes * 60);
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -130,11 +215,84 @@ export default function FocusScreen() {
       <View style={[styles.petCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
         <PetSprite petKey={focusData.activePet.key} size={78} style={styles.petSprite} />
         <Text style={[styles.petName, { color: colors.text }]}>
-          {focusData.activePet.name} is with you
+          {focusData.petLabel} is with {focusData.displayName}
         </Text>
         <Text style={[styles.petCopy, { color: colors.subtle }]}>
-          {focusData.completed}/{focusData.total} done today
+          {focusData.completed}/{focusData.total} done today • {completedSessions} clean session
+          {completedSessions === 1 ? "" : "s"}
         </Text>
+      </View>
+
+      <View style={[styles.timerCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardLabel, { color: colors.subtle }]}>Focus Timer</Text>
+        <View style={styles.timerPresetRow}>
+          {focusPresets.map((minutes) => {
+            const selected = sessionMinutes === minutes;
+            return (
+              <TouchableOpacity
+                key={minutes}
+                style={[
+                  styles.timerPresetChip,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                  selected && {
+                    borderColor: colors.tint,
+                    backgroundColor: colors.background,
+                  },
+                ]}
+                onPress={() => handleSelectPreset(minutes)}
+              >
+                <Text style={[styles.timerPresetText, { color: colors.text }]}>
+                  {minutes}m
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.timerValue, { color: colors.text }]}>
+          {formatClock(secondsLeft)}
+        </Text>
+        <Text style={[styles.timerStatus, { color: colors.subtle }]}>
+          {timerStatusText}
+        </Text>
+
+        <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${Math.max(0, Math.min(100, timerProgress))}%`,
+                backgroundColor: colors.tint,
+              },
+            ]}
+          />
+        </View>
+
+        <View style={styles.timerActionRow}>
+          <TouchableOpacity
+            style={[styles.timerPrimaryButton, { backgroundColor: colors.tint }]}
+            onPress={handleStartPause}
+          >
+            <Text style={styles.primaryButtonText}>
+              {timerState === "running" ? "Pause" : timerState === "paused" ? "Resume" : "Start"}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.timerSecondaryButton,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={handleResetTimer}
+          >
+            <Text style={[styles.timerSecondaryText, { color: colors.text }]}>
+              Reset
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {focusData.currentTask ? (
@@ -151,6 +309,9 @@ export default function FocusScreen() {
               {focusData.currentTask.notes}
             </Text>
           )}
+          <Text style={[styles.currentHint, { color: colors.subtle }]}>
+            Give this task one clean block before you decide it needs to move.
+          </Text>
 
           <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: colors.tint }]}
@@ -243,10 +404,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 3,
   },
-  petEmoji: {
-    fontSize: 48,
-    marginBottom: 10,
-  },
   petSprite: {
     marginBottom: 10,
   },
@@ -254,11 +411,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "700",
     marginBottom: 6,
+    textAlign: "center",
   },
   petCopy: {
     fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
   },
-  currentCard: {
+  timerCard: {
     borderRadius: 20,
     padding: 20,
     marginHorizontal: 16,
@@ -275,6 +435,73 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 10,
   },
+  timerPresetRow: {
+    flexDirection: "row",
+    marginBottom: 18,
+  },
+  timerPresetChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginRight: 8,
+  },
+  timerPresetText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  timerValue: {
+    fontSize: 48,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  timerStatus: {
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 14,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 16,
+  },
+  progressFill: {
+    height: 8,
+    borderRadius: 4,
+  },
+  timerActionRow: {
+    flexDirection: "row",
+  },
+  timerPrimaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+    marginRight: 8,
+  },
+  timerSecondaryButton: {
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timerSecondaryText: {
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  currentCard: {
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
   currentTitle: {
     fontSize: 26,
     fontWeight: "700",
@@ -287,6 +514,11 @@ const styles = StyleSheet.create({
   currentNotes: {
     fontSize: 14,
     lineHeight: 21,
+  },
+  currentHint: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
   },
   primaryButton: {
     marginTop: 18,

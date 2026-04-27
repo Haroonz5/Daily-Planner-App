@@ -7,6 +7,8 @@ import { auth, db } from "@/constants/firebaseConfig";
 export type UserProfile = {
   activePetKey?: string | null;
   petNickname?: string | null;
+  displayName?: string | null;
+  focusDurationMinutes?: number | null;
 };
 
 export function useUserProfile() {
