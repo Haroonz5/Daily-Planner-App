@@ -9,7 +9,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ai:dev": "cd ai && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

@@ -21,6 +21,10 @@ import {
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
+  parseNaturalTasks,
+  type ParsedAiTask,
+} from "../../utils/ai";
+import {
   buildRecurringDates,
   formatDateKey,
   formatTimeFromDate,
@@ -98,6 +102,11 @@ export default function AddTask() {
   const [futureDraftTime, setFutureDraftTime] = useState(new Date());
   const [showFutureDatePicker, setShowFutureDatePicker] = useState(false);
   const [showFutureTimePicker, setShowFutureTimePicker] = useState(false);
+  const [naturalInput, setNaturalInput] = useState("");
+  const [parsedTasks, setParsedTasks] = useState<ParsedAiTask[]>([]);
+  const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [aiSource, setAiSource] = useState<"openai" | "local" | "offline" | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -138,6 +147,7 @@ export default function AddTask() {
   const futureDraftDateKey = formatDateKey(futureDraftDate);
   const futureDraftLabel = getRelativeDateLabel(futureDraftDateKey);
   const futureDraftTimeLabel = formatTimeFromDate(futureDraftTime);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const planningInsights = useMemo(() => {
     const selectedDayTasks = tasks.filter((task) => task.date === selectedDateKey);
@@ -290,6 +300,132 @@ export default function AddTask() {
     setShowFutureTimePicker(false);
   };
 
+  const handleParseNaturalTasks = async () => {
+    if (!naturalInput.trim()) {
+      setError("Type a few tasks first, like: Gym at 6 PM, study at 8 PM.");
+      return;
+    }
+
+    setAiBusy(true);
+    setError("");
+    setSuccessMessage("");
+
+    try {
+      const result = await parseNaturalTasks({
+        text: naturalInput.trim(),
+        defaultDate: selectedDateKey,
+        timezone,
+        existingTasks: tasks.map((task) => ({
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority,
+        })),
+      });
+
+      setParsedTasks(result.tasks);
+      setAiWarnings(result.warnings);
+      setAiSource(result.source);
+
+      if (result.tasks.length === 0) {
+        setError("I could not turn that into tasks yet. Try adding times with 'at'.");
+      }
+    } catch (e: any) {
+      setError(e.message ?? "The AI parser could not read that yet.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const composeParsedNotes = (task: ParsedAiTask) => {
+    const noteParts = [
+      task.notes?.trim(),
+      task.durationMinutes ? `Estimated duration: ${task.durationMinutes} minutes` : "",
+    ].filter(Boolean);
+
+    return noteParts.join("\n");
+  };
+
+  const handleAddParsedTasks = async () => {
+    if (parsedTasks.length === 0) {
+      setError("Parse tasks first, then you can add them.");
+      return;
+    }
+
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        setError("You need to be logged in to add tasks.");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      const createdTasks: {
+        id: string;
+        title: string;
+        time: string;
+        date: string;
+        priority: TaskPriority;
+      }[] = [];
+
+      parsedTasks.forEach((parsedTask) => {
+        const taskRef = doc(collection(db, "users", uid, "tasks"));
+        const safePriority = parsedTask.priority ?? "Medium";
+
+        batch.set(taskRef, {
+          title: parsedTask.title.trim(),
+          notes: composeParsedNotes(parsedTask),
+          priority: safePriority,
+          time: parsedTask.time,
+          date: parsedTask.date,
+          completed: false,
+          status: "pending",
+          createdAt: new Date(),
+          completedAt: null,
+          skippedAt: null,
+          lastActionAt: new Date(),
+          rescheduledCount: 0,
+          originalTime: parsedTask.time,
+          recurrence: "none",
+          recurrenceGroupId: null,
+          aiCreated: true,
+        });
+
+        createdTasks.push({
+          id: taskRef.id,
+          title: parsedTask.title.trim(),
+          time: parsedTask.time,
+          date: parsedTask.date,
+          priority: safePriority,
+        });
+      });
+
+      await batch.commit();
+
+      await Promise.all(
+        createdTasks.map((task) =>
+          syncTaskNotifications({
+            ...task,
+            completed: false,
+            status: "pending",
+          })
+        )
+      );
+
+      await syncMorningSummaryNotification(uid);
+
+      setNaturalInput("");
+      setParsedTasks([]);
+      setAiWarnings([]);
+      setAiSource(null);
+      setError("");
+      setSuccessMessage(`${createdTasks.length} AI-parsed task${createdTasks.length === 1 ? "" : "s"} added.`);
+      setTimeout(() => setSuccessMessage(""), 2600);
+    } catch (e: any) {
+      setError(e.message ?? "Something went wrong while adding AI-parsed tasks.");
+    }
+  };
+
   const handleAddTask = async () => {
     if (!title.trim()) {
       setError("Please enter a task title");
@@ -384,6 +520,126 @@ export default function AddTask() {
           <Text style={[styles.subtitle, { color: colors.subtle }]}>
             Add something for later today, tomorrow, or weeks ahead.
           </Text>
+        </View>
+
+        <View
+          style={[
+            styles.aiCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.aiTitle, { color: colors.text }]}>
+            Quick Add with AI
+          </Text>
+          <Text style={[styles.aiSubtitle, { color: colors.subtle }]}>
+            Type multiple tasks in one sentence and review the schedule before adding.
+          </Text>
+
+          <TextInput
+            style={[
+              styles.aiInput,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            placeholder="Gym at 6 PM, study for 2 hours at 8 PM"
+            placeholderTextColor={colors.subtle}
+            value={naturalInput}
+            onChangeText={setNaturalInput}
+            multiline
+          />
+
+          <View style={styles.aiActionRow}>
+            <TouchableOpacity
+              style={[styles.aiSecondaryButton, { backgroundColor: colors.surface }]}
+              onPress={() => {
+                setNaturalInput("");
+                setParsedTasks([]);
+                setAiWarnings([]);
+                setAiSource(null);
+              }}
+              disabled={aiBusy}
+            >
+              <Text style={[styles.aiSecondaryText, { color: colors.subtle }]}>
+                Clear
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.aiPrimaryButton, { backgroundColor: colors.tint }]}
+              onPress={handleParseNaturalTasks}
+              disabled={aiBusy}
+            >
+              <Text style={styles.aiPrimaryText}>
+                {aiBusy ? "Parsing..." : "Parse Tasks"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {parsedTasks.length > 0 && (
+            <View style={styles.aiPreviewWrap}>
+              <View style={styles.aiPreviewHeader}>
+                <Text style={[styles.aiPreviewTitle, { color: colors.text }]}>
+                  Parsed Tasks
+                </Text>
+                {aiSource ? (
+                  <Text style={[styles.aiSourceText, { color: colors.subtle }]}>
+                    {aiSource === "openai" ? "AI" : "Local"} parser
+                  </Text>
+                ) : null}
+              </View>
+
+              {parsedTasks.map((task, index) => (
+                <View
+                  key={`${task.title}-${task.date}-${task.time}-${index}`}
+                  style={[
+                    styles.aiParsedTask,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.aiParsedTopRow}>
+                    <Text style={[styles.aiParsedTitle, { color: colors.text }]}>
+                      {task.title}
+                    </Text>
+                    <Text style={[styles.aiParsedPriority, { color: colors.subtle }]}>
+                      {task.priority}
+                    </Text>
+                  </View>
+                  <Text style={[styles.aiParsedMeta, { color: colors.subtle }]}>
+                    {getRelativeDateLabel(task.date)} at {task.time}
+                    {task.durationMinutes ? ` • ${task.durationMinutes} min` : ""}
+                  </Text>
+                </View>
+              ))}
+
+              {aiWarnings.map((warning) => (
+                <Text
+                  key={warning}
+                  style={[styles.aiWarningText, { color: colors.warning }]}
+                >
+                  {warning}
+                </Text>
+              ))}
+
+              <TouchableOpacity
+                style={[styles.aiAddButton, { backgroundColor: colors.tint }]}
+                onPress={handleAddParsedTasks}
+              >
+                <Text style={styles.aiPrimaryText}>
+                  Add {parsedTasks.length} Parsed Task
+                  {parsedTasks.length === 1 ? "" : "s"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         <TextInput
@@ -779,6 +1035,111 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 21,
     paddingHorizontal: 30,
+  },
+  aiCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginHorizontal: 24,
+    marginBottom: 18,
+  },
+  aiTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  aiSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  aiInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    minHeight: 88,
+    fontSize: 15,
+    textAlignVertical: "top",
+  },
+  aiActionRow: {
+    flexDirection: "row",
+    marginTop: 12,
+  },
+  aiSecondaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginRight: 8,
+  },
+  aiPrimaryButton: {
+    flex: 2,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  aiSecondaryText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  aiPrimaryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  aiPreviewWrap: {
+    marginTop: 16,
+  },
+  aiPreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  aiPreviewTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  aiSourceText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  aiParsedTask: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+  },
+  aiParsedTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  aiParsedTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    marginRight: 10,
+  },
+  aiParsedPriority: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  aiParsedMeta: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  aiWarningText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  aiAddButton: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 12,
   },
   input: {
     borderWidth: 1,

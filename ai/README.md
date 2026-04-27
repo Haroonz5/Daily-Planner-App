@@ -1,0 +1,36 @@
+# Daily Discipline AI Backend
+
+This FastAPI service powers natural-language task parsing for the Expo app.
+
+## Setup
+
+```bash
+cd ai
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Add your OpenAI API key to `.env`.
+
+## Run
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+For the Expo app, set:
+
+```bash
+EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_LAN_IP:8000 npx expo start -c
+```
+
+Use your Mac LAN IP when testing on a physical phone. `localhost` only works for simulators or the same machine.
+
+## Endpoints
+
+- `GET /health`
+- `POST /v1/parse-tasks`
+
+If `OPENAI_API_KEY` is missing, the backend uses a basic local parser so development can continue.
