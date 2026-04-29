@@ -17,6 +17,11 @@ import {
 } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import {
+  getWeeklyReview,
+  type AiHistoryTask,
+  type WeeklyReviewResult,
+} from "../../utils/ai";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -69,11 +74,37 @@ const scheduledDateTime = (date: string, time: string) => {
   return new Date(year, month - 1, day, hours, mins, 0, 0);
 };
 
+const serializeDateValue = (value: any) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return null;
+};
+
+const toAiHistoryTask = (task: Task): AiHistoryTask => ({
+  id: task.id,
+  title: task.title,
+  date: task.date,
+  time: task.time,
+  priority: task.priority ?? "Medium",
+  completed: task.completed,
+  status: task.status ?? "pending",
+  rescheduledCount: task.rescheduledCount ?? 0,
+  completedAt: serializeDateValue(task.completedAt),
+  skippedAt: serializeDateValue(task.skippedAt),
+});
+
 export default function StatsScreen() {
   const { themeName } = useAppTheme();
   const { profile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [weeklyReview, setWeeklyReview] = useState<WeeklyReviewResult | null>(
+    null
+  );
+  const [weeklyReviewBusy, setWeeklyReviewBusy] = useState(false);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -305,6 +336,8 @@ export default function StatsScreen() {
       todayCompleted,
       todaySkipped,
       todayPercent,
+      weekStart: last7Days[0],
+      weekEnd: last7Days[last7Days.length - 1],
       streak,
       weeklyStats,
       priorityCounts,
@@ -330,6 +363,34 @@ export default function StatsScreen() {
       disciplineLabel,
     };
   }, [profile.activePetKey, tasks]);
+
+  useEffect(() => {
+    if (tasks.length === 0) {
+      setWeeklyReview(null);
+      setWeeklyReviewBusy(false);
+      return;
+    }
+
+    let active = true;
+    setWeeklyReviewBusy(true);
+
+    void getWeeklyReview({
+      weekStart: stats.weekStart,
+      weekEnd: stats.weekEnd,
+      tasks: tasks.map(toAiHistoryTask),
+      timezone,
+    })
+      .then((result) => {
+        if (active) setWeeklyReview(result);
+      })
+      .finally(() => {
+        if (active) setWeeklyReviewBusy(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [stats.weekEnd, stats.weekStart, tasks, timezone]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -371,6 +432,99 @@ export default function StatsScreen() {
             Best window: {bucketLabels[stats.mostProductiveWindow]} • Watch: {bucketLabels[stats.riskWindow]}
           </Text>
         </View>
+
+      <View
+        style={[
+          styles.weeklyReviewCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <View style={styles.weeklyReviewHeader}>
+          <View>
+            <Text style={[styles.weeklyReviewEyebrow, { color: colors.tint }]}>
+              AI Weekly Review
+            </Text>
+            <Text style={[styles.weeklyReviewTitle, { color: colors.text }]}>
+              {weeklyReviewBusy
+                ? "Building your review..."
+                : weeklyReview?.headline ?? "Weekly review waiting"}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.weeklyReviewPill,
+              { backgroundColor: colors.surface },
+            ]}
+          >
+            <Text style={[styles.weeklyReviewPillText, { color: colors.subtle }]}>
+              {weeklyReviewBusy
+                ? "Live"
+                : weeklyReview?.source === "openai"
+                  ? "AI"
+                  : "Local"}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.weeklyReviewSummary, { color: colors.subtle }]}>
+          {weeklyReviewBusy
+            ? "Checking wins, skipped work, reschedules, and strongest windows."
+            : weeklyReview?.summary ??
+              "Complete a few tasks this week and this will turn into a coach-style recap."}
+        </Text>
+
+        {!!weeklyReview && (
+          <View style={styles.weeklyReviewGrid}>
+            <View
+              style={[
+                styles.weeklyReviewColumn,
+                { backgroundColor: colors.surface },
+              ]}
+            >
+              <Text style={[styles.weeklyReviewColumnTitle, { color: colors.text }]}>
+                Wins
+              </Text>
+              {(weeklyReview.wins.length
+                ? weeklyReview.wins
+                : ["No wins logged yet."]
+              ).slice(0, 2).map((item) => (
+                <Text
+                  key={`win-${item}`}
+                  style={[styles.weeklyReviewItem, { color: colors.subtle }]}
+                >
+                  {item}
+                </Text>
+              ))}
+            </View>
+
+            <View
+              style={[
+                styles.weeklyReviewColumn,
+                { backgroundColor: colors.surface },
+              ]}
+            >
+              <Text style={[styles.weeklyReviewColumnTitle, { color: colors.text }]}>
+                Next Focus
+              </Text>
+              {(weeklyReview.nextWeekFocus.length
+                ? weeklyReview.nextWeekFocus
+                : ["Keep the plan lean."]
+              ).slice(0, 2).map((item) => (
+                <Text
+                  key={`focus-${item}`}
+                  style={[styles.weeklyReviewItem, { color: colors.subtle }]}
+                >
+                  {item}
+                </Text>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
 
       <View
         style={[
@@ -842,6 +996,69 @@ const styles = StyleSheet.create({
   petProgressText: {
     fontSize: 13,
     fontWeight: "600",
+  },
+  weeklyReviewCard: {
+    borderRadius: 24,
+    padding: 18,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  weeklyReviewHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  weeklyReviewEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  weeklyReviewTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    maxWidth: 250,
+  },
+  weeklyReviewPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  weeklyReviewPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  weeklyReviewSummary: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  weeklyReviewGrid: {
+    flexDirection: "row",
+    marginTop: 14,
+  },
+  weeklyReviewColumn: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginHorizontal: 4,
+  },
+  weeklyReviewColumnTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  weeklyReviewItem: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 6,
   },
   topRow: {
     flexDirection: "row",

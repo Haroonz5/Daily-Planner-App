@@ -45,9 +45,12 @@ import {
   type RecurrenceRule,
 } from "../../utils/task-helpers";
 import {
+  getPatternFeedback,
   runAiReschedule,
+  type AiHistoryTask,
   type AiRescheduleResult,
   type AiRescheduleTask,
+  type PatternFeedbackResult,
 } from "../../utils/ai";
 import {
   cancelTaskNotifications,
@@ -129,6 +132,18 @@ const completionBurstPieces = Array.from({ length: 32 }, (_, index) => {
   };
 });
 
+const victoryBurstPieces = Array.from({ length: 48 }, (_, index) => {
+  const angle = (index / 48) * Math.PI * 2;
+  const distance = 92 + (index % 6) * 22;
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance,
+    size: 8 + (index % 5) * 2,
+    rotation: index * 19,
+    color: confettiPalette[index % confettiPalette.length],
+  };
+});
+
 const roundUpToInterval = (value: number, interval: number) =>
   Math.ceil(value / interval) * interval;
 
@@ -150,6 +165,27 @@ const toAiRescheduleTask = (task: Task): AiRescheduleTask => ({
   completed: task.completed,
   status: task.status ?? "pending",
   rescheduledCount: task.rescheduledCount ?? 0,
+});
+
+const serializeDateValue = (value: any) => {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return null;
+};
+
+const toAiHistoryTask = (task: Task): AiHistoryTask => ({
+  id: task.id,
+  title: task.title,
+  date: task.date,
+  time: task.time,
+  priority: task.priority ?? "Medium",
+  completed: task.completed,
+  status: task.status ?? "pending",
+  rescheduledCount: task.rescheduledCount ?? 0,
+  completedAt: serializeDateValue(task.completedAt),
+  skippedAt: serializeDateValue(task.skippedAt),
 });
 
 export default function HomeScreen() {
@@ -175,13 +211,14 @@ export default function HomeScreen() {
   const [aiRescheduleResult, setAiRescheduleResult] =
     useState<AiRescheduleResult | null>(null);
   const [aiRescheduleBusy, setAiRescheduleBusy] = useState(false);
+  const [patternFeedback, setPatternFeedback] =
+    useState<PatternFeedbackResult | null>(null);
+  const [patternBusy, setPatternBusy] = useState(false);
   const [unlockedPet, setUnlockedPet] = useState<PetTier | null>(null);
   const [dismissedMissedPromptDate, setDismissedMissedPromptDate] = useState<string | null>(null);
   const [tasksLoaded, setTasksLoaded] = useState(false);
 
-  const confettiValues = useRef(
-    Array.from({ length: 18 }, () => new Animated.Value(-40))
-  ).current;
+  const victoryBurstValue = useRef(new Animated.Value(0)).current;
   const completionBurstValue = useRef(new Animated.Value(0)).current;
   const hasCelebratedRef = useRef(false);
   const petHydratedRef = useRef(false);
@@ -355,6 +392,36 @@ export default function HomeScreen() {
       return taskMinutes !== null && taskMinutes + 60 < currentMinutes;
     });
   }, [todayTasks]);
+  const petMood =
+    todayTasks.length === 0
+      ? {
+          title: "Curious",
+          body: `${activePet.name} is waiting for one clear mission to follow.`,
+          tone: colors.warning,
+        }
+      : missedTasksToday.length > 0
+        ? {
+            title: "Concerned",
+            body: `${activePet.name} noticed a slipped task. Reschedule it before it turns into noise.`,
+            tone: colors.danger,
+          }
+        : progressPercent === 100
+          ? {
+              title: "Proud",
+              body: `${activePet.name} is absolutely glowing. Clean execution hits different.`,
+              tone: colors.success,
+            }
+          : completed > 0
+            ? {
+                title: "Energized",
+                body: `${activePet.name} can feel the momentum. One more task keeps it rolling.`,
+                tone: colors.tint,
+              }
+            : {
+                title: "Ready",
+                body: `${activePet.name} is warmed up. Start with the smallest task on the list.`,
+                tone: colors.tint,
+              };
 
   const buildAdaptiveTimes = (count: number, excludedIds: Set<string>) => {
     const now = new Date();
@@ -430,27 +497,22 @@ export default function HomeScreen() {
     if (allDone && !hasCelebratedRef.current) {
       hasCelebratedRef.current = true;
       setShowConfetti(true);
+      victoryBurstValue.stopAnimation();
+      victoryBurstValue.setValue(0);
 
-      confettiValues.forEach((value) => value.setValue(-80));
-
-      Animated.stagger(
-        45,
-        confettiValues.map((value, index) =>
-          Animated.timing(value, {
-            toValue: 700 + index * 12,
-            duration: 1800 + index * 20,
-            useNativeDriver: true,
-          })
-        )
-      ).start(() => {
-        setTimeout(() => setShowConfetti(false), 400);
+      Animated.timing(victoryBurstValue, {
+        toValue: 1,
+        duration: 1150,
+        useNativeDriver: true,
+      }).start(() => {
+        setTimeout(() => setShowConfetti(false), 200);
       });
     }
 
     if (!allDone) {
       hasCelebratedRef.current = false;
     }
-  }, [completed, confettiValues, todayTasks.length]);
+  }, [completed, todayTasks.length, victoryBurstValue]);
 
   useEffect(() => {
     if (!tasksLoaded) return;
@@ -469,6 +531,28 @@ export default function HomeScreen() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   }, [strongestPet, tasksLoaded]);
+
+  useEffect(() => {
+    if (!tasksLoaded) return;
+
+    let active = true;
+    setPatternBusy(true);
+
+    void getPatternFeedback({
+      tasks: tasks.slice(-90).map(toAiHistoryTask),
+      timezone,
+    })
+      .then((result) => {
+        if (active) setPatternFeedback(result);
+      })
+      .finally(() => {
+        if (active) setPatternBusy(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [tasks, tasksLoaded, timezone]);
 
   useEffect(() => {
     if (
@@ -597,7 +681,7 @@ export default function HomeScreen() {
 
     Animated.timing(completionBurstValue, {
       toValue: 1,
-      duration: 900,
+      duration: 1050,
       useNativeDriver: true,
     }).start(() => {
       setCompletionBurstVisible(false);
@@ -1029,24 +1113,134 @@ export default function HomeScreen() {
         <AmbientBackground colors={colors} variant="energy" />
 
         {showConfetti && (
-          <View pointerEvents="none" style={styles.confettiLayer}>
-            {confettiValues.map((value, index) => (
+          <View pointerEvents="none" style={styles.victoryBurstLayer}>
+            <View
+              style={[
+                styles.victoryBurstOrigin,
+                {
+                  left: screenWidth / 2,
+                  top: screenHeight * 0.36,
+                },
+              ]}
+            >
               <Animated.View
-                key={index}
                 style={[
-                  styles.confettiPiece,
+                  styles.victoryBurstHalo,
                   {
-                    backgroundColor:
-                      confettiPalette[index % confettiPalette.length],
-                    left: (index * (screenWidth / 18)) % (screenWidth - 20),
+                    borderColor: colors.tint,
+                    opacity: victoryBurstValue.interpolate({
+                      inputRange: [0, 0.35, 1],
+                      outputRange: [0, 0.72, 0],
+                    }),
                     transform: [
-                      { translateY: value },
-                      { rotate: `${index * 17}deg` },
+                      {
+                        scale: victoryBurstValue.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.25, 2.8],
+                        }),
+                      },
                     ],
                   },
                 ]}
               />
-            ))}
+              <Animated.View
+                style={[
+                  styles.victoryBurstHalo,
+                  styles.victoryBurstHaloDelay,
+                  {
+                    borderColor: colors.warning,
+                    opacity: victoryBurstValue.interpolate({
+                      inputRange: [0, 0.48, 1],
+                      outputRange: [0, 0.58, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: victoryBurstValue.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.15, 3.4],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+
+              {victoryBurstPieces.map((piece, index) => {
+                const translateX = victoryBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, piece.x],
+                });
+                const translateY = victoryBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, piece.y],
+                });
+                const rotate = victoryBurstValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [
+                    `${piece.rotation}deg`,
+                    `${piece.rotation + 420}deg`,
+                  ],
+                });
+                const opacity = victoryBurstValue.interpolate({
+                  inputRange: [0, 0.68, 1],
+                  outputRange: [1, 1, 0],
+                });
+                const scale = victoryBurstValue.interpolate({
+                  inputRange: [0, 0.16, 1],
+                  outputRange: [0.35, 1.18, 0.45],
+                });
+
+                return (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.victoryBurstPiece,
+                      {
+                        width: piece.size,
+                        height: piece.size + 10,
+                        backgroundColor: piece.color,
+                        opacity,
+                        transform: [
+                          { translateX },
+                          { translateY },
+                          { rotate },
+                          { scale },
+                        ],
+                      },
+                    ]}
+                  />
+                );
+              })}
+
+              <Animated.View
+                style={[
+                  styles.victoryBurstBadge,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.tint,
+                    opacity: victoryBurstValue.interpolate({
+                      inputRange: [0, 0.15, 0.82, 1],
+                      outputRange: [0, 1, 1, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: victoryBurstValue.interpolate({
+                          inputRange: [0, 0.18, 1],
+                          outputRange: [0.72, 1, 0.95],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <Text style={[styles.victoryBurstLabel, { color: colors.tint }]}>
+                  Perfect Day
+                </Text>
+                <Text style={[styles.victoryBurstTitle, { color: colors.text }]}>
+                  Full clear complete
+                </Text>
+              </Animated.View>
+            </View>
           </View>
         )}
 
@@ -1061,6 +1255,47 @@ export default function HomeScreen() {
                 },
               ]}
             >
+              <Animated.View
+                style={[
+                  styles.completionBurstRing,
+                  {
+                    borderColor: colors.tint,
+                    opacity: completionBurstValue.interpolate({
+                      inputRange: [0, 0.42, 1],
+                      outputRange: [0, 0.72, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: completionBurstValue.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.15, 2.35],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.completionBurstCore,
+                  {
+                    backgroundColor: colors.tint,
+                    opacity: completionBurstValue.interpolate({
+                      inputRange: [0, 0.14, 0.58, 1],
+                      outputRange: [0.95, 0.65, 0.18, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: completionBurstValue.interpolate({
+                          inputRange: [0, 0.22, 1],
+                          outputRange: [0.55, 1.7, 0.4],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+
               {completionBurstPieces.map((piece, index) => {
                 const translateX = completionBurstValue.interpolate({
                   inputRange: [0, 1],
@@ -1303,6 +1538,28 @@ export default function HomeScreen() {
               />
             </View>
 
+            <View
+              style={[
+                styles.petMoodCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: petMood.tone,
+                },
+              ]}
+            >
+              <View
+                style={[styles.petMoodDot, { backgroundColor: petMood.tone }]}
+              />
+              <View style={styles.petMoodCopy}>
+                <Text style={[styles.petMoodTitle, { color: colors.text }]}>
+                  {activePet.name} feels {petMood.title}
+                </Text>
+                <Text style={[styles.petMoodBody, { color: colors.subtle }]}>
+                  {petMood.body}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.petCardFooter}>
               <Text style={[styles.petFooterHint, { color: colors.subtle }]}>
                 {unlockedPets.length} of {PET_TIERS.length} companions unlocked
@@ -1357,6 +1614,77 @@ export default function HomeScreen() {
               <Text style={[styles.calloutBody, { color: colors.subtle }]}>
                 {behaviorCallout.body}
               </Text>
+            </View>
+          )}
+
+          {(patternBusy || (patternFeedback?.insights.length ?? 0) > 0) && (
+            <View
+              style={[
+                styles.patternCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <View style={styles.patternHeader}>
+                <View>
+                  <Text style={[styles.patternEyebrow, { color: colors.tint }]}>
+                    AI Pattern Coach
+                  </Text>
+                  <Text style={[styles.patternTitle, { color: colors.text }]}>
+                    {patternBusy
+                      ? "Reading your rhythm..."
+                      : patternFeedback?.summary ?? "Pattern check ready"}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.patternSourcePill,
+                    { backgroundColor: colors.surface },
+                  ]}
+                >
+                  <Text
+                    style={[styles.patternSourceText, { color: colors.subtle }]}
+                  >
+                    {patternBusy
+                      ? "Live"
+                      : patternFeedback?.source === "openai"
+                        ? "AI"
+                        : "Local"}
+                  </Text>
+                </View>
+              </View>
+
+              {patternBusy ? (
+                <Text style={[styles.patternLoading, { color: colors.subtle }]}>
+                  Checking completion windows, skips, and reschedules.
+                </Text>
+              ) : (
+                patternFeedback?.insights.slice(0, 2).map((insight) => (
+                  <View
+                    key={`${insight.title}-${insight.action}`}
+                    style={[
+                      styles.patternInsight,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.patternInsightTitle, { color: colors.text }]}>
+                      {insight.title}
+                    </Text>
+                    <Text style={[styles.patternInsightBody, { color: colors.subtle }]}>
+                      {insight.body}
+                    </Text>
+                    <Text style={[styles.patternInsightAction, { color: colors.tint }]}>
+                      Try: {insight.action}
+                    </Text>
+                  </View>
+                ))
+              )}
             </View>
           )}
 
@@ -2333,6 +2661,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  petMoodCard: {
+    marginTop: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  petMoodDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 5,
+    marginRight: 10,
+  },
+  petMoodCopy: {
+    flex: 1,
+  },
+  petMoodTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  petMoodBody: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
   petCardFooter: {
     marginTop: 14,
     flexDirection: "row",
@@ -2419,6 +2774,70 @@ const styles = StyleSheet.create({
   calloutBody: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  patternCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  patternHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 12,
+  },
+  patternEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  patternTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    maxWidth: 250,
+  },
+  patternSourcePill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  patternSourceText: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  patternLoading: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  patternInsight: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 8,
+  },
+  patternInsightTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 5,
+  },
+  patternInsightBody: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  patternInsightAction: {
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 7,
   },
   missedBanner: {
     marginHorizontal: 16,
@@ -2879,6 +3298,23 @@ const styles = StyleSheet.create({
     width: 0,
     height: 0,
   },
+  completionBurstRing: {
+    position: "absolute",
+    left: -54,
+    top: -54,
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    borderWidth: 3,
+  },
+  completionBurstCore: {
+    position: "absolute",
+    left: -34,
+    top: -34,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+  },
   completionBurstPiece: {
     position: "absolute",
     left: -4,
@@ -2911,5 +3347,65 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     marginTop: 3,
+  },
+  victoryBurstLayer: {
+    ...StyleSheet.absoluteFillObject,
+    pointerEvents: "none",
+    zIndex: 40,
+  },
+  victoryBurstOrigin: {
+    position: "absolute",
+    width: 0,
+    height: 0,
+  },
+  victoryBurstHalo: {
+    position: "absolute",
+    left: -84,
+    top: -84,
+    width: 168,
+    height: 168,
+    borderRadius: 84,
+    borderWidth: 4,
+  },
+  victoryBurstHaloDelay: {
+    left: -118,
+    top: -118,
+    width: 236,
+    height: 236,
+    borderRadius: 118,
+    borderWidth: 2,
+  },
+  victoryBurstPiece: {
+    position: "absolute",
+    left: -4,
+    top: -4,
+    borderRadius: 999,
+  },
+  victoryBurstBadge: {
+    position: "absolute",
+    left: -118,
+    top: -30,
+    width: 236,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  victoryBurstLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  victoryBurstTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    marginTop: 4,
   },
 });

@@ -133,6 +133,42 @@ class DailyFeedbackResponse(BaseModel):
     source: Literal["openai", "local"]
 
 
+class PatternInsight(BaseModel):
+    title: str
+    body: str
+    action: str
+    confidence: Literal["low", "medium", "high"] = "medium"
+
+
+class PatternFeedbackRequest(BaseModel):
+    tasks: list[FeedbackTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class PatternFeedbackResponse(BaseModel):
+    insights: list[PatternInsight]
+    summary: str
+    source: Literal["openai", "local"]
+
+
+class WeeklyReviewRequest(BaseModel):
+    week_start: str
+    week_end: str
+    tasks: list[FeedbackTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class WeeklyReviewResponse(BaseModel):
+    headline: str
+    summary: str
+    wins: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    next_week_focus: list[str] = Field(default_factory=list)
+    source: Literal["openai", "local"]
+
+
 class BreakdownRequest(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     notes: str = ""
@@ -381,6 +417,22 @@ def _feedback_task_minutes(task: FeedbackTask) -> int:
     if task.priority == "Low":
         return 30
     return 60
+
+
+def _task_time_bucket(task: FeedbackTask) -> str:
+    if not task.time:
+        return "morning"
+
+    minutes = _time_to_minutes(task.time)
+    if minutes is None:
+        return "morning"
+    if minutes < 9 * 60:
+        return "early morning"
+    if minutes < 12 * 60:
+        return "morning"
+    if minutes < 17 * 60:
+        return "afternoon"
+    return "evening"
 
 
 def _clean_title(segment: str) -> str:
@@ -1014,6 +1066,329 @@ def _openai_daily_feedback(
         return None
 
 
+def _local_pattern_feedback(request: PatternFeedbackRequest) -> PatternFeedbackResponse:
+    completed_tasks = [task for task in request.tasks if task.completed]
+    skipped_tasks = [
+        task for task in request.tasks if (task.status or "pending") == "skipped"
+    ]
+    rescheduled_tasks = [
+        task for task in request.tasks if (task.rescheduled_count or 0) > 0
+    ]
+    insights: list[PatternInsight] = []
+
+    if len(request.tasks) < 5:
+        return PatternFeedbackResponse(
+            insights=[
+                PatternInsight(
+                    title="Keep collecting signal",
+                    body="A few more completed and skipped tasks will make your pattern feedback sharper.",
+                    action="Use the app for a couple more days, then check this card again.",
+                    confidence="low",
+                )
+            ],
+            summary="Not enough history for deep patterns yet.",
+            source="local",
+        )
+
+    bucket_totals: dict[str, int] = {}
+    bucket_completed: dict[str, int] = {}
+    bucket_friction: dict[str, int] = {}
+
+    for task in request.tasks:
+        bucket = _task_time_bucket(task)
+        bucket_totals[bucket] = bucket_totals.get(bucket, 0) + 1
+        if task.completed:
+            bucket_completed[bucket] = bucket_completed.get(bucket, 0) + 1
+        if (task.status or "pending") == "skipped" or task.rescheduled_count > 0:
+            bucket_friction[bucket] = bucket_friction.get(bucket, 0) + 1
+
+    scored_buckets = [
+        (
+            bucket,
+            bucket_completed.get(bucket, 0) / total,
+            bucket_friction.get(bucket, 0) / total,
+            total,
+        )
+        for bucket, total in bucket_totals.items()
+        if total >= 2
+    ]
+
+    if scored_buckets:
+        best_bucket, best_rate, _, best_total = max(
+            scored_buckets, key=lambda item: item[1]
+        )
+        worst_bucket, _, worst_friction, worst_total = max(
+            scored_buckets, key=lambda item: item[2]
+        )
+
+        if best_total >= 3 and best_rate >= 0.6:
+            insights.append(
+                PatternInsight(
+                    title=f"{best_bucket.title()} works for you",
+                    body=f"You complete about {round(best_rate * 100)}% of tasks scheduled in the {best_bucket}.",
+                    action=f"Put tomorrow's most important task in the {best_bucket}.",
+                    confidence="high" if best_total >= 5 else "medium",
+                )
+            )
+
+        if worst_total >= 3 and worst_friction >= 0.45:
+            insights.append(
+                PatternInsight(
+                    title=f"{worst_bucket.title()} creates friction",
+                    body=f"Tasks in the {worst_bucket} are skipped or rescheduled about {round(worst_friction * 100)}% of the time.",
+                    action="Move hard tasks out of that window or make them smaller.",
+                    confidence="high" if worst_total >= 5 else "medium",
+                )
+            )
+
+    skip_counts: dict[str, int] = {}
+    for task in skipped_tasks:
+        skip_counts[task.title] = skip_counts.get(task.title, 0) + 1
+
+    if skip_counts:
+        title, count = max(skip_counts.items(), key=lambda item: item[1])
+        if count >= 2:
+            insights.append(
+                PatternInsight(
+                    title=f"{title} keeps slipping",
+                    body=f"You skipped this task {count} times in your history.",
+                    action="Rewrite it as a smaller first step or schedule it earlier.",
+                    confidence="high" if count >= 3 else "medium",
+                )
+            )
+
+    if len(rescheduled_tasks) >= max(3, len(request.tasks) * 0.25):
+        insights.append(
+            PatternInsight(
+                title="Your plan needs more buffer",
+                body="A noticeable chunk of your tasks are being moved after scheduling.",
+                action="Leave 30-45 minutes between important tasks tomorrow.",
+                confidence="medium",
+            )
+        )
+
+    if not insights:
+        completion_rate = len(completed_tasks) / len(request.tasks)
+        insights.append(
+            PatternInsight(
+                title="Stable baseline forming",
+                body=f"Your current completion rate is about {round(completion_rate * 100)}%.",
+                action="Keep the plan simple and let stronger patterns emerge.",
+                confidence="medium",
+            )
+        )
+
+    return PatternFeedbackResponse(
+        insights=insights[:3],
+        summary="I found a few patterns in your task history.",
+        source="local",
+    )
+
+
+def _openai_pattern_feedback(
+    request: PatternFeedbackRequest,
+    baseline: PatternFeedbackResponse,
+) -> PatternFeedbackResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        prompt = {
+            "timezone": request.timezone,
+            "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
+            "tasks": [task.model_dump() for task in request.tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You generate behavior pattern feedback for Daily Discipline. "
+                        "Use task history and the baseline as truth. Return only JSON with: "
+                        '{"summary":"short sentence","insights":[{"title":"short title",'
+                        '"body":"specific observation","action":"specific next action",'
+                        '"confidence":"low|medium|high"}]}. '
+                        "No generic motivation. Point to patterns in timing, skips, reschedules, or task types."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        insights = []
+        for item in data.get("insights", [])[:3]:
+            confidence = item.get("confidence", "medium")
+            if confidence not in ("low", "medium", "high"):
+                confidence = "medium"
+            insights.append(
+                PatternInsight(
+                    title=str(item.get("title") or "Pattern found"),
+                    body=str(item.get("body") or ""),
+                    action=str(item.get("action") or ""),
+                    confidence=confidence,
+                )
+            )
+
+        if not insights:
+            return None
+
+        return PatternFeedbackResponse(
+            insights=insights,
+            summary=str(data.get("summary") or baseline.summary),
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
+def _local_weekly_review(request: WeeklyReviewRequest) -> WeeklyReviewResponse:
+    week_tasks = [
+        task
+        for task in request.tasks
+        if request.week_start <= task.date <= request.week_end
+    ]
+    total = len(week_tasks)
+    completed = sum(1 for task in week_tasks if task.completed)
+    skipped = sum(
+        1 for task in week_tasks if (task.status or "pending") == "skipped"
+    )
+    rescheduled = sum(1 for task in week_tasks if task.rescheduled_count > 0)
+    completion_rate = round((completed / total) * 100) if total else 0
+
+    if total == 0:
+        return WeeklyReviewResponse(
+            headline="No weekly signal yet",
+            summary="This week has no scheduled tasks, so there is nothing useful to review yet.",
+            wins=[],
+            risks=["A blank week makes it hard to build momentum."],
+            next_week_focus=["Schedule 3 anchor tasks before the week starts."],
+            source="local",
+        )
+
+    wins: list[str] = []
+    risks: list[str] = []
+    focus: list[str] = []
+
+    if completed > 0:
+        wins.append(f"You completed {completed} task{'s' if completed != 1 else ''} this week.")
+    if completion_rate >= 70:
+        wins.append("Your weekly completion rate is strong enough to build on.")
+    if skipped:
+        risks.append(f"{skipped} task{'s' if skipped != 1 else ''} got skipped.")
+    if rescheduled:
+        risks.append(f"{rescheduled} task{'s' if rescheduled != 1 else ''} had to move after planning.")
+
+    bucket_counts: dict[str, int] = {}
+    for task in week_tasks:
+        if task.completed:
+            bucket = _task_time_bucket(task)
+            bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+
+    if bucket_counts:
+        best_bucket = max(bucket_counts.items(), key=lambda item: item[1])[0]
+        wins.append(f"Your strongest completion window was the {best_bucket}.")
+        focus.append(f"Put one high-priority task in the {best_bucket} next week.")
+
+    if skipped >= 2:
+        focus.append("Cut or shrink the task type you skipped most often.")
+    if rescheduled >= 2:
+        focus.append("Add more buffer between important tasks.")
+    if completion_rate < 50:
+        focus.append("Plan fewer tasks next week and protect one daily anchor.")
+
+    if not focus:
+        focus.append("Repeat what worked, but keep the plan lean.")
+
+    if completion_rate >= 80:
+        headline = "Strong week"
+        summary = "Your execution is trending well. Next week should protect the same structure."
+    elif completion_rate >= 50:
+        headline = "Useful week"
+        summary = "You made real progress, and the friction points are visible enough to adjust."
+    else:
+        headline = "Reset week"
+        summary = "The plan did not convert cleanly. Next week needs fewer tasks and tighter timing."
+
+    return WeeklyReviewResponse(
+        headline=headline,
+        summary=summary,
+        wins=wins[:3],
+        risks=risks[:3],
+        next_week_focus=focus[:3],
+        source="local",
+    )
+
+
+def _openai_weekly_review(
+    request: WeeklyReviewRequest,
+    baseline: WeeklyReviewResponse,
+) -> WeeklyReviewResponse | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        prompt = {
+            "week_start": request.week_start,
+            "week_end": request.week_end,
+            "timezone": request.timezone,
+            "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
+            "tasks": [task.model_dump() for task in request.tasks],
+            "baseline": baseline.model_dump(),
+        }
+
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You write a weekly review for Daily Discipline. "
+                        "Use the task data and baseline as truth. Return only JSON with: "
+                        '{"headline":"short title","summary":"2 concise sentences max",'
+                        '"wins":["specific win"],"risks":["specific risk"],'
+                        '"next_week_focus":["specific action"]}. '
+                        "Be direct, useful, and non-generic."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+
+        data = json.loads(response.choices[0].message.content or "{}")
+        return WeeklyReviewResponse(
+            headline=str(data.get("headline") or baseline.headline),
+            summary=str(data.get("summary") or baseline.summary),
+            wins=[str(item) for item in data.get("wins", baseline.wins)][:3],
+            risks=[str(item) for item in data.get("risks", baseline.risks)][:3],
+            next_week_focus=[
+                str(item)
+                for item in data.get(
+                    "next_week_focus",
+                    baseline.next_week_focus,
+                )
+            ][:3],
+            source="openai",
+        )
+    except Exception:
+        return None
+
+
 def _local_breakdown(request: BreakdownRequest) -> BreakdownResponse:
     lower = f"{request.title} {request.notes}".lower()
 
@@ -1216,6 +1591,20 @@ def daily_feedback(request: DailyFeedbackRequest):
     baseline = _local_daily_feedback(request)
     ai_feedback = _openai_daily_feedback(request, baseline)
     return ai_feedback or baseline
+
+
+@app.post("/v1/pattern-feedback", response_model=PatternFeedbackResponse)
+def pattern_feedback(request: PatternFeedbackRequest):
+    baseline = _local_pattern_feedback(request)
+    ai_feedback = _openai_pattern_feedback(request, baseline)
+    return ai_feedback or baseline
+
+
+@app.post("/v1/weekly-review", response_model=WeeklyReviewResponse)
+def weekly_review(request: WeeklyReviewRequest):
+    baseline = _local_weekly_review(request)
+    ai_review = _openai_weekly_review(request, baseline)
+    return ai_review or baseline
 
 
 @app.post("/v1/breakdown-task", response_model=BreakdownResponse)

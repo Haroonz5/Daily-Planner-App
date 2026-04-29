@@ -73,6 +73,28 @@ export type DailyFeedbackResult = {
   source: "openai" | "local" | "offline";
 };
 
+export type PatternInsight = {
+  title: string;
+  body: string;
+  action: string;
+  confidence: "low" | "medium" | "high";
+};
+
+export type PatternFeedbackResult = {
+  insights: PatternInsight[];
+  summary: string;
+  source: "openai" | "local" | "offline";
+};
+
+export type WeeklyReviewResult = {
+  headline: string;
+  summary: string;
+  wins: string[];
+  risks: string[];
+  nextWeekFocus: string[];
+  source: "openai" | "local" | "offline";
+};
+
 export type TaskBreakdownStep = {
   title: string;
   durationMinutes: number;
@@ -149,6 +171,16 @@ const getTimeMinutes = (time: string) => {
   const date = parseTimeToDate(time);
   if (!date) return null;
   return date.getHours() * 60 + date.getMinutes();
+};
+
+const getBucketLabel = (time?: string) => {
+  if (!time) return "morning";
+  const minutes = getTimeMinutes(time);
+  if (minutes === null) return "morning";
+  if (minutes < 9 * 60) return "early morning";
+  if (minutes < 12 * 60) return "morning";
+  if (minutes < 17 * 60) return "afternoon";
+  return "evening";
 };
 
 const roundUpToInterval = (value: number, interval: number) =>
@@ -802,6 +834,299 @@ export const getDailyFeedback = async ({
       message: String(data.message ?? "Review your day and adjust tomorrow."),
       wins: (data.wins ?? []).map(String),
       adjustments: (data.adjustments ?? []).map(String),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localPatternFeedback = ({
+  tasks,
+}: {
+  tasks: AiHistoryTask[];
+}): PatternFeedbackResult => {
+  if (tasks.length < 5) {
+    return {
+      insights: [
+        {
+          title: "Keep collecting signal",
+          body: "A few more completed and skipped tasks will make your pattern feedback sharper.",
+          action: "Use the app for a couple more days, then check this card again.",
+          confidence: "low",
+        },
+      ],
+      summary: "Not enough history for deep patterns yet.",
+      source: "offline",
+    };
+  }
+
+  const bucketTotals = new Map<string, number>();
+  const bucketCompleted = new Map<string, number>();
+  const bucketFriction = new Map<string, number>();
+  const skipCounts = new Map<string, number>();
+  const insights: PatternInsight[] = [];
+
+  tasks.forEach((task) => {
+    const bucket = getBucketLabel(task.time);
+    bucketTotals.set(bucket, (bucketTotals.get(bucket) ?? 0) + 1);
+    if (task.completed) {
+      bucketCompleted.set(bucket, (bucketCompleted.get(bucket) ?? 0) + 1);
+    }
+    if (task.status === "skipped" || (task.rescheduledCount ?? 0) > 0) {
+      bucketFriction.set(bucket, (bucketFriction.get(bucket) ?? 0) + 1);
+    }
+    if (task.status === "skipped") {
+      skipCounts.set(task.title, (skipCounts.get(task.title) ?? 0) + 1);
+    }
+  });
+
+  const bucketScores = [...bucketTotals.entries()]
+    .filter(([, total]) => total >= 2)
+    .map(([bucket, total]) => ({
+      bucket,
+      total,
+      completionRate: (bucketCompleted.get(bucket) ?? 0) / total,
+      frictionRate: (bucketFriction.get(bucket) ?? 0) / total,
+    }));
+
+  const bestBucket = bucketScores.reduce(
+    (best, item) => (item.completionRate > best.completionRate ? item : best),
+    bucketScores[0]
+  );
+  const worstBucket = bucketScores.reduce(
+    (worst, item) => (item.frictionRate > worst.frictionRate ? item : worst),
+    bucketScores[0]
+  );
+
+  if (bestBucket && bestBucket.total >= 3 && bestBucket.completionRate >= 0.6) {
+    insights.push({
+      title: `${bestBucket.bucket} works for you`,
+      body: `You complete about ${Math.round(bestBucket.completionRate * 100)}% of tasks scheduled in the ${bestBucket.bucket}.`,
+      action: `Put tomorrow's most important task in the ${bestBucket.bucket}.`,
+      confidence: bestBucket.total >= 5 ? "high" : "medium",
+    });
+  }
+
+  if (worstBucket && worstBucket.total >= 3 && worstBucket.frictionRate >= 0.45) {
+    insights.push({
+      title: `${worstBucket.bucket} creates friction`,
+      body: `Tasks in the ${worstBucket.bucket} are skipped or rescheduled about ${Math.round(worstBucket.frictionRate * 100)}% of the time.`,
+      action: "Move hard tasks out of that window or make them smaller.",
+      confidence: worstBucket.total >= 5 ? "high" : "medium",
+    });
+  }
+
+  const mostSkipped = [...skipCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (mostSkipped && mostSkipped[1] >= 2) {
+    insights.push({
+      title: `${mostSkipped[0]} keeps slipping`,
+      body: `You skipped this task ${mostSkipped[1]} times in your history.`,
+      action: "Rewrite it as a smaller first step or schedule it earlier.",
+      confidence: mostSkipped[1] >= 3 ? "high" : "medium",
+    });
+  }
+
+  if (insights.length === 0) {
+    const completionRate =
+      tasks.filter((task) => task.completed).length / Math.max(tasks.length, 1);
+    insights.push({
+      title: "Stable baseline forming",
+      body: `Your current completion rate is about ${Math.round(completionRate * 100)}%.`,
+      action: "Keep the plan simple and let stronger patterns emerge.",
+      confidence: "medium",
+    });
+  }
+
+  return {
+    insights: insights.slice(0, 3),
+    summary: "I found a few patterns in your task history.",
+    source: "offline",
+  };
+};
+
+const serializeHistoryTasks = (tasks: AiHistoryTask[]) =>
+  tasks.map((task) => ({
+    id: task.id ?? null,
+    title: task.title,
+    date: task.date,
+    time: task.time ?? null,
+    priority: task.priority ?? "Medium",
+    completed: task.completed ?? false,
+    status: task.status ?? "pending",
+    rescheduled_count: task.rescheduledCount ?? 0,
+    completed_at: task.completedAt ?? null,
+    skipped_at: task.skippedAt ?? null,
+  }));
+
+export const getPatternFeedback = async ({
+  tasks,
+  timezone,
+}: {
+  tasks: AiHistoryTask[];
+  timezone: string;
+}): Promise<PatternFeedbackResult> => {
+  const fallback = () => localPatternFeedback({ tasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/pattern-feedback`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        timezone,
+        now: new Date().toISOString(),
+        tasks: serializeHistoryTasks(tasks),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      insights: (data.insights ?? []).map((insight: any) => ({
+        title: String(insight.title ?? "Pattern found"),
+        body: String(insight.body ?? ""),
+        action: String(insight.action ?? ""),
+        confidence: (["low", "medium", "high"].includes(insight.confidence)
+          ? insight.confidence
+          : "medium") as PatternInsight["confidence"],
+      })),
+      summary: String(data.summary ?? "Pattern feedback ready."),
+      source: data.source === "openai" ? "openai" : "local",
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localWeeklyReview = ({
+  weekStart,
+  weekEnd,
+  tasks,
+}: {
+  weekStart: string;
+  weekEnd: string;
+  tasks: AiHistoryTask[];
+}): WeeklyReviewResult => {
+  const weekTasks = tasks.filter(
+    (task) => task.date >= weekStart && task.date <= weekEnd
+  );
+  const total = weekTasks.length;
+  const completed = weekTasks.filter((task) => task.completed).length;
+  const skipped = weekTasks.filter((task) => task.status === "skipped").length;
+  const rescheduled = weekTasks.filter(
+    (task) => (task.rescheduledCount ?? 0) > 0
+  ).length;
+  const completionRate = total ? Math.round((completed / total) * 100) : 0;
+
+  if (total === 0) {
+    return {
+      headline: "No weekly signal yet",
+      summary:
+        "This week has no scheduled tasks, so there is nothing useful to review yet.",
+      wins: [],
+      risks: ["A blank week makes it hard to build momentum."],
+      nextWeekFocus: ["Schedule 3 anchor tasks before the week starts."],
+      source: "offline",
+    };
+  }
+
+  const wins: string[] = [];
+  const risks: string[] = [];
+  const nextWeekFocus: string[] = [];
+
+  if (completed > 0) wins.push(`You completed ${completed} tasks this week.`);
+  if (completionRate >= 70) {
+    wins.push("Your weekly completion rate is strong enough to build on.");
+  }
+  if (skipped > 0) risks.push(`${skipped} tasks got skipped.`);
+  if (rescheduled > 0) risks.push(`${rescheduled} tasks moved after planning.`);
+
+  const completedBuckets = new Map<string, number>();
+  weekTasks.forEach((task) => {
+    if (!task.completed) return;
+    const bucket = getBucketLabel(task.time);
+    completedBuckets.set(bucket, (completedBuckets.get(bucket) ?? 0) + 1);
+  });
+  const bestBucket = [...completedBuckets.entries()].sort((a, b) => b[1] - a[1])[0];
+
+  if (bestBucket) {
+    wins.push(`Your strongest completion window was the ${bestBucket[0]}.`);
+    nextWeekFocus.push(`Put one high-priority task in the ${bestBucket[0]}.`);
+  }
+  if (skipped >= 2) {
+    nextWeekFocus.push("Cut or shrink the task type you skipped most often.");
+  }
+  if (rescheduled >= 2) {
+    nextWeekFocus.push("Add more buffer between important tasks.");
+  }
+  if (completionRate < 50) {
+    nextWeekFocus.push("Plan fewer tasks and protect one daily anchor.");
+  }
+
+  return {
+    headline:
+      completionRate >= 80
+        ? "Strong week"
+        : completionRate >= 50
+          ? "Useful week"
+          : "Reset week",
+    summary:
+      completionRate >= 80
+        ? "Your execution is trending well. Protect the same structure next week."
+        : completionRate >= 50
+          ? "You made real progress, and the friction points are clear enough to adjust."
+          : "The plan did not convert cleanly. Next week needs fewer tasks and tighter timing.",
+    wins: wins.slice(0, 3),
+    risks: risks.slice(0, 3),
+    nextWeekFocus: nextWeekFocus.length
+      ? nextWeekFocus.slice(0, 3)
+      : ["Repeat what worked, but keep the plan lean."],
+    source: "offline",
+  };
+};
+
+export const getWeeklyReview = async ({
+  weekStart,
+  weekEnd,
+  tasks,
+  timezone,
+}: {
+  weekStart: string;
+  weekEnd: string;
+  tasks: AiHistoryTask[];
+  timezone: string;
+}): Promise<WeeklyReviewResult> => {
+  const fallback = () => localWeeklyReview({ weekStart, weekEnd, tasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/weekly-review`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        week_start: weekStart,
+        week_end: weekEnd,
+        timezone,
+        now: new Date().toISOString(),
+        tasks: serializeHistoryTasks(tasks),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      headline: String(data.headline ?? "Weekly review"),
+      summary: String(data.summary ?? "Review ready."),
+      wins: (data.wins ?? []).map(String),
+      risks: (data.risks ?? []).map(String),
+      nextWeekFocus: (data.next_week_focus ?? data.nextWeekFocus ?? []).map(
+        String
+      ),
       source: data.source === "openai" ? "openai" : "local",
     };
   } catch {
