@@ -9,7 +9,10 @@ export type AppThemeName =
   | "ocean"
   | "midnight"
   | "obsidian"
-  | "emberNight";
+  | "emberNight"
+  | "amazonLight"
+  | "githubDark"
+  | "auroraDark";
 
 type ThemePalette = {
   text: string;
@@ -39,6 +42,9 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   midnight: "Midnight",
   obsidian: "Obsidian",
   emberNight: "Ember Night",
+  amazonLight: "Amazon Light",
+  githubDark: "GitHub Dark",
+  auroraDark: "Aurora Dark",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -192,6 +198,57 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff7a93",
     success: "#8ed69d",
     warning: "#ffc46b",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  amazonLight: {
+    text: "#17202a",
+    background: "#f3f4f6",
+    card: "#ffffff",
+    surface: "#e7eef3",
+    tint: "#ff9900",
+    icon: "#56616d",
+    tabIconDefault: "#7d8791",
+    tabIconSelected: "#ff9900",
+    subtle: "#5f6f7b",
+    border: "#d5dde5",
+    danger: "#c7511f",
+    success: "#067d62",
+    warning: "#b7791f",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  githubDark: {
+    text: "#f0f6fc",
+    background: "#0d1117",
+    card: "#161b22",
+    surface: "#21262d",
+    tint: "#58a6ff",
+    icon: "#8b949e",
+    tabIconDefault: "#6e7681",
+    tabIconSelected: "#58a6ff",
+    subtle: "#8b949e",
+    border: "#30363d",
+    danger: "#ff7b72",
+    success: "#3fb950",
+    warning: "#d29922",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  auroraDark: {
+    text: "#eef7ff",
+    background: "#07111f",
+    card: "#0d1b2e",
+    surface: "#132943",
+    tint: "#7dd3fc",
+    icon: "#92a8c4",
+    tabIconDefault: "#5e728c",
+    tabIconSelected: "#7dd3fc",
+    subtle: "#b5c7dc",
+    border: "#203651",
+    danger: "#fb7185",
+    success: "#34d399",
+    warning: "#fbbf24",
     statusBar: "light",
     navigationTone: "dark",
   },
