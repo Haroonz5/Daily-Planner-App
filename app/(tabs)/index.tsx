@@ -31,6 +31,7 @@ import {
   getPetProgress,
   getTaskXp,
   getUnlockedPets,
+  toDateSafe,
   type PetTier,
 } from "@/constants/rewards";
 import { Colors, ThemeLabels } from "@/constants/theme";
@@ -78,6 +79,7 @@ type Task = {
   lastActionAt?: Date | string | null;
   rescheduledCount?: number;
   originalTime?: string;
+  recoveryFromDate?: string | null;
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
 };
@@ -241,8 +243,8 @@ export default function HomeScreen() {
 
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayDate = yesterday.toISOString().split("T")[0];
-        const todayDate = new Date().toISOString().split("T")[0];
+        const yesterdayDate = formatDateKey(yesterday);
+        const todayDate = formatDateKey(new Date());
 
         const incompleteTasks = fetched.filter(
           (t) =>
@@ -255,6 +257,8 @@ export default function HomeScreen() {
           await updateDoc(doc(db, "users", uid, "tasks", task.id), {
             date: todayDate,
             lastActionAt: new Date(),
+            recoveryFromDate: yesterdayDate,
+            rescheduledCount: (task.rescheduledCount ?? 0) + 1,
           });
 
           await syncTaskNotifications({
@@ -411,6 +415,51 @@ export default function HomeScreen() {
       return taskMinutes !== null && taskMinutes + 60 < currentMinutes;
     });
   }, [todayTasks]);
+  const recoveryMission = useMemo(() => {
+    const yesterday = new Date(`${today}T12:00:00`);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayDate = formatDateKey(yesterday);
+    const recoveryTasks = todayTasks.filter(
+      (task) => task.recoveryFromDate === yesterdayDate
+    );
+    const openRecoveryTasks = recoveryTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    );
+    const yesterdayTasks = tasks.filter((task) => task.date === yesterdayDate);
+    const yesterdayMissedTasks = yesterdayTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    );
+
+    if (recoveryTasks.length === 0 && yesterdayMissedTasks.length === 0) {
+      return null;
+    }
+
+    const completedHighBeforeNoon = todayTasks.some((task) => {
+      if (!task.completed || (task.priority ?? "Medium") !== "High") {
+        return false;
+      }
+
+      const completedAt = toDateSafe(task.completedAt);
+      return completedAt ? completedAt.getHours() < 12 : true;
+    });
+    const recoveredCarriedTask = recoveryTasks.some((task) => task.completed);
+    const saved = completedHighBeforeNoon || recoveredCarriedTask;
+    const target =
+      openRecoveryTasks[0] ??
+      todayTasks.find(
+        (task) =>
+          !task.completed &&
+          (task.status ?? "pending") !== "skipped" &&
+          (task.priority ?? "Medium") === "High"
+      ) ??
+      null;
+
+    return {
+      missedCount: Math.max(openRecoveryTasks.length, yesterdayMissedTasks.length),
+      saved,
+      target,
+    };
+  }, [tasks, today, todayTasks]);
   const petMood =
     todayTasks.length === 0
       ? {
@@ -1577,36 +1626,52 @@ export default function HomeScreen() {
                 {unlockedPets.length} of {PET_TIERS.length} companions unlocked
               </Text>
 
-              <TouchableOpacity
-                style={[
-                  styles.petCollectionButton,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                ]}
-                onPress={() => setPetCollectionVisible(true)}
-              >
-                <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
-                  Collection
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.petFooterActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.petCollectionButton,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => router.push("/pet-home" as never)}
+                >
+                  <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
+                    Pet Home
+                  </Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.petCollectionButton,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                    marginLeft: 8,
-                  },
-                ]}
-                onPress={() => router.push("/focus")}
-              >
-                <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
-                  Focus
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.petCollectionButton,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => setPetCollectionVisible(true)}
+                >
+                  <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
+                    Collection
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.petCollectionButton,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => router.push("/focus")}
+                >
+                  <Text style={[styles.petCollectionButtonText, { color: colors.text }]}>
+                    Focus
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -1626,6 +1691,74 @@ export default function HomeScreen() {
               <Text style={[styles.calloutBody, { color: colors.subtle }]}>
                 {behaviorCallout.body}
               </Text>
+            </View>
+          )}
+
+          {recoveryMission && (
+            <View
+              style={[
+                styles.recoveryCard,
+                {
+                  backgroundColor: recoveryMission.saved
+                    ? colors.surface
+                    : colors.card,
+                  borderColor: recoveryMission.saved
+                    ? colors.success
+                    : colors.warning,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <View style={styles.recoveryHeader}>
+                <View>
+                  <Text style={[styles.recoveryEyebrow, { color: colors.tint }]}>
+                    Streak Protection
+                  </Text>
+                  <Text style={[styles.recoveryTitle, { color: colors.text }]}>
+                    {recoveryMission.saved
+                      ? "Recovery saved"
+                      : "Recovery mission active"}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.recoveryPill,
+                    {
+                      backgroundColor: recoveryMission.saved
+                        ? colors.success
+                        : colors.warning,
+                    },
+                  ]}
+                >
+                  <Text style={styles.recoveryPillText}>
+                    {recoveryMission.saved ? "Protected" : "Open"}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[styles.recoveryBody, { color: colors.subtle }]}>
+                {recoveryMission.saved
+                  ? "You bounced back after a slip. That is the behavior we want to reward."
+                  : recoveryMission.target
+                    ? `${recoveryMission.missedCount} slipped task${
+                        recoveryMission.missedCount === 1 ? "" : "s"
+                      } got carried forward. Finish ${recoveryMission.target.title} to protect momentum.`
+                    : "Yesterday slipped a bit. Add one recovery task and complete it today to protect momentum."}
+              </Text>
+
+              {!recoveryMission.saved && !recoveryMission.target ? (
+                <TouchableOpacity
+                  style={[
+                    styles.recoveryAction,
+                    { backgroundColor: colors.tint },
+                  ]}
+                  onPress={() => router.push("/(tabs)/explore")}
+                >
+                  <Text style={styles.recoveryActionText}>
+                    Add Recovery Task
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
 
@@ -1804,6 +1937,30 @@ export default function HomeScreen() {
               {todayTasks.map((task) => renderTask(task))}
             </View>
           )}
+
+          <TouchableOpacity
+            style={[
+              styles.weekPlannerButton,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.tint,
+              },
+            ]}
+            onPress={() => router.push("/week" as never)}
+          >
+            <View style={styles.weekPlannerCopy}>
+              <Text style={[styles.weekPlannerTitle, { color: colors.text }]}>
+                Week View
+              </Text>
+              <Text style={[styles.weekPlannerText, { color: colors.subtle }]}>
+                Review today, tomorrow, and the next 7 days in order.
+              </Text>
+            </View>
+            <Text style={[styles.weekPlannerArrow, { color: colors.tint }]}>
+              Open
+            </Text>
+          </TouchableOpacity>
 
           {futureTasks.length > 0 && (
             <View style={styles.futureSection}>
@@ -2736,11 +2893,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
   },
   petFooterHint: {
     fontSize: 12,
     flex: 1,
     marginRight: 12,
+  },
+  petFooterActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 8,
   },
   petCollectionButton: {
     borderRadius: 999,
@@ -2817,6 +2981,61 @@ const styles = StyleSheet.create({
   calloutBody: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  recoveryCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.09,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  recoveryHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  recoveryEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  recoveryTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  recoveryPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  recoveryPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  recoveryBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  recoveryAction: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginTop: 12,
+  },
+  recoveryActionText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
   patternCard: {
     marginHorizontal: 16,
@@ -3044,6 +3263,38 @@ const styles = StyleSheet.create({
   },
   futureTaskList: {
     marginBottom: 0,
+  },
+  weekPlannerButton: {
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  weekPlannerCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  weekPlannerTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  weekPlannerText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  weekPlannerArrow: {
+    fontSize: 13,
+    fontWeight: "900",
   },
   summaryButton: {
     marginHorizontal: 16,

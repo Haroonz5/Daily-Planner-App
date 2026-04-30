@@ -77,11 +77,13 @@ export default function RootLayout() {
   useEffect(() => {
     if (loading || !themeLoaded || onboardingSeen === null) return;
 
-    const firstSegment = segments[0];
+    const firstSegment = String(segments[0] ?? "");
     const inProtectedTabs = firstSegment === "(tabs)";
     const inSummary = firstSegment === "summary";
     const inFocus = firstSegment === "focus";
     const inSettings = firstSegment === "settings";
+    const inPetHome = firstSegment === "pet-home";
+    const inWeek = firstSegment === "week";
     const inOnboarding = firstSegment === "onboarding";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
 
@@ -95,7 +97,10 @@ export default function RootLayout() {
       return;
     }
 
-    if (!user && (inProtectedTabs || inSummary || inFocus || inSettings)) {
+    if (
+      !user &&
+      (inProtectedTabs || inSummary || inFocus || inSettings || inPetHome || inWeek)
+    ) {
       router.replace("/login");
       return;
     }
@@ -187,6 +192,8 @@ export default function RootLayout() {
             <Stack.Screen name="signup" options={{ headerShown: false }} />
             <Stack.Screen name="summary" options={{ headerShown: false }} />
             <Stack.Screen name="focus" options={{ headerShown: false }} />
+            <Stack.Screen name="pet-home" options={{ headerShown: false }} />
+            <Stack.Screen name="week" options={{ headerShown: false }} />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ headerShown: false }} />
           </Stack>

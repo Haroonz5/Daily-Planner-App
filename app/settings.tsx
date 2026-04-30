@@ -25,8 +25,11 @@ import {
 import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
+  getNotificationSettings,
   refreshNotificationState,
+  saveNotificationSettings,
   scheduleQuickTestNotification,
+  type NotificationSettings,
 } from "../utils/notifications";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -50,6 +53,9 @@ type SettingsScreenProps = {
   showBackButton?: boolean;
 };
 
+const notificationTimeOptions = ["6:30 AM", "7:00 AM", "8:00 AM", "9:00 AM"];
+const eveningTimeOptions = ["8:00 PM", "9:00 PM", "10:00 PM"];
+
 export default function SettingsScreen({
   showBackButton = true,
 }: SettingsScreenProps) {
@@ -63,6 +69,15 @@ export default function SettingsScreen({
   const [petNickname, setPetNickname] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [remindersBusy, setRemindersBusy] = useState(false);
+  const [notificationSettings, setNotificationSettings] =
+    useState<NotificationSettings>({
+      taskRemindersEnabled: true,
+      missedFollowUpEnabled: true,
+      morningSummaryEnabled: true,
+      eveningReminderEnabled: true,
+      morningSummaryTime: "7:00 AM",
+      eveningReminderTime: "9:00 PM",
+    });
   const [statusMessage, setStatusMessage] = useState("");
   const [statusTone, setStatusTone] = useState<StatusTone>("idle");
 
@@ -89,6 +104,18 @@ export default function SettingsScreen({
     setDisplayName(profile.displayName ?? "");
     setPetNickname(profile.petNickname ?? "");
   }, [profile.displayName, profile.petNickname]);
+
+  useEffect(() => {
+    let active = true;
+
+    void getNotificationSettings().then((settings) => {
+      if (active) setNotificationSettings(settings);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const rewardData = useMemo(() => {
     const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
@@ -149,6 +176,27 @@ export default function SettingsScreen({
       setStatusMessage(
         "Reminder schedule refreshed for evening and tomorrow morning."
       );
+    } finally {
+      setRemindersBusy(false);
+    }
+  };
+
+  const updateNotificationSettings = async (
+    updates: Partial<NotificationSettings>
+  ) => {
+    const uid = auth.currentUser?.uid;
+    setRemindersBusy(true);
+
+    try {
+      const nextSettings = await saveNotificationSettings(updates);
+      setNotificationSettings(nextSettings);
+
+      if (uid) {
+        await refreshNotificationState(uid);
+      }
+
+      setStatusTone("success");
+      setStatusMessage("Notification preferences saved and synced.");
     } finally {
       setRemindersBusy(false);
     }
@@ -476,6 +524,123 @@ export default function SettingsScreen({
           reminders are still healthy on-device.
         </Text>
 
+        <View style={styles.settingRows}>
+          {[
+            {
+              label: "Task reminders",
+              value: notificationSettings.taskRemindersEnabled,
+              keyName: "taskRemindersEnabled" as const,
+            },
+            {
+              label: "Missed task follow-up",
+              value: notificationSettings.missedFollowUpEnabled,
+              keyName: "missedFollowUpEnabled" as const,
+            },
+            {
+              label: "Morning summary",
+              value: notificationSettings.morningSummaryEnabled,
+              keyName: "morningSummaryEnabled" as const,
+            },
+            {
+              label: "Evening planning reminder",
+              value: notificationSettings.eveningReminderEnabled,
+              keyName: "eveningReminderEnabled" as const,
+            },
+          ].map((item) => (
+            <View
+              key={item.keyName}
+              style={[
+                styles.settingToggleRow,
+                { borderBottomColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.settingToggleLabel, { color: colors.text }]}>
+                {item.label}
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.settingToggleButton,
+                  {
+                    backgroundColor: item.value ? colors.tint : colors.surface,
+                    borderColor: item.value ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() =>
+                  updateNotificationSettings({ [item.keyName]: !item.value })
+                }
+                disabled={remindersBusy}
+              >
+                <Text
+                  style={[
+                    styles.settingToggleText,
+                    { color: item.value ? "#fff" : colors.subtle },
+                  ]}
+                >
+                  {item.value ? "On" : "Off"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+
+        <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+          Morning Summary Time
+        </Text>
+        <View style={styles.timeChipRow}>
+          {notificationTimeOptions.map((time) => {
+            const selected = notificationSettings.morningSummaryTime === time;
+            return (
+              <TouchableOpacity
+                key={`morning-${time}`}
+                style={[
+                  styles.timeChip,
+                  {
+                    backgroundColor: selected ? colors.surface : colors.background,
+                    borderColor: selected ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() =>
+                  updateNotificationSettings({ morningSummaryTime: time })
+                }
+                disabled={remindersBusy}
+              >
+                <Text style={[styles.timeChipText, { color: colors.text }]}>
+                  {time}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+          Evening Planning Time
+        </Text>
+        <View style={styles.timeChipRow}>
+          {eveningTimeOptions.map((time) => {
+            const selected = notificationSettings.eveningReminderTime === time;
+            return (
+              <TouchableOpacity
+                key={`evening-${time}`}
+                style={[
+                  styles.timeChip,
+                  {
+                    backgroundColor: selected ? colors.surface : colors.background,
+                    borderColor: selected ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() =>
+                  updateNotificationSettings({ eveningReminderTime: time })
+                }
+                disabled={remindersBusy}
+              >
+                <Text style={[styles.timeChipText, { color: colors.text }]}>
+                  {time}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={[styles.secondaryButton, { backgroundColor: colors.surface }]}
@@ -700,6 +865,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginBottom: 10,
+  },
+  settingRows: {
+    marginTop: 8,
+  },
+  settingToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 12,
+  },
+  settingToggleLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    marginRight: 12,
+  },
+  settingToggleButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    minWidth: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    alignItems: "center",
+  },
+  settingToggleText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  timeChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginBottom: 4,
+  },
+  timeChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  timeChipText: {
+    fontSize: 12,
+    fontWeight: "800",
   },
   buttonRow: {
     flexDirection: "row",

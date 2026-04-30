@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
@@ -18,6 +18,12 @@ import {
   getDailyFeedback,
   type DailyFeedbackResult,
 } from "@/utils/ai";
+import {
+  cancelTaskNotifications,
+  syncMorningSummaryNotification,
+  syncTaskNotifications,
+} from "@/utils/notifications";
+import { formatDateKey } from "@/utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -60,7 +66,7 @@ export default function SummaryScreen() {
     useState<DailyFeedbackResult | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
 
-  const todayDate = new Date().toISOString().split("T")[0];
+  const todayDate = formatDateKey(new Date());
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
@@ -114,6 +120,53 @@ export default function SummaryScreen() {
       : summary.allDone
         ? "You completed all your tasks today. Amazing work!"
         : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
+  const reviewTasks = useMemo(
+    () =>
+      summary.todayTasks.filter(
+        (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+      ),
+    [summary.todayTasks]
+  );
+
+  const rescheduleTaskTomorrow = async (task: Task) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowDate = formatDateKey(tomorrow);
+    const nextTime = task.time ?? "9:00 AM";
+
+    await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+      date: tomorrowDate,
+      time: nextTime,
+      status: "pending",
+      completed: false,
+      skippedAt: null,
+      lastActionAt: new Date(),
+      rescheduledCount: (task.rescheduledCount ?? 0) + 1,
+    });
+
+    await syncTaskNotifications({
+      id: task.id,
+      title: task.title,
+      time: nextTime,
+      date: tomorrowDate,
+      priority: task.priority,
+      completed: false,
+      status: "pending",
+    });
+    await syncMorningSummaryNotification(uid);
+  };
+
+  const deleteReviewTask = async (task: Task) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    await cancelTaskNotifications(task.id);
+    await deleteDoc(doc(db, "users", uid, "tasks", task.id));
+    await syncMorningSummaryNotification(uid);
+  };
 
   useEffect(() => {
     let active = true;
@@ -322,6 +375,73 @@ export default function SummaryScreen() {
           />
         </View>
       </View>
+
+      {reviewTasks.length > 0 && (
+        <View
+          style={[
+            styles.reviewCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.warning,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <Text style={[styles.reviewEyebrow, { color: colors.warning }]}>
+            Missed Task Review
+          </Text>
+          <Text style={[styles.reviewTitle, { color: colors.text }]}>
+            Decide what deserves another shot
+          </Text>
+          <Text style={[styles.reviewBody, { color: colors.subtle }]}>
+            Move worthwhile tasks to tomorrow, or delete the ones that were
+            really just noise.
+          </Text>
+
+          {reviewTasks.map((task) => (
+            <View
+              key={`review-${task.id}`}
+              style={[
+                styles.reviewTask,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.reviewTaskCopy}>
+                <Text style={[styles.reviewTaskTitle, { color: colors.text }]}>
+                  {task.title}
+                </Text>
+                <Text style={[styles.reviewTaskMeta, { color: colors.subtle }]}>
+                  {task.time ?? "No time"} • {task.priority ?? "Medium"}
+                </Text>
+              </View>
+
+              <View style={styles.reviewActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.reviewActionButton,
+                    { backgroundColor: colors.tint },
+                  ]}
+                  onPress={() => rescheduleTaskTomorrow(task)}
+                >
+                  <Text style={styles.reviewActionText}>Tomorrow</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.reviewActionButton,
+                    { backgroundColor: colors.danger },
+                  ]}
+                  onPress={() => deleteReviewTask(task)}
+                >
+                  <Text style={styles.reviewActionText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       <View
         style={[
@@ -600,6 +720,67 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: 8,
     borderRadius: 4,
+  },
+  reviewCard: {
+    borderRadius: 22,
+    padding: 18,
+    width: "100%",
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  reviewEyebrow: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 7,
+  },
+  reviewTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  reviewBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  reviewTask: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 10,
+  },
+  reviewTaskCopy: {
+    marginBottom: 10,
+  },
+  reviewTaskTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 3,
+  },
+  reviewTaskMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  reviewActions: {
+    flexDirection: "row",
+  },
+  reviewActionButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    marginRight: 8,
+  },
+  reviewActionText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
   card: {
     borderRadius: 20,

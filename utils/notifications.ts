@@ -14,11 +14,30 @@ export type NotificationTask = {
   priority?: "Low" | "Medium" | "High";
 };
 
+export type NotificationSettings = {
+  taskRemindersEnabled: boolean;
+  missedFollowUpEnabled: boolean;
+  morningSummaryEnabled: boolean;
+  eveningReminderEnabled: boolean;
+  morningSummaryTime: string;
+  eveningReminderTime: string;
+};
+
 const TASK_NOTIFICATION_IDS_KEY = "taskNotificationIds";
 const MORNING_SUMMARY_NOTIFICATION_KEY = "morningSummaryNotificationId";
 const EVENING_REMINDER_NOTIFICATION_KEY = "eveningReminderNotificationId";
+const NOTIFICATION_SETTINGS_KEY = "notificationSettings";
 const MORNING_SUMMARY_NOTIFICATION_ID = "daily-discipline-morning-summary";
 const EVENING_REMINDER_NOTIFICATION_ID = "daily-discipline-evening-reminder";
+
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  taskRemindersEnabled: true,
+  missedFollowUpEnabled: true,
+  morningSummaryEnabled: true,
+  eveningReminderEnabled: true,
+  morningSummaryTime: "7:00 AM",
+  eveningReminderTime: "9:00 PM",
+};
 
 const NOTIFICATION_KINDS = {
   eveningReminder: "evening-planning-reminder",
@@ -68,6 +87,14 @@ const parseTimeToMinutes = (time: string) => {
   return normalizedHours * 60 + minutes;
 };
 
+const parseClockTime = (time: string, fallback: string) => {
+  const minutes = parseTimeToMinutes(time) ?? parseTimeToMinutes(fallback) ?? 0;
+  return {
+    hour: Math.floor(minutes / 60),
+    minute: minutes % 60,
+  };
+};
+
 const loadTaskNotificationMap = async (): Promise<TaskNotificationMap> => {
   const raw = await AsyncStorage.getItem(TASK_NOTIFICATION_IDS_KEY);
   if (!raw) return {};
@@ -80,6 +107,34 @@ const loadTaskNotificationMap = async (): Promise<TaskNotificationMap> => {
 
 const saveTaskNotificationMap = async (map: TaskNotificationMap) => {
   await AsyncStorage.setItem(TASK_NOTIFICATION_IDS_KEY, JSON.stringify(map));
+};
+
+export const getNotificationSettings = async (): Promise<NotificationSettings> => {
+  const raw = await AsyncStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+  if (!raw) return DEFAULT_NOTIFICATION_SETTINGS;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<NotificationSettings>;
+    return {
+      ...DEFAULT_NOTIFICATION_SETTINGS,
+      ...parsed,
+    };
+  } catch {
+    return DEFAULT_NOTIFICATION_SETTINGS;
+  }
+};
+
+export const saveNotificationSettings = async (
+  updates: Partial<NotificationSettings>
+) => {
+  const current = await getNotificationSettings();
+  const next = {
+    ...current,
+    ...updates,
+  };
+
+  await AsyncStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(next));
+  return next;
 };
 
 const cancelMatchingScheduledNotifications = async ({
@@ -131,9 +186,7 @@ export const ensureNotificationPermissions = async () => {
 };
 
 export const ensureBaseReminders = async () => {
-  const granted = await ensureNotificationPermissions();
-  if (!granted) return;
-
+  const settings = await getNotificationSettings();
   const existingId = await AsyncStorage.getItem(EVENING_REMINDER_NOTIFICATION_KEY);
   await cancelMatchingScheduledNotifications({
     storedId: existingId,
@@ -141,6 +194,19 @@ export const ensureBaseReminders = async () => {
     title: "Plan tomorrow tonight",
     kind: NOTIFICATION_KINDS.eveningReminder,
   });
+
+  if (!settings.eveningReminderEnabled) {
+    await AsyncStorage.removeItem(EVENING_REMINDER_NOTIFICATION_KEY);
+    return;
+  }
+
+  const granted = await ensureNotificationPermissions();
+  if (!granted) return;
+
+  const eveningTime = parseClockTime(
+    settings.eveningReminderTime,
+    DEFAULT_NOTIFICATION_SETTINGS.eveningReminderTime
+  );
 
   const id = await Notifications.scheduleNotificationAsync({
     identifier: EVENING_REMINDER_NOTIFICATION_ID,
@@ -151,8 +217,8 @@ export const ensureBaseReminders = async () => {
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour: 21,
-      minute: 0,
+      hour: eveningTime.hour,
+      minute: eveningTime.minute,
     },
   });
 
@@ -179,6 +245,9 @@ export const cancelManyTaskNotifications = async (taskIds: string[]) => {
 
 export const syncTaskNotifications = async (task: NotificationTask) => {
   await cancelTaskNotifications(task.id);
+
+  const settings = await getNotificationSettings();
+  if (!settings.taskRemindersEnabled) return;
 
   const granted = await ensureNotificationPermissions();
   if (!granted) return;
@@ -210,28 +279,31 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
     },
   });
 
-  const missedDate = new Date(dueDate.getTime() + 15 * 60 * 1000);
-  const missedId = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Still waiting on this one",
-      body: `${task.title} was due at ${task.time}. Move now or reschedule honestly.`,
-      data: { kind: NOTIFICATION_KINDS.taskMissed, taskId: task.id },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: missedDate,
-    },
-  });
+  const ids = [dueId];
+
+  if (settings.missedFollowUpEnabled) {
+    const missedDate = new Date(dueDate.getTime() + 15 * 60 * 1000);
+    const missedId = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Still waiting on this one",
+        body: `${task.title} was due at ${task.time}. Move now or reschedule honestly.`,
+        data: { kind: NOTIFICATION_KINDS.taskMissed, taskId: task.id },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: missedDate,
+      },
+    });
+    ids.push(missedId);
+  }
 
   const notificationMap = await loadTaskNotificationMap();
-  notificationMap[task.id] = [dueId, missedId];
+  notificationMap[task.id] = ids;
   await saveTaskNotificationMap(notificationMap);
 };
 
 export const syncMorningSummaryNotification = async (uid: string) => {
-  const granted = await ensureNotificationPermissions();
-  if (!granted) return;
-
+  const settings = await getNotificationSettings();
   const existingId = await AsyncStorage.getItem(MORNING_SUMMARY_NOTIFICATION_KEY);
   await cancelMatchingScheduledNotifications({
     storedId: existingId,
@@ -239,6 +311,14 @@ export const syncMorningSummaryNotification = async (uid: string) => {
     title: "This is what past you said",
     kind: NOTIFICATION_KINDS.morningSummary,
   });
+
+  if (!settings.morningSummaryEnabled) {
+    await AsyncStorage.removeItem(MORNING_SUMMARY_NOTIFICATION_KEY);
+    return;
+  }
+
+  const granted = await ensureNotificationPermissions();
+  if (!granted) return;
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -265,7 +345,11 @@ export const syncMorningSummaryNotification = async (uid: string) => {
   }
 
   const summaryDate = new Date(tomorrow);
-  summaryDate.setHours(7, 0, 0, 0);
+  const morningTime = parseClockTime(
+    settings.morningSummaryTime,
+    DEFAULT_NOTIFICATION_SETTINGS.morningSummaryTime
+  );
+  summaryDate.setHours(morningTime.hour, morningTime.minute, 0, 0);
 
   if (summaryDate <= new Date()) {
     await AsyncStorage.removeItem(MORNING_SUMMARY_NOTIFICATION_KEY);
