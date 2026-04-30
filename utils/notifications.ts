@@ -17,6 +17,15 @@ export type NotificationTask = {
 const TASK_NOTIFICATION_IDS_KEY = "taskNotificationIds";
 const MORNING_SUMMARY_NOTIFICATION_KEY = "morningSummaryNotificationId";
 const EVENING_REMINDER_NOTIFICATION_KEY = "eveningReminderNotificationId";
+const MORNING_SUMMARY_NOTIFICATION_ID = "daily-discipline-morning-summary";
+const EVENING_REMINDER_NOTIFICATION_ID = "daily-discipline-evening-reminder";
+
+const NOTIFICATION_KINDS = {
+  eveningReminder: "evening-planning-reminder",
+  morningSummary: "morning-summary",
+  taskDue: "task-due",
+  taskMissed: "task-missed",
+} as const;
 
 type TaskNotificationMap = Record<string, string[]>;
 
@@ -73,6 +82,46 @@ const saveTaskNotificationMap = async (map: TaskNotificationMap) => {
   await AsyncStorage.setItem(TASK_NOTIFICATION_IDS_KEY, JSON.stringify(map));
 };
 
+const cancelMatchingScheduledNotifications = async ({
+  storedId,
+  stableId,
+  title,
+  kind,
+}: {
+  storedId?: string | null;
+  stableId: string;
+  title: string;
+  kind: string;
+}) => {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(
+    () => []
+  );
+  const idsToCancel = new Set<string>();
+
+  if (storedId) idsToCancel.add(storedId);
+  idsToCancel.add(stableId);
+
+  scheduled.forEach((request) => {
+    const requestKind = (request.content.data as { kind?: string } | undefined)
+      ?.kind;
+
+    if (
+      request.identifier === stableId ||
+      request.identifier === storedId ||
+      request.content.title === title ||
+      requestKind === kind
+    ) {
+      idsToCancel.add(request.identifier);
+    }
+  });
+
+  await Promise.all(
+    [...idsToCancel].map((id) =>
+      Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+    )
+  );
+};
+
 export const ensureNotificationPermissions = async () => {
   const current = await Notifications.getPermissionsAsync();
   if (current.granted) return true;
@@ -86,14 +135,19 @@ export const ensureBaseReminders = async () => {
   if (!granted) return;
 
   const existingId = await AsyncStorage.getItem(EVENING_REMINDER_NOTIFICATION_KEY);
-  if (existingId) {
-    await Notifications.cancelScheduledNotificationAsync(existingId).catch(() => {});
-  }
+  await cancelMatchingScheduledNotifications({
+    storedId: existingId,
+    stableId: EVENING_REMINDER_NOTIFICATION_ID,
+    title: "Plan tomorrow tonight",
+    kind: NOTIFICATION_KINDS.eveningReminder,
+  });
 
   const id = await Notifications.scheduleNotificationAsync({
+    identifier: EVENING_REMINDER_NOTIFICATION_ID,
     content: {
       title: "Plan tomorrow tonight",
       body: "Don't leave tomorrow to chance. Set your tasks tonight so morning has direction.",
+      data: { kind: NOTIFICATION_KINDS.eveningReminder },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -148,6 +202,7 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
     content: {
       title: dueTitle,
       body: dueBody,
+      data: { kind: NOTIFICATION_KINDS.taskDue, taskId: task.id },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -160,6 +215,7 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
     content: {
       title: "Still waiting on this one",
       body: `${task.title} was due at ${task.time}. Move now or reschedule honestly.`,
+      data: { kind: NOTIFICATION_KINDS.taskMissed, taskId: task.id },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -177,9 +233,12 @@ export const syncMorningSummaryNotification = async (uid: string) => {
   if (!granted) return;
 
   const existingId = await AsyncStorage.getItem(MORNING_SUMMARY_NOTIFICATION_KEY);
-  if (existingId) {
-    await Notifications.cancelScheduledNotificationAsync(existingId).catch(() => {});
-  }
+  await cancelMatchingScheduledNotifications({
+    storedId: existingId,
+    stableId: MORNING_SUMMARY_NOTIFICATION_ID,
+    title: "This is what past you said",
+    kind: NOTIFICATION_KINDS.morningSummary,
+  });
 
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -223,9 +282,11 @@ export const syncMorningSummaryNotification = async (uid: string) => {
     extraCount > 0 ? `${preview} • +${extraCount} more` : preview;
 
   const id = await Notifications.scheduleNotificationAsync({
+    identifier: MORNING_SUMMARY_NOTIFICATION_ID,
     content: {
       title: "This is what past you said",
       body,
+      data: { kind: NOTIFICATION_KINDS.morningSummary },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,

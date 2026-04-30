@@ -37,6 +37,7 @@ import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   formatDateKey,
+  getRelativeDateLabel,
   getBehaviorCallout,
   getTimeBucket,
   parseTimeToMinutes,
@@ -285,6 +286,24 @@ export default function HomeScreen() {
     () => tasks.filter((task) => task.date > today),
     [tasks, today]
   );
+  const futureTaskGroups = useMemo(() => {
+    const grouped = new Map<string, Task[]>();
+    const sortedFutureTasks = [...futureTasks].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+    });
+
+    sortedFutureTasks.forEach((task) => {
+      const current = grouped.get(task.date) ?? [];
+      grouped.set(task.date, [...current, task]);
+    });
+
+    return [...grouped.entries()].map(([date, groupTasks]) => ({
+      date,
+      label: getRelativeDateLabel(date),
+      tasks: groupTasks,
+    }));
+  }, [futureTasks]);
   const completed = todayTasks.filter((t) => t.completed).length;
   const openTodayTasks = todayTasks.filter(
     (task) => !task.completed && (task.status ?? "pending") !== "skipped"
@@ -950,6 +969,8 @@ export default function HomeScreen() {
   };
 
   const isCurrentTask = (task: Task) => {
+    if (task.date !== today) return false;
+
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const taskMinutes = parseTimeToMinutes(task.time);
@@ -1402,15 +1423,6 @@ export default function HomeScreen() {
                   Theme
                 </Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => router.push("/settings")}
-                style={[styles.iconButton, { backgroundColor: colors.surface }]}
-              >
-                <Text style={[styles.iconButtonText, { color: colors.subtle }]}>
-                  Settings
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -1652,6 +1664,8 @@ export default function HomeScreen() {
                       ? "Live"
                       : patternFeedback?.source === "openai"
                         ? "AI"
+                        : patternFeedback?.source === "offline"
+                          ? "Offline"
                         : "Local"}
                   </Text>
                 </View>
@@ -1796,17 +1810,46 @@ export default function HomeScreen() {
               <Text style={[styles.futureHeading, { color: colors.text }]}>
                 📅 Future Plans
               </Text>
-              <View
-                style={[
-                  styles.taskList,
-                  {
-                    backgroundColor: colors.card,
-                    shadowColor: colors.tint,
-                  },
-                ]}
-              >
-                {futureTasks.map((task) => renderTask(task, true))}
-              </View>
+              {futureTaskGroups.map((group) => (
+                <View key={group.date} style={styles.futureDayGroup}>
+                  <View style={styles.futureDayHeader}>
+                    <View>
+                      <Text style={[styles.futureDayLabel, { color: colors.text }]}>
+                        {group.label}
+                      </Text>
+                      <Text style={[styles.futureDayDate, { color: colors.subtle }]}>
+                        {group.date}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.futureDayPill,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.futureDayPillText, { color: colors.subtle }]}>
+                        {group.tasks.length} task{group.tasks.length === 1 ? "" : "s"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.taskList,
+                      styles.futureTaskList,
+                      {
+                        backgroundColor: colors.card,
+                        shadowColor: colors.tint,
+                      },
+                    ]}
+                  >
+                    {group.tasks.map((task) => renderTask(task, true))}
+                  </View>
+                </View>
+              ))}
             </View>
           )}
 
@@ -2969,6 +3012,38 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 12,
     paddingHorizontal: 24,
+  },
+  futureDayGroup: {
+    marginBottom: 16,
+  },
+  futureDayHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 24,
+    marginBottom: 8,
+  },
+  futureDayLabel: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  futureDayDate: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  futureDayPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  futureDayPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  futureTaskList: {
+    marginBottom: 0,
   },
   summaryButton: {
     marginHorizontal: 16,

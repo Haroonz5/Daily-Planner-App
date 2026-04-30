@@ -16,10 +16,15 @@ Daily Discipline is a mobile productivity app built with Expo and React Native. 
 - Local notifications for task reminders
 - Morning summary and evening planning reminders
 - AI natural-language task input
+- AI recurring task detection, like "Gym at 6 PM every day"
 - AI reality check for overloaded schedules
 - AI rescheduling for missed tasks
 - AI daily feedback based on actual completion
+- AI pattern feedback based on skips, timing, and reschedules
+- AI weekly review with wins and next-week focus
 - AI task breakdown for large or vague tasks
+- EAS build setup for internal testers
+- Docker/Render setup for deploying the AI backend
 
 ## AI Features
 
@@ -62,6 +67,12 @@ Study for biology exam
 ```
 
 can be broken into smaller scheduled steps.
+
+### Pattern Feedback And Weekly Review
+
+The Today screen can surface behavior patterns like strongest time windows,
+repeated skips, and reschedule friction. The Stats screen includes a weekly AI
+review with wins, risks, and next-week focus items.
 
 ## Tech Stack
 
@@ -197,7 +208,22 @@ npm run web
 npm run typecheck
 npm run lint
 npm run ai:dev
+npm run eas:preview
+npm run eas:simulator
+npm run eas:production
 ```
+
+## Testing And Release
+
+Tester setup lives in:
+
+```txt
+docs/TESTING_AND_RELEASE.md
+```
+
+The app includes `eas.json` profiles for preview, simulator, and production
+builds. The AI backend includes a Dockerfile and `render.yaml` so it can be
+deployed before sending builds to testers.
 
 ## Current Status
 
@@ -205,7 +231,6 @@ The app currently supports task planning, reminders, AI scheduling tools, XP rew
 
 The next possible improvements would be:
 
-- Pattern feedback
 - Deeper pet progression
 - Streak protection
 - More companion customization
@@ -215,4 +240,3 @@ The next possible improvements would be:
 ## Purpose
 
 Daily Discipline is designed to make productivity feel more personal, realistic, and rewarding. Instead of only tracking tasks, the app helps users understand their habits, recover from missed tasks, and build consistency over time.
-

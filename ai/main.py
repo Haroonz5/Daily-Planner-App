@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 Priority = Literal["Low", "Medium", "High"]
+Recurrence = Literal["none", "daily", "weekdays", "weekly"]
 
 
 class ExistingTask(BaseModel):
@@ -36,6 +37,7 @@ class ParsedTask(BaseModel):
     time: str
     priority: Priority = "Medium"
     duration_minutes: int | None = Field(default=None, ge=1, le=720)
+    recurrence: Recurrence = "none"
     notes: str = ""
 
 
@@ -208,6 +210,10 @@ TASK_SCHEMA = {
                     "time": {"type": "string"},
                     "priority": {"type": "string", "enum": ["Low", "Medium", "High"]},
                     "duration_minutes": {"type": ["integer", "null"]},
+                    "recurrence": {
+                        "type": "string",
+                        "enum": ["none", "daily", "weekdays", "weekly"],
+                    },
                     "notes": {"type": "string"},
                 },
                 "required": [
@@ -216,6 +222,7 @@ TASK_SCHEMA = {
                     "time",
                     "priority",
                     "duration_minutes",
+                    "recurrence",
                     "notes",
                 ],
             },
@@ -437,9 +444,15 @@ def _task_time_bucket(task: FeedbackTask) -> str:
 
 def _clean_title(segment: str) -> str:
     cleaned = re.sub(
-        r"\b(today|tomorrow|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b",
         "",
         segment,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(today|tomorrow|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        "",
+        cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
@@ -456,6 +469,19 @@ def _clean_title(segment: str) -> str:
     )
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
     return cleaned[:1].upper() + cleaned[1:] if cleaned else "Task"
+
+
+def _recurrence_from_text(segment: str) -> Recurrence:
+    lower = segment.lower()
+
+    if re.search(r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b", lower):
+        return "weekdays"
+    if re.search(r"\b(every\s+day|everyday|daily|each\s+day)\b", lower):
+        return "daily"
+    if re.search(r"\b(every\s+week|weekly|each\s+week)\b", lower):
+        return "weekly"
+
+    return "none"
 
 
 def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
@@ -495,6 +521,7 @@ def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
                 time=_format_time(hour, minute, period),
                 priority=_priority_from_text(segment),
                 duration_minutes=duration,
+                recurrence=_recurrence_from_text(segment),
                 notes=notes,
             )
         )
@@ -535,8 +562,11 @@ def _openai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
                         "Return only JSON matching this shape: "
                         '{"tasks":[{"title":"Gym","date":"YYYY-MM-DD","time":"6:00 PM",'
                         '"priority":"Low|Medium|High","duration_minutes":60,'
-                        '"notes":""}],"warnings":[]}. '
+                        '"recurrence":"none|daily|weekdays|weekly","notes":""}],"warnings":[]}. '
                         "Use the provided default_date when no date is stated. "
+                        "If the user says every day, everyday, or daily, set recurrence to daily. "
+                        "If the user says weekdays or Monday to Friday, set recurrence to weekdays. "
+                        "If the user says weekly or every week, set recurrence to weekly. "
                         "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
                         "Keep titles short and action-oriented. Do not invent tasks."
                     ),

@@ -61,6 +61,7 @@ type Task = {
   rescheduledCount?: number;
   originalTime?: string;
   recurrence?: RecurrenceRule;
+  recurrenceGroupId?: string | null;
 };
 
 const priorityColors: Record<TaskPriority, string> = {
@@ -156,6 +157,11 @@ export default function AddTask() {
   const futureDraftLabel = getRelativeDateLabel(futureDraftDateKey);
   const futureDraftTimeLabel = formatTimeFromDate(futureDraftTime);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const aiDraftOccurrenceCount = parsedTasks.reduce(
+    (sum, task) =>
+      sum + buildRecurringDates(task.date, task.recurrence ?? "none").length,
+    0
+  );
 
   const planningInsights = useMemo(() => {
     const selectedDayTasks = tasks.filter((task) => task.date === selectedDateKey);
@@ -357,7 +363,7 @@ export default function AddTask() {
         setRealityCheck(check);
       }
     } catch (e: any) {
-      setError(e.message ?? "The AI parser could not read that yet.");
+      setError(e.message ?? "The AI planner could not read that yet.");
     } finally {
       setAiBusy(false);
     }
@@ -512,7 +518,7 @@ export default function AddTask() {
 
   const handleAddParsedTasks = async () => {
     if (parsedTasks.length === 0) {
-      setError("Parse tasks first, then you can add them.");
+      setError("Use Plan with AI first, then you can add the drafts.");
       return;
     }
 
@@ -532,35 +538,42 @@ export default function AddTask() {
         priority: TaskPriority;
       }[] = [];
 
-      parsedTasks.forEach((parsedTask) => {
-        const taskRef = doc(collection(db, "users", uid, "tasks"));
+      parsedTasks.forEach((parsedTask, index) => {
         const safePriority = parsedTask.priority ?? "Medium";
+        const taskRecurrence = parsedTask.recurrence ?? "none";
+        const taskDates = buildRecurringDates(parsedTask.date, taskRecurrence);
+        const recurrenceGroupId =
+          taskRecurrence === "none" ? null : `${uid}-${Date.now()}-ai-${index}`;
 
-        batch.set(taskRef, {
-          title: parsedTask.title.trim(),
-          notes: composeParsedNotes(parsedTask),
-          priority: safePriority,
-          time: parsedTask.time,
-          date: parsedTask.date,
-          completed: false,
-          status: "pending",
-          createdAt: new Date(),
-          completedAt: null,
-          skippedAt: null,
-          lastActionAt: new Date(),
-          rescheduledCount: 0,
-          originalTime: parsedTask.time,
-          recurrence: "none",
-          recurrenceGroupId: null,
-          aiCreated: true,
-        });
+        taskDates.forEach((dateKey) => {
+          const taskRef = doc(collection(db, "users", uid, "tasks"));
 
-        createdTasks.push({
-          id: taskRef.id,
-          title: parsedTask.title.trim(),
-          time: parsedTask.time,
-          date: parsedTask.date,
-          priority: safePriority,
+          batch.set(taskRef, {
+            title: parsedTask.title.trim(),
+            notes: composeParsedNotes(parsedTask),
+            priority: safePriority,
+            time: parsedTask.time,
+            date: dateKey,
+            completed: false,
+            status: "pending",
+            createdAt: new Date(),
+            completedAt: null,
+            skippedAt: null,
+            lastActionAt: new Date(),
+            rescheduledCount: 0,
+            originalTime: parsedTask.time,
+            recurrence: taskRecurrence,
+            recurrenceGroupId,
+            aiCreated: true,
+          });
+
+          createdTasks.push({
+            id: taskRef.id,
+            title: parsedTask.title.trim(),
+            time: parsedTask.time,
+            date: dateKey,
+            priority: safePriority,
+          });
         });
       });
 
@@ -584,10 +597,10 @@ export default function AddTask() {
       setAiSource(null);
       setRealityCheck(null);
       setError("");
-      setSuccessMessage(`${createdTasks.length} AI-parsed task${createdTasks.length === 1 ? "" : "s"} added.`);
+      setSuccessMessage(`${createdTasks.length} AI-planned task${createdTasks.length === 1 ? "" : "s"} added.`);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
-      setError(e.message ?? "Something went wrong while adding AI-parsed tasks.");
+      setError(e.message ?? "Something went wrong while adding AI-planned tasks.");
     }
   };
 
@@ -707,7 +720,7 @@ export default function AddTask() {
           <Text style={styles.plannerHeroKicker}>Smart Planning</Text>
           <Text style={styles.plannerHeroTitle}>Make it doable before you start</Text>
           <Text style={styles.plannerHeroBody}>
-            Parse messy ideas, break big tasks into steps, and reality-check the day before it gets overloaded.
+            Turn messy ideas into tasks, break big work into steps, and reality-check the day before it gets overloaded.
           </Text>
         </View>
 
@@ -766,20 +779,56 @@ export default function AddTask() {
               disabled={aiBusy}
             >
               <Text style={styles.aiPrimaryText}>
-                {aiBusy ? "Parsing..." : "Parse Tasks"}
+                {aiBusy ? "Planning..." : "Plan with AI"}
               </Text>
             </TouchableOpacity>
           </View>
+
+          {(aiBusy || aiSource) && (
+            <View
+              style={[
+                styles.aiStatusCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor:
+                    aiSource === "offline" ? colors.warning : colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.aiStatusTitle, { color: colors.text }]}>
+                {aiBusy
+                  ? "Building your task plan..."
+                  : aiSource === "openai"
+                    ? "AI plan ready"
+                    : aiSource === "local"
+                      ? "Smart fallback used"
+                      : "Offline planner used"}
+              </Text>
+              <Text style={[styles.aiStatusBody, { color: colors.subtle }]}>
+                {aiBusy
+                  ? "Checking the text, dates, times, and whether the day is realistic."
+                  : aiSource === "openai"
+                    ? "The backend AI understood your tasks and checked the schedule."
+                    : aiSource === "local"
+                      ? "The AI service is online, but it used the app's local planner instead of OpenAI."
+                      : "The AI backend could not be reached, so the app used its built-in planner. You can still add tasks."}
+              </Text>
+            </View>
+          )}
 
           {parsedTasks.length > 0 && (
             <View style={styles.aiPreviewWrap}>
               <View style={styles.aiPreviewHeader}>
                 <Text style={[styles.aiPreviewTitle, { color: colors.text }]}>
-                  Parsed Tasks
+                  AI Drafts
                 </Text>
                 {aiSource ? (
                   <Text style={[styles.aiSourceText, { color: colors.subtle }]}>
-                    {aiSource === "openai" ? "AI" : "Local"} parser
+                    {aiSource === "openai"
+                      ? "AI"
+                      : aiSource === "offline"
+                        ? "Offline"
+                        : "Local"} planner
                   </Text>
                 ) : null}
               </View>
@@ -807,6 +856,12 @@ export default function AddTask() {
                     {getRelativeDateLabel(task.date)} at {task.time}
                     {task.durationMinutes ? ` • ${task.durationMinutes} min` : ""}
                   </Text>
+                  {task.recurrence && task.recurrence !== "none" && (
+                    <Text style={[styles.aiParsedRepeat, { color: colors.tint }]}>
+                      Repeats {recurrenceLabels[task.recurrence].toLowerCase()} · creates{" "}
+                      {buildRecurringDates(task.date, task.recurrence).length} tasks
+                    </Text>
+                  )}
                 </View>
               ))}
 
@@ -905,7 +960,7 @@ export default function AddTask() {
                             : {
                                 ...realityCheck,
                                 summary:
-                                  "Trim candidates removed. Parse again if you want a fresh check.",
+                                  "Trim candidates removed. Run Plan with AI again if you want a fresh check.",
                                 warnings: [],
                                 suggestions: [
                                   "Review the remaining tasks before adding them.",
@@ -939,7 +994,7 @@ export default function AddTask() {
                 <Text style={styles.aiPrimaryText}>
                   {realityCheck?.severity === "overloaded"
                     ? "Add Anyway"
-                    : `Add ${parsedTasks.length} Parsed Task${parsedTasks.length === 1 ? "" : "s"}`}
+                    : `Add ${aiDraftOccurrenceCount} Scheduled Task${aiDraftOccurrenceCount === 1 ? "" : "s"}`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1566,6 +1621,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  aiParsedRepeat: {
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+    marginTop: 6,
+  },
   aiWarningText: {
     fontSize: 12,
     lineHeight: 18,
@@ -1625,6 +1686,21 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 12,
+  },
+  aiStatusCard: {
+    borderWidth: 1,
+    borderRadius: 15,
+    padding: 12,
+    marginTop: 12,
+  },
+  aiStatusTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  aiStatusBody: {
+    fontSize: 12,
+    lineHeight: 17,
   },
   breakdownCard: {
     borderWidth: 1,

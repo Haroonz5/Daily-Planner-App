@@ -10,9 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "icon": "./assets/images/app-icon.png"
+      "icon": "./assets/images/app-icon.png",
+      "bundleIdentifier": "com.haroonzaman.dailydiscipline"
     },
     "android": {
+      "package": "com.haroonzaman.dailydiscipline",
       "adaptiveIcon": {
         "backgroundColor": "#030647",
         "foregroundImage": "./assets/images/app-icon.png"

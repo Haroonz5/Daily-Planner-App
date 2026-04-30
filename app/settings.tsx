@@ -46,7 +46,13 @@ type Task = {
   completedAt?: any;
 };
 
-export default function SettingsScreen() {
+type SettingsScreenProps = {
+  showBackButton?: boolean;
+};
+
+export default function SettingsScreen({
+  showBackButton = true,
+}: SettingsScreenProps) {
   const router = useRouter();
   const { themeName, setThemeName } = useAppTheme();
   const { profile, saveProfile } = useUserProfile();
@@ -175,9 +181,11 @@ export default function SettingsScreen() {
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={[styles.backText, { color: colors.tint }]}>Back</Text>
-        </TouchableOpacity>
+        {showBackButton && (
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={[styles.backText, { color: colors.tint }]}>Back</Text>
+          </TouchableOpacity>
+        )}
         <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
         <Text style={[styles.subtitle, { color: colors.subtle }]}>
           Personalize the app, check reminders, and keep the system feeling

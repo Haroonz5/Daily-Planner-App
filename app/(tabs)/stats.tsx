@@ -396,13 +396,37 @@ export default function StatsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackground colors={colors} variant="calm" />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
-          <Text style={styles.emoji}>📊</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
-          <Text style={[styles.subtitle, { color: colors.subtle }]}>
-            See how your discipline is shaping up.
-          </Text>
+          <View style={styles.headerCopy}>
+            <Text style={[styles.headerKicker, { color: colors.tint }]}>
+              Analytics
+            </Text>
+            <Text style={[styles.title, { color: colors.text }]}>Your Stats</Text>
+            <Text style={[styles.subtitle, { color: colors.subtle }]}>
+              A cleaner read on consistency, timing, XP, and what to adjust next.
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.headerBadge,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.headerBadgeValue, { color: colors.text }]}>
+              {stats.levelData.level}
+            </Text>
+            <Text style={[styles.headerBadgeLabel, { color: colors.subtle }]}>
+              Level
+            </Text>
+          </View>
         </View>
 
         <View
@@ -431,6 +455,21 @@ export default function StatsScreen() {
           <Text style={styles.dashboardBody}>
             Best window: {bucketLabels[stats.mostProductiveWindow]} • Watch: {bucketLabels[stats.riskWindow]}
           </Text>
+
+          <View style={styles.dashboardMetricRow}>
+            <View style={styles.dashboardMetric}>
+              <Text style={styles.dashboardMetricValue}>{stats.todayPercent}%</Text>
+              <Text style={styles.dashboardMetricLabel}>today</Text>
+            </View>
+            <View style={styles.dashboardMetric}>
+              <Text style={styles.dashboardMetricValue}>{stats.streak}</Text>
+              <Text style={styles.dashboardMetricLabel}>streak</Text>
+            </View>
+            <View style={styles.dashboardMetric}>
+              <Text style={styles.dashboardMetricValue}>{stats.onTimeRate}%</Text>
+              <Text style={styles.dashboardMetricLabel}>on time</Text>
+            </View>
+          </View>
         </View>
 
       <View
@@ -465,6 +504,8 @@ export default function StatsScreen() {
                 ? "Live"
                 : weeklyReview?.source === "openai"
                   ? "AI"
+                  : weeklyReview?.source === "offline"
+                    ? "Offline"
                   : "Local"}
             </Text>
           </View>
@@ -529,7 +570,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.petCard,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <View style={styles.petHero}>
@@ -571,7 +616,11 @@ export default function StatsScreen() {
         <View
           style={[
             styles.topCard,
-            { backgroundColor: colors.card, shadowColor: colors.tint },
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
           ]}
         >
           <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -588,7 +637,11 @@ export default function StatsScreen() {
         <View
           style={[
             styles.topCard,
-            { backgroundColor: colors.card, shadowColor: colors.tint },
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
           ]}
         >
           <Text style={[styles.cardTitle, { color: colors.subtle }]}>Level</Text>
@@ -604,7 +657,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -637,7 +694,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -670,7 +731,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -689,7 +754,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -719,7 +788,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -755,7 +828,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -798,7 +875,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -830,7 +911,11 @@ export default function StatsScreen() {
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card, shadowColor: colors.tint },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
@@ -877,7 +962,6 @@ export default function StatsScreen() {
         </View>
       </View>
 
-      <View style={{ height: 120 }} />
       </ScrollView>
     </View>
   );
@@ -885,10 +969,49 @@ export default function StatsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { alignItems: "center", paddingTop: 60, paddingBottom: 24 },
-  emoji: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 32, fontWeight: "700" },
-  subtitle: { fontSize: 14, marginTop: 6 },
+  scrollContent: {
+    paddingBottom: 130,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 22,
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  headerKicker: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  title: { fontSize: 34, fontWeight: "900", letterSpacing: -0.7 },
+  subtitle: { fontSize: 14, marginTop: 7, lineHeight: 20 },
+  headerBadge: {
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    alignItems: "center",
+    minWidth: 74,
+  },
+  headerBadgeValue: {
+    fontSize: 26,
+    fontWeight: "900",
+    lineHeight: 29,
+  },
+  headerBadgeLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
   dashboardHero: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -959,11 +1082,37 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 14,
   },
+  dashboardMetricRow: {
+    flexDirection: "row",
+    marginTop: 18,
+    borderRadius: 22,
+    padding: 8,
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  dashboardMetric: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  dashboardMetricValue: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  dashboardMetricLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
   petCard: {
     borderRadius: 22,
     padding: 20,
     marginHorizontal: 16,
     marginBottom: 16,
+    borderWidth: 1,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -1070,6 +1219,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     marginHorizontal: 4,
+    borderWidth: 1,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,
@@ -1088,6 +1238,7 @@ const styles = StyleSheet.create({
     padding: 20,
     marginHorizontal: 16,
     marginBottom: 16,
+    borderWidth: 1,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 12,

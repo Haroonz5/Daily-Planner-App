@@ -1,4 +1,4 @@
-import { formatDateKey } from "./task-helpers";
+import { formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
 
@@ -19,6 +19,7 @@ export type ParsedAiTask = {
   priority: AiTaskPriority;
   durationMinutes?: number | null;
   notes?: string;
+  recurrence?: RecurrenceRule;
 };
 
 export type ParseNaturalTasksResult = {
@@ -157,6 +158,31 @@ const getLocalDuration = (text: string) => {
     : Math.round(value);
 };
 
+const recurrenceRules: RecurrenceRule[] = ["none", "daily", "weekdays", "weekly"];
+
+const normalizeRecurrence = (value: unknown): RecurrenceRule =>
+  recurrenceRules.includes(value as RecurrenceRule)
+    ? (value as RecurrenceRule)
+    : "none";
+
+const getLocalRecurrence = (text: string): RecurrenceRule => {
+  const lower = text.toLowerCase();
+
+  if (/\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b/.test(lower)) {
+    return "weekdays";
+  }
+
+  if (/\b(every\s+day|everyday|daily|each\s+day)\b/.test(lower)) {
+    return "daily";
+  }
+
+  if (/\b(every\s+week|weekly|each\s+week)\b/.test(lower)) {
+    return "weekly";
+  }
+
+  return "none";
+};
+
 const estimateTaskMinutes = (task: {
   durationMinutes?: number | null;
   priority?: AiTaskPriority;
@@ -198,6 +224,10 @@ const formatMinutesToTaskTime = (minutes: number) => {
 const cleanLocalTitle = (segment: string) => {
   const cleaned = segment
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
+    .replace(
+      /\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b/gi,
+      ""
+    )
     .replace(
       /\bfor\s+\d+(?:\.\d+)?\s*(hours?|hrs?|minutes?|mins?)\b/gi,
       ""
@@ -249,6 +279,7 @@ const localParseNaturalTasks = (
     }
 
     const durationMinutes = getLocalDuration(segment);
+    const recurrence = getLocalRecurrence(segment);
     return [
       {
         title: cleanLocalTitle(segment),
@@ -260,6 +291,7 @@ const localParseNaturalTasks = (
             ? "Low"
             : "Medium",
         durationMinutes,
+        recurrence,
         notes: durationMinutes
           ? `Estimated duration: ${durationMinutes} minutes`
           : "",
@@ -314,6 +346,7 @@ export const parseNaturalTasks = async ({
           ? task.priority
           : "Medium") as AiTaskPriority,
         durationMinutes: task.duration_minutes ?? task.durationMinutes ?? null,
+        recurrence: normalizeRecurrence(task.recurrence),
         notes: String(task.notes ?? ""),
       })),
       warnings: (data.warnings ?? []).map(String),

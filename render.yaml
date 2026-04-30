@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: daily-discipline-ai
+    env: docker
+    rootDir: ai
+    plan: starter
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: AI_ALLOWED_ORIGINS
+        value: "*"
+      - key: OPENAI_API_KEY
+        sync: false

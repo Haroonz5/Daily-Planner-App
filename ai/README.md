@@ -29,6 +29,21 @@ EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_LAN_IP:8000 npx expo start -c
 
 Use your Mac LAN IP when testing on a physical phone. `localhost` only works for simulators or the same machine.
 
+## Deploy
+
+The repository root includes:
+
+```txt
+render.yaml
+ai/Dockerfile
+```
+
+Deploy the service, set `OPENAI_API_KEY`, then point the app at the deployed URL:
+
+```bash
+EXPO_PUBLIC_AI_API_URL=https://your-ai-backend npx expo start -c
+```
+
 ## Endpoints
 
 - `GET /health`

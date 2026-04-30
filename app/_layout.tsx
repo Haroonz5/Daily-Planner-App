@@ -8,6 +8,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { useEffect, useState } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
@@ -110,7 +111,41 @@ export default function RootLayout() {
   };
 
   if (loading || !themeLoaded || onboardingSeen === null) {
-    return null;
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            backgroundColor: "#030647",
+          }}
+        >
+          <ActivityIndicator color="#c4a8d4" size="large" />
+          <Text
+            style={{
+              marginTop: 16,
+              color: "#fff",
+              fontSize: 18,
+              fontWeight: "800",
+            }}
+          >
+            Loading Daily Discipline
+          </Text>
+          <Text
+            style={{
+              marginTop: 6,
+              color: "rgba(255,255,255,0.68)",
+              fontSize: 13,
+              textAlign: "center",
+            }}
+          >
+            Checking your account, theme, and reminders.
+          </Text>
+        </View>
+      </GestureHandlerRootView>
+    );
   }
 
   const palette = Colors[themeName];
