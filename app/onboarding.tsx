@@ -8,27 +8,62 @@ import {
   View,
 } from "react-native";
 
+import { AmbientBackground } from "@/components/ambient-background";
+import { PetSprite } from "@/components/pet-sprite";
 import { markOnboardingSeen, useAppTheme } from "@/constants/appTheme";
+import type { PetKey } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 
-const slides = [
+type OnboardingSlide = {
+  emoji: string;
+  title: string;
+  description: string;
+  label: string;
+  petKey?: PetKey;
+  bullets: string[];
+};
+
+const slides: OnboardingSlide[] = [
   {
-    emoji: "🌙",
-    title: "Plan tomorrow tonight",
+    emoji: "☀️",
+    label: "Step 1",
+    title: "Plan before the day gets loud",
     description:
-      "Set your tasks the night before so your day starts with direction instead of guesswork.",
+      "Set tasks for today, tomorrow, or the future so your day starts with direction instead of guesswork.",
+    bullets: ["Today and future tasks", "Recurring routines", "Clean schedule review"],
   },
   {
-    emoji: "🎯",
-    title: "Focus on today only",
+    emoji: "✨",
+    label: "AI Assist",
+    title: "Type messy plans. Get real tasks.",
     description:
-      "See what matters now, track progress, and build discipline one task at a time.",
+      "Write something like 'gym at 6 every day' and the app turns it into structured tasks you can approve.",
+    bullets: ["Natural language planning", "Reality checks", "Task breakdowns"],
+  },
+  {
+    emoji: "🐉",
+    label: "Rewards",
+    petKey: "dragon",
+    title: "Earn XP and grow companions",
+    description:
+      "Every completed task feeds your reward system. Consistency unlocks stronger companions over time.",
+    bullets: ["XP by priority", "Pet unlocks", "Recovery missions"],
   },
   {
     emoji: "📈",
-    title: "Learn how you really work",
+    label: "Insights",
+    title: "Learn how you actually work",
     description:
-      "Your app will help you notice patterns, improve consistency, and build a routine you can actually follow.",
+      "Stats show your best windows, friction points, skipped patterns, and what to adjust next.",
+    bullets: ["Weekly review", "Best time windows", "Plan vs reality"],
+  },
+  {
+    emoji: "🎯",
+    label: "Loop",
+    title: "Small honest wins stack up",
+    description:
+      "The goal is not perfection. It is a repeatable loop that keeps you planning, adjusting, and coming back.",
+    bullets: ["Plan", "Execute", "Review", "Improve"],
   },
 ];
 
@@ -58,6 +93,8 @@ export default function OnboardingScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <AmbientBackground colors={colors} variant="signal" />
+
       <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
         <Text style={[styles.skipText, { color: colors.subtle }]}>Skip</Text>
       </TouchableOpacity>
@@ -69,16 +106,42 @@ export default function OnboardingScreen() {
         <View
           style={[
             styles.heroCard,
-            { backgroundColor: colors.card, shadowColor: colors.tint },
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
           ]}
         >
-          <Text style={styles.emoji}>{slide.emoji}</Text>
+          <Text style={[styles.slideLabel, { color: colors.tint }]}>
+            {slide.label}
+          </Text>
+          {slide.petKey ? (
+            <PetSprite petKey={slide.petKey} size={104} style={styles.petHero} />
+          ) : (
+            <Text style={styles.emoji}>{slide.emoji}</Text>
+          )}
           <Text style={[styles.title, { color: colors.text }]}>
             {slide.title}
           </Text>
           <Text style={[styles.description, { color: colors.subtle }]}>
             {slide.description}
           </Text>
+          <View style={styles.bulletGrid}>
+            {slide.bullets.map((bullet) => (
+              <View
+                key={bullet}
+                style={[
+                  styles.bulletPill,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.bulletText, { color: colors.text }]}>
+                  {bullet}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={styles.dotsRow}>
@@ -108,6 +171,9 @@ export default function OnboardingScreen() {
           </Text>
           <Text style={[styles.footerText, { color: colors.subtle }]}>
             Calm planning. Honest execution. Better follow-through.
+          </Text>
+          <Text style={[styles.progressText, { color: colors.subtle }]}>
+            {currentSlide + 1} of {slides.length}
           </Text>
 
           <TouchableOpacity
@@ -148,13 +214,24 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     padding: 28,
     alignItems: "center",
+    borderWidth: 1,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 18,
     elevation: 5,
   },
+  slideLabel: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 12,
+    textTransform: "uppercase",
+  },
   emoji: {
     fontSize: 64,
+    marginBottom: 18,
+  },
+  petHero: {
     marginBottom: 18,
   },
   title: {
@@ -167,6 +244,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     textAlign: "center",
+  },
+  bulletGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginTop: 18,
+  },
+  bulletPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  bulletText: {
+    fontSize: 12,
+    fontWeight: "800",
   },
   dotsRow: {
     flexDirection: "row",
@@ -198,7 +293,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     lineHeight: 22,
-    marginBottom: 20,
+    marginBottom: 10,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: 18,
   },
   primaryButton: {
     borderRadius: 16,

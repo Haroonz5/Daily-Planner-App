@@ -78,11 +78,75 @@ export default function PetHomeScreen() {
             : completedToday > 0
               ? "Energized"
               : "Ready to start";
+    const bondScore = Math.min(
+      100,
+      Math.round(
+        Math.round(totalXp / 40) + completedToday * 8 + Math.max(0, completionRate / 4)
+      )
+    );
+    const careSignals = [
+      {
+        label: "Bond",
+        value: `${bondScore}%`,
+        detail:
+          bondScore >= 80
+            ? "Deep trust"
+            : bondScore >= 45
+              ? "Growing"
+              : "New bond",
+      },
+      {
+        label: "Energy",
+        value: `${Math.max(0, 100 - skippedToday * 18)}%`,
+        detail: skippedToday > 0 ? "Needs a reset" : "Steady",
+      },
+      {
+        label: "Focus",
+        value: `${completionRate}%`,
+        detail: todayTasks.length === 0 ? "No missions" : "Today",
+      },
+    ];
+    const milestones = [
+      {
+        label: "First Step",
+        unlocked: totalXp >= 25,
+        detail: "Earn 25 XP",
+      },
+      {
+        label: "Steady Week",
+        unlocked: totalXp >= 250,
+        detail: "Earn 250 XP",
+      },
+      {
+        label: "Companion Keeper",
+        unlocked: unlockedPets.length >= 4,
+        detail: "Unlock 4 pets",
+      },
+      {
+        label: "Legend Bond",
+        unlocked: unlockedPets.length === PET_TIERS.length,
+        detail: "Unlock every pet",
+      },
+    ];
+    const companionLine =
+      todayTasks.length === 0
+        ? "Give me one mission and I will guard it with you."
+        : completionRate === 100
+          ? "That was clean. I am saving this one in the legend book."
+          : skippedToday > 0
+            ? "We slipped, but we do not have to spiral. Pick the smallest next move."
+            : completedToday > 0
+              ? "Momentum is awake. Do not let it wander off."
+              : "Start small. I will match your pace.";
 
     return {
       activePet,
+      bondScore,
+      careSignals,
       completedToday,
       completionRate,
+      companionLine,
+      milestones,
       mood,
       petProgress,
       skippedToday,
@@ -128,6 +192,16 @@ export default function PetHomeScreen() {
           <Text style={[styles.petDescription, { color: colors.subtle }]}>
             {petData.activePet.description}
           </Text>
+          <View
+            style={[
+              styles.companionSpeech,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.companionSpeechText, { color: colors.text }]}>
+              {petData.companionLine}
+            </Text>
+          </View>
 
           <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
             <View
@@ -145,6 +219,38 @@ export default function PetHomeScreen() {
               ? `${petData.petProgress.remainingXp} XP until ${petData.petProgress.nextPet.name}`
               : "Collection complete. Legendary behavior."}
           </Text>
+        </View>
+
+        <View
+          style={[
+            styles.bondCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Companion Bond
+          </Text>
+          <View style={styles.careGrid}>
+            {petData.careSignals.map((signal) => (
+              <View
+                key={signal.label}
+                style={[
+                  styles.careTile,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.careValue, { color: colors.text }]}>
+                  {signal.value}
+                </Text>
+                <Text style={[styles.careLabel, { color: colors.subtle }]}>
+                  {signal.label}
+                </Text>
+                <Text style={[styles.careDetail, { color: colors.tint }]}>
+                  {signal.detail}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={styles.statGrid}>
@@ -215,6 +321,42 @@ export default function PetHomeScreen() {
             })}
           </View>
         </View>
+
+        <View
+          style={[
+            styles.badgeCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Reward Badges
+          </Text>
+          <View style={styles.badgeGrid}>
+            {petData.milestones.map((badge) => (
+              <View
+                key={badge.label}
+                style={[
+                  styles.badgeTile,
+                  {
+                    backgroundColor: badge.unlocked
+                      ? colors.surface
+                      : colors.background,
+                    borderColor: badge.unlocked ? colors.tint : colors.border,
+                    opacity: badge.unlocked ? 1 : 0.55,
+                  },
+                ]}
+              >
+                <Text style={styles.badgeIcon}>{badge.unlocked ? "*" : "-"}</Text>
+                <Text style={[styles.badgeLabel, { color: colors.text }]}>
+                  {badge.label}
+                </Text>
+                <Text style={[styles.badgeDetail, { color: colors.subtle }]}>
+                  {badge.detail}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
       </ScrollView>
     </View>
   );
@@ -275,7 +417,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: "center",
+    marginBottom: 14,
+  },
+  companionSpeech: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 13,
     marginBottom: 18,
+  },
+  companionSpeechText: {
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 20,
+    textAlign: "center",
   },
   progressTrack: {
     width: "100%",
@@ -292,6 +447,38 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 10,
     textAlign: "center",
+  },
+  bondCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 18,
+    marginBottom: 16,
+  },
+  careGrid: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+  },
+  careTile: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    marginHorizontal: 4,
+  },
+  careValue: {
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  careLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
+  careDetail: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 6,
   },
   statGrid: {
     flexDirection: "row",
@@ -319,6 +506,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     padding: 18,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
@@ -349,5 +537,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 4,
+  },
+  badgeCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 18,
+  },
+  badgeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  badgeTile: {
+    width: "48%",
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  badgeIcon: {
+    fontSize: 22,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  badgeLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  badgeDetail: {
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
   },
 });

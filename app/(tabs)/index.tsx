@@ -1180,7 +1180,7 @@ export default function HomeScreen() {
   return (
     <>
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
-        <AmbientBackground colors={colors} variant="energy" />
+        <AmbientBackground colors={colors} variant="signal" />
 
         {showConfetti && (
           <View pointerEvents="none" style={styles.victoryBurstLayer}>

@@ -84,6 +84,14 @@ const bucketSuggestedTimes: Record<TimeBucket, string> = {
   evening: "6:30 PM",
 };
 
+const aiPromptExamples = [
+  "Gym at 6 PM every day",
+  "Study math for 2 hours at 8 PM",
+  "Meal prep Sunday at 4 PM",
+];
+
+const quickTimePresets = ["8:00 AM", "12:30 PM", "3:30 PM", "6:00 PM", "9:00 PM"];
+
 const getDefaultFutureDate = () => {
   const date = new Date();
   date.setDate(date.getDate() + 2);
@@ -282,6 +290,10 @@ export default function AddTask() {
     return { warnings, suggestion };
   }, [formattedTime, priority, selectedDateKey, selectedDateLabel, tasks, title]);
 
+  const selectedDayTaskCount = tasks.filter(
+    (task) => task.date === selectedDateKey
+  ).length;
+
   const resetForm = () => {
     setTitle("");
     setNotes("");
@@ -382,6 +394,15 @@ export default function AddTask() {
     const date = new Date();
     date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     return formatTimeFromDate(date);
+  };
+
+  const applyTimePreset = (timeLabel: string) => {
+    const minutes = parseTimeToMinutes(timeLabel);
+    if (minutes === null) return;
+
+    const nextTime = new Date(time);
+    nextTime.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    setTime(nextTime);
   };
 
   const handleBreakDownTask = async () => {
@@ -740,6 +761,26 @@ export default function AddTask() {
             Type multiple tasks in one sentence and review the schedule before adding.
           </Text>
 
+          <View style={styles.exampleRow}>
+            {aiPromptExamples.map((example) => (
+              <TouchableOpacity
+                key={example}
+                style={[
+                  styles.exampleChip,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setNaturalInput(example)}
+              >
+                <Text style={[styles.exampleChipText, { color: colors.text }]}>
+                  {example}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <TextInput
             style={[
               styles.aiInput,
@@ -1035,6 +1076,63 @@ export default function AddTask() {
 
         <View
           style={[
+            styles.scheduleSnapshot,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <View style={styles.scheduleSnapshotHeader}>
+            <View>
+              <Text style={[styles.snapshotKicker, { color: colors.tint }]}>
+                Schedule Snapshot
+              </Text>
+              <Text style={[styles.snapshotTitle, { color: colors.text }]}>
+                {selectedDateLabel} at {formattedTime}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.snapshotPill,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.snapshotPillText, { color: colors.subtle }]}>
+                {priority}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.snapshotMetricRow}>
+            <View style={[styles.snapshotMetric, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.snapshotMetricValue, { color: colors.text }]}>
+                {selectedDayTaskCount}
+              </Text>
+              <Text style={[styles.snapshotMetricLabel, { color: colors.subtle }]}>
+                already planned
+              </Text>
+            </View>
+            <View style={[styles.snapshotMetric, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.snapshotMetricValue, { color: colors.text }]}>
+                {recurringDates.length}
+              </Text>
+              <Text style={[styles.snapshotMetricLabel, { color: colors.subtle }]}>
+                will create
+              </Text>
+            </View>
+          </View>
+
+          <Text style={[styles.snapshotHint, { color: colors.subtle }]}>
+            {planningInsights.warnings.length > 0
+              ? "The app spotted some friction below. Adjust before adding if you want a cleaner day."
+              : "This plan looks clean so far. Keep it realistic and specific."}
+          </Text>
+        </View>
+
+        <View
+          style={[
             styles.breakdownCard,
             {
               backgroundColor: colors.card,
@@ -1230,6 +1328,30 @@ export default function AddTask() {
             ⏰ {formattedTime}
           </Text>
         </TouchableOpacity>
+
+        <View style={styles.quickTimeRow}>
+          {quickTimePresets.map((preset) => {
+            const selected = formattedTime === preset;
+
+            return (
+              <TouchableOpacity
+                key={preset}
+                style={[
+                  styles.quickTimeChip,
+                  {
+                    backgroundColor: selected ? colors.surface : colors.card,
+                    borderColor: selected ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() => applyTimePreset(preset)}
+              >
+                <Text style={[styles.quickTimeText, { color: colors.text }]}>
+                  {preset}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
         <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: colors.subtle }]}>
@@ -1544,6 +1666,24 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 12,
   },
+  exampleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginBottom: 10,
+  },
+  exampleChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  exampleChipText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   aiInput: {
     borderWidth: 1,
     borderRadius: 14,
@@ -1804,6 +1944,69 @@ const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: "top",
   },
+  scheduleSnapshot: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    marginHorizontal: 24,
+    marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  scheduleSnapshotHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  snapshotKicker: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 5,
+  },
+  snapshotTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  snapshotPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  snapshotPillText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  snapshotMetricRow: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+  },
+  snapshotMetric: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginHorizontal: 4,
+  },
+  snapshotMetricValue: {
+    fontSize: 23,
+    fontWeight: "900",
+  },
+  snapshotMetricLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
+  snapshotHint: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 12,
+  },
   section: {
     marginHorizontal: 24,
     marginBottom: 16,
@@ -1867,9 +2070,27 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     marginHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   timeText: { fontSize: 15 },
+  quickTimeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: 20,
+    marginBottom: 16,
+  },
+  quickTimeChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  quickTimeText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   centerModalBackdrop: {
     flex: 1,
     justifyContent: "center",

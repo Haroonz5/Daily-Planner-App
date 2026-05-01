@@ -243,6 +243,34 @@ export default function StatsScreen() {
       }
     });
 
+    const windowPerformance = (Object.keys(bucketLabels) as TimeBucket[]).map(
+      (bucket) => {
+        const bucketTasks = tasks.filter(
+          (task) =>
+            getBucketFromMinutes(parseTimeToMinutes(task.originalTime ?? task.time)) ===
+            bucket
+        );
+        const completed = bucketTasks.filter((task) => task.completed).length;
+        const friction = bucketTasks.filter(
+          (task) =>
+            (task.status ?? "pending") === "skipped" ||
+            (task.rescheduledCount ?? 0) > 0
+        ).length;
+        const completionRate = bucketTasks.length
+          ? Math.round((completed / bucketTasks.length) * 100)
+          : 0;
+
+        return {
+          bucket,
+          label: bucketLabels[bucket],
+          total: bucketTasks.length,
+          completed,
+          friction,
+          completionRate,
+        };
+      }
+    );
+
     const riskWindow = (Object.keys(frictionCounts) as TimeBucket[]).reduce(
       (worst, bucket) => (frictionCounts[bucket] > frictionCounts[worst] ? bucket : worst),
       "morning"
@@ -344,6 +372,7 @@ export default function StatsScreen() {
       mostSkippedTask,
       mostProductiveWindow,
       riskWindow,
+      windowPerformance,
       averageDelay,
       onTimeRate,
       totalTasks,
@@ -470,6 +499,43 @@ export default function StatsScreen() {
               <Text style={styles.dashboardMetricLabel}>on time</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.coachGrid}>
+          {[
+            {
+              label: "Do more of",
+              title: bucketLabels[stats.mostProductiveWindow],
+              body: "This is where your completed tasks cluster strongest.",
+            },
+            {
+              label: "Protect against",
+              title: bucketLabels[stats.riskWindow],
+              body: "This window has more skips or reschedules. Plan lighter here.",
+            },
+          ].map((card) => (
+            <View
+              key={card.label}
+              style={[
+                styles.coachCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <Text style={[styles.coachLabel, { color: colors.tint }]}>
+                {card.label}
+              </Text>
+              <Text style={[styles.coachTitle, { color: colors.text }]}>
+                {card.title}
+              </Text>
+              <Text style={[styles.coachBody, { color: colors.subtle }]}>
+                {card.body}
+              </Text>
+            </View>
+          ))}
         </View>
 
       <View
@@ -796,6 +862,52 @@ export default function StatsScreen() {
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Time Window Quality
+        </Text>
+        {stats.windowPerformance.map((window) => (
+          <View key={window.bucket} style={styles.windowRow}>
+            <View style={styles.windowCopy}>
+              <Text style={[styles.windowLabel, { color: colors.text }]}>
+                {window.label}
+              </Text>
+              <Text style={[styles.windowMeta, { color: colors.subtle }]}>
+                {window.completed}/{window.total} done • {window.friction} friction
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.windowTrack,
+                { backgroundColor: colors.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.windowFill,
+                  {
+                    width: `${window.completionRate}%`,
+                    backgroundColor: colors.tint,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.windowPercent, { color: colors.subtle }]}>
+              {window.completionRate}%
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           This Week
         </Text>
         <View style={styles.barChart}>
@@ -1107,6 +1219,38 @@ const styles = StyleSheet.create({
     marginTop: 3,
     textTransform: "uppercase",
   },
+  coachGrid: {
+    flexDirection: "row",
+    marginHorizontal: 12,
+    marginBottom: 16,
+  },
+  coachCard: {
+    flex: 1,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+    marginHorizontal: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  coachLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  coachTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  coachBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
   petCard: {
     borderRadius: 22,
     padding: 20,
@@ -1286,6 +1430,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     marginTop: 10,
+  },
+  windowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+  },
+  windowCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  windowLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  windowMeta: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  windowTrack: {
+    width: 86,
+    height: 8,
+    borderRadius: 999,
+    overflow: "hidden",
+    marginRight: 10,
+  },
+  windowFill: {
+    height: 8,
+    borderRadius: 999,
+  },
+  windowPercent: {
+    width: 38,
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "right",
   },
   planRealityRow: {
     flexDirection: "row",
