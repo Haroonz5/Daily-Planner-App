@@ -226,6 +226,7 @@ export default function SettingsScreen({
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
@@ -699,13 +700,16 @@ export default function SettingsScreen({
         <Text style={styles.logoutText}>Log Out</Text>
       </TouchableOpacity>
 
-      <View style={{ height: 40 }} />
+      <View style={styles.bottomSpacer} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: {
+    paddingBottom: 130,
+  },
   header: {
     paddingHorizontal: 24,
     paddingTop: 60,
@@ -943,5 +947,8 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 16,
+  },
+  bottomSpacer: {
+    height: 18,
   },
 });

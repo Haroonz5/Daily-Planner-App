@@ -185,7 +185,19 @@ export default function PetHomeScreen() {
             },
           ]}
         >
-          <PetSprite petKey={petData.activePet.key} size={138} style={styles.heroPet} />
+          <PetSprite
+            petKey={petData.activePet.key}
+            size={138}
+            animated
+            mood={
+              petData.completionRate === 100
+                ? "happy"
+                : petData.skippedToday > 0
+                  ? "tired"
+                  : "idle"
+            }
+            style={styles.heroPet}
+          />
           <Text style={[styles.moodLabel, { color: colors.tint }]}>
             {petData.mood}
           </Text>

@@ -644,7 +644,13 @@ export default function StatsScreen() {
         ]}
       >
         <View style={styles.petHero}>
-          <PetSprite petKey={stats.activePet.key} size={72} style={styles.petSprite} />
+          <PetSprite
+            petKey={stats.activePet.key}
+            size={72}
+            animated
+            mood={stats.disciplineScore >= 75 ? "happy" : "idle"}
+            style={styles.petSprite}
+          />
           <View style={styles.petCopy}>
             <Text style={[styles.petName, { color: colors.text }]}>
               {stats.activePet.name}

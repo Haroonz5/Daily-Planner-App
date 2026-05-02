@@ -9,6 +9,7 @@ export type UserProfile = {
   petNickname?: string | null;
   displayName?: string | null;
   focusDurationMinutes?: number | null;
+  tutorialCompleted?: boolean | null;
 };
 
 export function useUserProfile() {

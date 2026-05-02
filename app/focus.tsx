@@ -1,7 +1,14 @@
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { collection, doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import {
+  addDoc,
+  collection,
+  doc,
+  increment,
+  onSnapshot,
+  updateDoc,
+} from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
@@ -29,7 +36,18 @@ type Task = {
   skippedAt?: any;
   lastActionAt?: any;
   rescheduledCount?: number;
+  focusSessionCount?: number;
+  focusMinutes?: number;
   originalTime?: string;
+};
+
+type FocusSession = {
+  id: string;
+  taskId: string | null;
+  taskTitle: string;
+  minutes: number;
+  completedAt?: any;
+  createdAt?: any;
 };
 
 const focusPresets = [15, 25, 45];
@@ -51,7 +69,9 @@ export default function FocusScreen() {
   const [sessionMinutes, setSessionMinutes] = useState(25);
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
   const [timerState, setTimerState] = useState<TimerState>("idle");
-  const [completedSessions, setCompletedSessions] = useState(0);
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const loggedSessionRef = useRef(false);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -67,6 +87,20 @@ export default function FocusScreen() {
     });
 
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    return onSnapshot(collection(db, "users", uid, "focusSessions"), (snap) => {
+      setFocusSessions(
+        snap.docs.map((document) => ({
+          id: document.id,
+          ...document.data(),
+        })) as FocusSession[]
+      );
+    });
   }, []);
 
   useEffect(() => {
@@ -90,7 +124,6 @@ export default function FocusScreen() {
   useEffect(() => {
     if (timerState === "running" && secondsLeft === 0) {
       setTimerState("done");
-      setCompletedSessions((current) => current + 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {}
       );
@@ -98,6 +131,29 @@ export default function FocusScreen() {
   }, [secondsLeft, timerState]);
 
   const today = formatDateKey(new Date());
+
+  const logFocusSession = useCallback(async (task: Task | null) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || loggedSessionRef.current) return;
+
+    loggedSessionRef.current = true;
+
+    await addDoc(collection(db, "users", uid, "focusSessions"), {
+      taskId: task?.id ?? null,
+      taskTitle: task?.title ?? "Untitled focus block",
+      minutes: sessionMinutes,
+      completedAt: new Date(),
+      createdAt: new Date(),
+    });
+
+    if (task) {
+      await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+        focusSessionCount: increment(1),
+        focusMinutes: increment(sessionMinutes),
+        lastActionAt: new Date(),
+      });
+    }
+  }, [sessionMinutes]);
 
   const focusData = useMemo(() => {
     const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
@@ -107,17 +163,49 @@ export default function FocusScreen() {
       (task) => !task.completed && (task.status ?? "pending") !== "skipped"
     );
     const completedToday = todayTasks.filter((task) => task.completed).length;
+    const selectedTask =
+      pendingTasks.find((task) => task.id === selectedTaskId) ?? pendingTasks[0] ?? null;
+    const completedSessionsToday = focusSessions.filter((session) => {
+      const value = session.completedAt;
+      const date =
+        typeof value?.toDate === "function"
+          ? value.toDate()
+          : value
+            ? new Date(value)
+            : null;
+      return date ? formatDateKey(date) === today : false;
+    });
+    const focusMinutesToday = completedSessionsToday.reduce(
+      (sum, session) => sum + (session.minutes ?? 0),
+      0
+    );
 
     return {
       activePet,
-      currentTask: pendingTasks[0] ?? null,
-      queue: pendingTasks.slice(1),
+      currentTask: selectedTask,
+      queue: pendingTasks.filter((task) => task.id !== selectedTask?.id),
       completed: completedToday,
+      completedSessionsToday,
+      focusMinutesToday,
       total: todayTasks.length,
       petLabel: profile.petNickname?.trim() || activePet.name,
       displayName: profile.displayName?.trim() || "You",
     };
-  }, [profile.activePetKey, profile.displayName, profile.petNickname, tasks, today]);
+  }, [
+    focusSessions,
+    profile.activePetKey,
+    profile.displayName,
+    profile.petNickname,
+    selectedTaskId,
+    tasks,
+    today,
+  ]);
+
+  useEffect(() => {
+    if (timerState === "done") {
+      void logFocusSession(focusData.currentTask);
+    }
+  }, [focusData.currentTask, logFocusSession, timerState]);
 
   const timerProgress = ((sessionMinutes * 60 - secondsLeft) / (sessionMinutes * 60)) * 100;
   const timerStatusText =
@@ -174,6 +262,7 @@ export default function FocusScreen() {
     setSessionMinutes(minutes);
     setSecondsLeft(minutes * 60);
     setTimerState("idle");
+    loggedSessionRef.current = false;
     await saveProfile({ focusDurationMinutes: minutes });
   };
 
@@ -188,6 +277,10 @@ export default function FocusScreen() {
       setSecondsLeft(sessionMinutes * 60);
     }
 
+    if (timerState === "idle" || timerState === "done") {
+      loggedSessionRef.current = false;
+    }
+
     setTimerState("running");
   };
 
@@ -195,6 +288,7 @@ export default function FocusScreen() {
     await Haptics.selectionAsync();
     setTimerState("idle");
     setSecondsLeft(sessionMinutes * 60);
+    loggedSessionRef.current = false;
   };
 
   return (
@@ -213,13 +307,21 @@ export default function FocusScreen() {
       </View>
 
       <View style={[styles.petCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-        <PetSprite petKey={focusData.activePet.key} size={78} style={styles.petSprite} />
+        <PetSprite
+          petKey={focusData.activePet.key}
+          size={78}
+          animated
+          mood={timerState === "done" ? "happy" : timerState === "paused" ? "tired" : "idle"}
+          style={styles.petSprite}
+        />
         <Text style={[styles.petName, { color: colors.text }]}>
           {focusData.petLabel} is with {focusData.displayName}
         </Text>
         <Text style={[styles.petCopy, { color: colors.subtle }]}>
-          {focusData.completed}/{focusData.total} done today • {completedSessions} clean session
-          {completedSessions === 1 ? "" : "s"}
+          {focusData.completed}/{focusData.total} done today •{" "}
+          {focusData.completedSessionsToday.length} clean session
+          {focusData.completedSessionsToday.length === 1 ? "" : "s"} •{" "}
+          {focusData.focusMinutesToday} focus min
         </Text>
       </View>
 
@@ -311,6 +413,7 @@ export default function FocusScreen() {
           )}
           <Text style={[styles.currentHint, { color: colors.subtle }]}>
             Give this task one clean block before you decide it needs to move.
+            Completing a focus block gives this task an XP bonus.
           </Text>
 
           <TouchableOpacity
@@ -333,17 +436,63 @@ export default function FocusScreen() {
 
       {focusData.queue.length > 0 && (
         <View style={[styles.queueCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
-          <Text style={[styles.cardLabel, { color: colors.subtle }]}>Up Next</Text>
+          <Text style={[styles.cardLabel, { color: colors.subtle }]}>Pick A Focus Task</Text>
           {focusData.queue.map((task) => (
-            <View key={task.id} style={[styles.queueRow, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              key={task.id}
+              style={[styles.queueRow, { borderBottomColor: colors.border }]}
+              onPress={() => {
+                setSelectedTaskId(task.id);
+                setTimerState("idle");
+                setSecondsLeft(sessionMinutes * 60);
+                loggedSessionRef.current = false;
+              }}
+            >
               <View style={styles.queueCopy}>
                 <Text style={[styles.queueTitle, { color: colors.text }]}>{task.title}</Text>
                 <Text style={[styles.queueMeta, { color: colors.subtle }]}>{task.time}</Text>
               </View>
-            </View>
+              <Text style={[styles.focusNowText, { color: colors.tint }]}>Focus</Text>
+            </TouchableOpacity>
           ))}
         </View>
       )}
+
+      <View style={[styles.queueCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardLabel, { color: colors.subtle }]}>Focus History</Text>
+        {focusSessions
+          .slice()
+          .sort((a, b) => {
+            const getTime = (value: any) =>
+              typeof value?.toDate === "function"
+                ? value.toDate().getTime()
+                : value
+                  ? new Date(value).getTime()
+                  : 0;
+            return getTime(b.completedAt) - getTime(a.completedAt);
+          })
+          .slice(0, 4)
+          .map((session) => (
+            <View
+              key={session.id}
+              style={[styles.historyRow, { borderBottomColor: colors.border }]}
+            >
+              <View style={styles.queueCopy}>
+                <Text style={[styles.queueTitle, { color: colors.text }]}>
+                  {session.taskTitle}
+                </Text>
+                <Text style={[styles.queueMeta, { color: colors.subtle }]}>
+                  {session.minutes} min focus block
+                </Text>
+              </View>
+            </View>
+          ))}
+        {focusSessions.length === 0 && (
+          <Text style={[styles.emptyText, { color: colors.subtle }]}>
+            Finish a timer and your session history will show up here.
+          </Text>
+        )}
+      </View>
 
       <View style={[styles.queueCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
         <Text style={[styles.cardLabel, { color: colors.subtle }]}>Quick Undo</Text>
@@ -544,6 +693,9 @@ const styles = StyleSheet.create({
   queueRow: {
     paddingVertical: 12,
     borderBottomWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   queueCopy: {
     flex: 1,
@@ -555,6 +707,15 @@ const styles = StyleSheet.create({
   queueMeta: {
     fontSize: 13,
     marginTop: 4,
+  },
+  focusNowText: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginLeft: 12,
+  },
+  historyRow: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
   undoRow: {
     paddingVertical: 12,

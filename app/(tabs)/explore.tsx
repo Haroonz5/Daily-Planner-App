@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import {
   collection,
@@ -64,6 +65,15 @@ type Task = {
   recurrenceGroupId?: string | null;
 };
 
+type TaskTemplate = {
+  id: string;
+  title: string;
+  notes?: string;
+  priority: TaskPriority;
+  recurrence: RecurrenceRule;
+  time: string;
+};
+
 const priorityColors: Record<TaskPriority, string> = {
   Low: "#8dcf9f",
   Medium: "#f2b97f",
@@ -91,6 +101,41 @@ const aiPromptExamples = [
 ];
 
 const quickTimePresets = ["8:00 AM", "12:30 PM", "3:30 PM", "6:00 PM", "9:00 PM"];
+const TASK_TEMPLATES_KEY = "dailyDisciplineTaskTemplates";
+const defaultTaskTemplates: TaskTemplate[] = [
+  {
+    id: "gym",
+    title: "Gym",
+    notes: "Show up, warm up, finish the planned workout.",
+    priority: "High",
+    recurrence: "none",
+    time: "6:00 PM",
+  },
+  {
+    id: "study",
+    title: "Study block",
+    notes: "Pick one subject and remove distractions.",
+    priority: "High",
+    recurrence: "none",
+    time: "8:00 PM",
+  },
+  {
+    id: "meal-prep",
+    title: "Meal prep",
+    notes: "Prep food so tomorrow is easier.",
+    priority: "Medium",
+    recurrence: "weekly",
+    time: "4:00 PM",
+  },
+  {
+    id: "clean-room",
+    title: "Clean room reset",
+    notes: "10-minute reset. Trash, clothes, desk.",
+    priority: "Low",
+    recurrence: "none",
+    time: "7:00 PM",
+  },
+];
 
 const getDefaultFutureDate = () => {
   const date = new Date();
@@ -118,6 +163,7 @@ export default function AddTask() {
   const [showFutureTimePicker, setShowFutureTimePicker] = useState(false);
   const [naturalInput, setNaturalInput] = useState("");
   const [parsedTasks, setParsedTasks] = useState<ParsedAiTask[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<TaskTemplate[]>([]);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
   const [aiSource, setAiSource] = useState<"openai" | "local" | "offline" | null>(null);
   const [realityCheck, setRealityCheck] = useState<RealityCheckResult | null>(null);
@@ -146,6 +192,24 @@ export default function AddTask() {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    void AsyncStorage.getItem(TASK_TEMPLATES_KEY).then((raw) => {
+      if (!active || !raw) return;
+
+      try {
+        setCustomTemplates(JSON.parse(raw) as TaskTemplate[]);
+      } catch {
+        setCustomTemplates([]);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const selectedDateKey = formatDateKey(selectedDate);
   const selectedDateLabel = getRelativeDateLabel(selectedDateKey);
   const formattedTime = formatTimeFromDate(time);
@@ -170,6 +234,7 @@ export default function AddTask() {
       sum + buildRecurringDates(task.date, task.recurrence ?? "none").length,
     0
   );
+  const templates = [...defaultTaskTemplates, ...customTemplates];
 
   const planningInsights = useMemo(() => {
     const selectedDayTasks = tasks.filter((task) => task.date === selectedDateKey);
@@ -403,6 +468,43 @@ export default function AddTask() {
     const nextTime = new Date(time);
     nextTime.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     setTime(nextTime);
+  };
+
+  const applyTemplate = (template: TaskTemplate) => {
+    setTitle(template.title);
+    setNotes(template.notes ?? "");
+    setPriority(template.priority);
+    setRecurrence(template.recurrence);
+    applyTimePreset(template.time);
+    setError("");
+    setSuccessMessage(`${template.title} template loaded.`);
+    setTimeout(() => setSuccessMessage(""), 1800);
+  };
+
+  const saveCurrentAsTemplate = async () => {
+    if (!title.trim()) {
+      setError("Add a task title before saving a template.");
+      return;
+    }
+
+    const nextTemplate: TaskTemplate = {
+      id: `${Date.now()}`,
+      title: title.trim(),
+      notes: notes.trim(),
+      priority,
+      recurrence,
+      time: formattedTime,
+    };
+    const deduped = customTemplates.filter(
+      (template) => template.title.toLowerCase() !== nextTemplate.title.toLowerCase()
+    );
+    const nextTemplates = [nextTemplate, ...deduped].slice(0, 8);
+
+    setCustomTemplates(nextTemplates);
+    await AsyncStorage.setItem(TASK_TEMPLATES_KEY, JSON.stringify(nextTemplates));
+    setError("");
+    setSuccessMessage(`${nextTemplate.title} saved as a quick template.`);
+    setTimeout(() => setSuccessMessage(""), 2200);
   };
 
   const handleBreakDownTask = async () => {
@@ -743,6 +845,62 @@ export default function AddTask() {
           <Text style={styles.plannerHeroBody}>
             Turn messy ideas into tasks, break big work into steps, and reality-check the day before it gets overloaded.
           </Text>
+        </View>
+
+        <View
+          style={[
+            styles.templateCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <View style={styles.templateHeader}>
+            <View>
+              <Text style={[styles.templateEyebrow, { color: colors.tint }]}>
+                Task Templates
+              </Text>
+              <Text style={[styles.templateTitle, { color: colors.text }]}>
+                One-tap routines
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.saveTemplateButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={saveCurrentAsTemplate}
+            >
+              <Text style={[styles.saveTemplateText, { color: colors.text }]}>
+                Save Current
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.templateGrid}>
+            {templates.map((template) => (
+              <TouchableOpacity
+                key={template.id}
+                style={[
+                  styles.templateTile,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => applyTemplate(template)}
+              >
+                <Text style={[styles.templateTileTitle, { color: colors.text }]}>
+                  {template.title}
+                </Text>
+                <Text style={[styles.templateTileMeta, { color: colors.subtle }]}>
+                  {template.time} • {recurrenceLabels[template.recurrence]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         <View
@@ -1644,6 +1802,66 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.84)",
     fontSize: 14,
     lineHeight: 21,
+  },
+  templateCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    marginHorizontal: 24,
+    marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  templateHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  templateEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  templateTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  saveTemplateButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  saveTemplateText: {
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  templateGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  templateTile: {
+    width: "48%",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 10,
+  },
+  templateTileTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  templateTileMeta: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
   },
   aiCard: {
     borderWidth: 1,

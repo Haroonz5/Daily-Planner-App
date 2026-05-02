@@ -15,6 +15,8 @@ export type RewardTask = {
   priority?: Priority;
   completedAt?: any;
   rescheduledCount?: number;
+  focusSessionCount?: number;
+  focusMinutes?: number;
   originalTime?: string;
   time?: string;
   date: string;
@@ -149,6 +151,8 @@ export const getTaskXp = (task: RewardTask) => {
     else if (delayMinutes <= 60) xp += 2;
   }
 
+  xp += Math.min((task.focusSessionCount ?? 0) * 4, 12);
+  xp += Math.min(Math.floor((task.focusMinutes ?? 0) / 45) * 3, 9);
   xp -= Math.min((task.rescheduledCount ?? 0) * 2, 8);
   return Math.max(5, xp);
 };

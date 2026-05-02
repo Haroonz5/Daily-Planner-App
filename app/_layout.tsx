@@ -7,6 +7,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { onAuthStateChanged, User } from "firebase/auth";
+import { doc, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -20,7 +21,7 @@ import {
 } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
 import { ensureBaseReminders } from "../utils/notifications";
-import { auth } from "../constants/firebaseConfig";
+import { auth, db } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
   const router = useRouter();
@@ -31,6 +32,9 @@ export default function RootLayout() {
   const [themeName, setThemeNameState] = useState<AppThemeName>("pastel");
   const [themeLoaded, setThemeLoaded] = useState(false);
   const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
+  const [tutorialCompleted, setTutorialCompleted] = useState<
+    boolean | undefined
+  >(undefined);
 
   useEffect(() => {
     const loadTheme = async () => {
@@ -61,6 +65,34 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setTutorialCompleted(undefined);
+      return;
+    }
+
+    setTutorialCompleted(undefined);
+
+    const profileRef = doc(db, "users", user.uid);
+    const unsubscribe = onSnapshot(
+      profileRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setTutorialCompleted(true);
+          return;
+        }
+
+        const completed = snapshot.data().tutorialCompleted;
+        setTutorialCompleted(typeof completed === "boolean" ? completed : true);
+      },
+      () => {
+        setTutorialCompleted(true);
+      }
+    );
+
+    return unsubscribe;
+  }, [user]);
+
+  useEffect(() => {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
@@ -84,6 +116,7 @@ export default function RootLayout() {
     const inSettings = firstSegment === "settings";
     const inPetHome = firstSegment === "pet-home";
     const inWeek = firstSegment === "week";
+    const inTutorial = firstSegment === "tutorial";
     const inOnboarding = firstSegment === "onboarding";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
 
@@ -93,22 +126,56 @@ export default function RootLayout() {
     }
 
     if (onboardingSeen && inOnboarding) {
-      router.replace(user ? "/(tabs)" : "/login");
+      if (user && tutorialCompleted === undefined) return;
+      router.replace(
+        (user && tutorialCompleted === false
+          ? "/tutorial"
+          : user
+            ? "/(tabs)"
+            : "/login") as never
+      );
       return;
     }
 
     if (
       !user &&
-      (inProtectedTabs || inSummary || inFocus || inSettings || inPetHome || inWeek)
+      (inProtectedTabs ||
+        inSummary ||
+        inFocus ||
+        inSettings ||
+        inPetHome ||
+        inWeek ||
+        inTutorial)
     ) {
       router.replace("/login");
       return;
     }
 
-    if (user && inAuthScreen) {
-      router.replace("/(tabs)");
+    if (user && tutorialCompleted === false && !inTutorial) {
+      router.replace("/tutorial" as never);
+      return;
     }
-  }, [loading, onboardingSeen, router, segments, themeLoaded, user]);
+
+    if (user && tutorialCompleted === true && inTutorial) {
+      router.replace("/(tabs)");
+      return;
+    }
+
+    if (user && inAuthScreen) {
+      if (tutorialCompleted === undefined) return;
+      router.replace(
+        (tutorialCompleted === false ? "/tutorial" : "/(tabs)") as never
+      );
+    }
+  }, [
+    loading,
+    onboardingSeen,
+    router,
+    segments,
+    themeLoaded,
+    tutorialCompleted,
+    user,
+  ]);
 
   const setThemeName = async (theme: AppThemeName) => {
     setThemeNameState(theme);
@@ -187,6 +254,7 @@ export default function RootLayout() {
         <ThemeProvider value={navigationTheme}>
           <Stack>
             <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+            <Stack.Screen name="tutorial" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="login" options={{ headerShown: false }} />
             <Stack.Screen name="signup" options={{ headerShown: false }} />

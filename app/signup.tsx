@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
 import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 import { useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -13,7 +14,7 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
-import { auth } from "../constants/firebaseConfig";
+import { auth, db } from "../constants/firebaseConfig";
 
 export default function Signup() {
   const router = useRouter();
@@ -41,9 +42,23 @@ export default function Signup() {
       setError("");
 
       const normalizedEmail = email.trim().toLowerCase();
-      await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+      const credential = await createUserWithEmailAndPassword(
+        auth,
+        normalizedEmail,
+        password
+      );
 
-      router.replace("/(tabs)");
+      await setDoc(
+        doc(db, "users", credential.user.uid),
+        {
+          createdAt: new Date(),
+          email: normalizedEmail,
+          tutorialCompleted: false,
+        },
+        { merge: true }
+      );
+
+      router.replace("/tutorial" as never);
     } catch {
       setError("Could not create account. Try again.");
     } finally {

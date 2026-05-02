@@ -460,6 +460,75 @@ export default function HomeScreen() {
       target,
     };
   }, [tasks, today, todayTasks]);
+  const todayReadiness = useMemo(() => {
+    const highPriorityCount = todayTasks.filter(
+      (task) => (task.priority ?? "Medium") === "High"
+    ).length;
+    const openCount = todayTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    ).length;
+    const crowdedSlots = todayTasks.filter((task, index) => {
+      const minutes = parseTimeToMinutes(task.time);
+      if (minutes === null) return false;
+
+      return todayTasks.some((other, otherIndex) => {
+        if (index === otherIndex) return false;
+        const otherMinutes = parseTimeToMinutes(other.time);
+        return otherMinutes !== null && Math.abs(otherMinutes - minutes) <= 30;
+      });
+    }).length;
+    const issues: string[] = [];
+
+    if (todayTasks.length >= 8) {
+      issues.push("too many tasks");
+    }
+    if (highPriorityCount >= 4) {
+      issues.push("too many high priorities");
+    }
+    if (crowdedSlots >= 2) {
+      issues.push("crowded time slots");
+    }
+    if (missedTasksToday.length > 0) {
+      issues.push("missed tasks need recovery");
+    }
+
+    const score = Math.max(
+      0,
+      Math.min(
+        100,
+        100 -
+          Math.max(0, todayTasks.length - 4) * 7 -
+          Math.max(0, highPriorityCount - 2) * 10 -
+          crowdedSlots * 5 -
+          missedTasksToday.length * 12
+      )
+    );
+    const label =
+      todayTasks.length === 0
+        ? "No plan yet"
+        : score >= 85
+          ? "Ready"
+          : score >= 65
+            ? "Manageable"
+            : score >= 45
+              ? "Heavy"
+              : "Overloaded";
+    const suggestion =
+      todayTasks.length === 0
+        ? "Add one meaningful task to give the day direction."
+        : issues.length === 0
+          ? "The day looks focused. Protect the plan and start with one task."
+          : `Watch for ${issues.slice(0, 2).join(" and ")}. Trim or reschedule before momentum drops.`;
+
+    return {
+      score,
+      label,
+      openCount,
+      highPriorityCount,
+      crowdedSlots,
+      suggestion,
+    };
+  }, [missedTasksToday.length, todayTasks]);
   const petMood =
     todayTasks.length === 0
       ? {
@@ -1532,6 +1601,75 @@ export default function HomeScreen() {
 
           <View
             style={[
+              styles.readinessCard,
+              {
+                backgroundColor: colors.card,
+                borderColor:
+                  todayReadiness.score >= 75 ? colors.success : colors.warning,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <View style={styles.readinessHeader}>
+              <View>
+                <Text style={[styles.readinessEyebrow, { color: colors.tint }]}>
+                  Today Readiness
+                </Text>
+                <Text style={[styles.readinessTitle, { color: colors.text }]}>
+                  {todayReadiness.label}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.readinessScorePill,
+                  {
+                    backgroundColor:
+                      todayReadiness.score >= 75
+                        ? colors.success
+                        : colors.warning,
+                  },
+                ]}
+              >
+                <Text style={styles.readinessScoreText}>
+                  {todayReadiness.score}%
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.readinessBody, { color: colors.subtle }]}>
+              {todayReadiness.suggestion}
+            </Text>
+
+            <View style={styles.readinessMetrics}>
+              <View style={[styles.readinessMetric, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.readinessMetricValue, { color: colors.text }]}>
+                  {todayReadiness.openCount}
+                </Text>
+                <Text style={[styles.readinessMetricLabel, { color: colors.subtle }]}>
+                  open
+                </Text>
+              </View>
+              <View style={[styles.readinessMetric, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.readinessMetricValue, { color: colors.text }]}>
+                  {todayReadiness.highPriorityCount}
+                </Text>
+                <Text style={[styles.readinessMetricLabel, { color: colors.subtle }]}>
+                  high
+                </Text>
+              </View>
+              <View style={[styles.readinessMetric, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.readinessMetricValue, { color: colors.text }]}>
+                  {todayReadiness.crowdedSlots}
+                </Text>
+                <Text style={[styles.readinessMetricLabel, { color: colors.subtle }]}>
+                  tight
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
               styles.petCard,
               {
                 backgroundColor: colors.card,
@@ -1545,6 +1683,8 @@ export default function HomeScreen() {
                 <PetSprite
                   petKey={activePet.key}
                   size={72}
+                  animated
+                  mood={progressPercent === 100 ? "happy" : missedTasksToday.length > 0 ? "tired" : "idle"}
                   style={styles.petSprite}
                 />
 
@@ -2792,6 +2932,69 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 999,
     backgroundColor: "#fff",
+  },
+  readinessCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  readinessHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  readinessEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  readinessTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  readinessScorePill: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  readinessScoreText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  readinessBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  readinessMetrics: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+    marginTop: 14,
+  },
+  readinessMetric: {
+    flex: 1,
+    borderRadius: 14,
+    padding: 11,
+    marginHorizontal: 4,
+  },
+  readinessMetricValue: {
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  readinessMetricLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
   },
   petCard: {
     marginHorizontal: 16,
