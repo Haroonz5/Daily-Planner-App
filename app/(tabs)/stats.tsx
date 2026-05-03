@@ -326,20 +326,57 @@ export default function StatsScreen() {
           100
         : 0;
 
+    const completionComponent = completionRate * 0.5;
+    const onTimeComponent = onTimeRate * 0.3;
+    const skipComponent = (100 - skipRate) * 0.15;
+    const rescheduleComponent = (100 - rescheduleRate) * 0.05;
+
     const disciplineScore = Math.max(
       0,
       Math.min(
         100,
         Math.round(
-          completionRate * 0.5 +
-            onTimeRate * 0.3 +
-            (100 - skipRate) * 0.15 +
-            (100 - rescheduleRate) * 0.05
+          completionComponent +
+            onTimeComponent +
+            skipComponent +
+            rescheduleComponent
         )
       )
     );
 
     const disciplineLabel = getDisciplineLabel(disciplineScore);
+    const disciplineBreakdown = [
+      {
+        label: "Completion",
+        score: Math.round(completionRate),
+        points: Math.round(completionComponent),
+        maxPoints: 50,
+        note: `${totalCompleted}/${totalTasks || 0} all-time tasks completed`,
+      },
+      {
+        label: "On-time execution",
+        score: onTimeRate,
+        points: Math.round(onTimeComponent),
+        maxPoints: 30,
+        note: delays.length
+          ? `${onTimeRate}% finished within 15 minutes of plan`
+          : "Complete scheduled tasks to train this score",
+      },
+      {
+        label: "Skip control",
+        score: Math.round(100 - skipRate),
+        points: Math.round(skipComponent),
+        maxPoints: 15,
+        note: `${totalSkipped} skipped task${totalSkipped === 1 ? "" : "s"} recorded`,
+      },
+      {
+        label: "Schedule stability",
+        score: Math.round(100 - rescheduleRate),
+        points: Math.round(rescheduleComponent),
+        maxPoints: 5,
+        note: `${totalRescheduled} total reschedule${totalRescheduled === 1 ? "" : "s"}`,
+      },
+    ];
 
     const bestDay = weeklyStats.length
       ? weeklyStats.reduce((best, day) => (day.percent > best.percent ? day : best), weeklyStats[0])
@@ -390,6 +427,7 @@ export default function StatsScreen() {
       petProgress,
       disciplineScore,
       disciplineLabel,
+      disciplineBreakdown,
     };
   }, [profile.activePetKey, tasks]);
 
@@ -499,6 +537,65 @@ export default function StatsScreen() {
               <Text style={styles.dashboardMetricLabel}>on time</Text>
             </View>
           </View>
+        </View>
+
+        <View
+          style={[
+            styles.scoreBreakdownCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <View style={styles.scoreBreakdownHeader}>
+            <View>
+              <Text style={[styles.scoreBreakdownEyebrow, { color: colors.tint }]}>
+                Discipline Score Breakdown
+              </Text>
+              <Text style={[styles.scoreBreakdownTitle, { color: colors.text }]}>
+                Why your score is {stats.disciplineScore}
+              </Text>
+            </View>
+            <Text style={[styles.scoreBreakdownTotal, { color: colors.text }]}>
+              {stats.disciplineScore}/100
+            </Text>
+          </View>
+
+          {stats.disciplineBreakdown.map((item) => (
+            <View key={item.label} style={styles.scoreBreakdownRow}>
+              <View style={styles.scoreBreakdownCopy}>
+                <Text style={[styles.scoreBreakdownLabel, { color: colors.text }]}>
+                  {item.label}
+                </Text>
+                <Text style={[styles.scoreBreakdownNote, { color: colors.subtle }]}>
+                  {item.note}
+                </Text>
+              </View>
+              <View style={styles.scoreBreakdownMeter}>
+                <View
+                  style={[
+                    styles.scoreBreakdownTrack,
+                    { backgroundColor: colors.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.scoreBreakdownFill,
+                      {
+                        width: `${Math.max(0, Math.min(100, item.score))}%`,
+                        backgroundColor: colors.tint,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.scoreBreakdownPoints, { color: colors.subtle }]}>
+                  {item.points}/{item.maxPoints}
+                </Text>
+              </View>
+            </View>
+          ))}
         </View>
 
         <View style={styles.coachGrid}>
@@ -629,6 +726,38 @@ export default function StatsScreen() {
                 </Text>
               ))}
             </View>
+          </View>
+        )}
+
+        {!!weeklyReview && (
+          <View
+            style={[
+              styles.coachPlanCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.coachPlanTitle, { color: colors.text }]}>
+              Coach Plan For Next Week
+            </Text>
+            {(weeklyReview.nextWeekFocus.length
+              ? weeklyReview.nextWeekFocus
+              : ["Keep the plan lighter and protect one high-value task per day."]
+            )
+              .slice(0, 3)
+              .map((item, index) => (
+                <Text
+                  key={`coach-plan-${item}`}
+                  style={[styles.coachPlanItem, { color: colors.subtle }]}
+                >
+                  {index + 1}. {item}
+                </Text>
+              ))}
+
+            {weeklyReview.risks.length > 0 && (
+              <Text style={[styles.coachPlanRisk, { color: colors.warning }]}>
+                Watch: {weeklyReview.risks.slice(0, 2).join(" • ")}
+              </Text>
+            )}
           </View>
         )}
       </View>
@@ -1225,6 +1354,74 @@ const styles = StyleSheet.create({
     marginTop: 3,
     textTransform: "uppercase",
   },
+  scoreBreakdownCard: {
+    borderRadius: 24,
+    padding: 18,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
+  },
+  scoreBreakdownHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 14,
+  },
+  scoreBreakdownEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  scoreBreakdownTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  scoreBreakdownTotal: {
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  scoreBreakdownRow: {
+    marginTop: 13,
+  },
+  scoreBreakdownCopy: {
+    marginBottom: 8,
+  },
+  scoreBreakdownLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 3,
+  },
+  scoreBreakdownNote: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  scoreBreakdownMeter: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  scoreBreakdownTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 999,
+    overflow: "hidden",
+    marginRight: 10,
+  },
+  scoreBreakdownFill: {
+    height: 8,
+    borderRadius: 999,
+  },
+  scoreBreakdownPoints: {
+    width: 46,
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "right",
+  },
   coachGrid: {
     flexDirection: "row",
     marginHorizontal: 12,
@@ -1358,6 +1555,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginBottom: 6,
+  },
+  coachPlanCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 14,
+  },
+  coachPlanTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  coachPlanItem: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 5,
+  },
+  coachPlanRisk: {
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 6,
   },
   topRow: {
     flexDirection: "row",

@@ -1,9 +1,18 @@
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { signOut } from "firebase/auth";
-import { collection, onSnapshot } from "firebase/firestore";
+import { deleteUser, signOut } from "firebase/auth";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  writeBatch,
+} from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,11 +34,22 @@ import {
 import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
+  formatDateKey,
+  getRelativeDateLabel,
+  parseTimeToMinutes,
+  recurrenceLabels,
+  type RecurrenceRule,
+} from "@/utils/task-helpers";
+import {
+  cancelManyTaskNotifications,
+  getScheduledNotificationAudit,
   getNotificationSettings,
   refreshNotificationState,
   saveNotificationSettings,
   scheduleQuickTestNotification,
   type NotificationSettings,
+  type ScheduledNotificationAudit,
+  syncMorningSummaryNotification,
 } from "../utils/notifications";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -47,14 +67,28 @@ type Task = {
   rescheduledCount?: number;
   originalTime?: string;
   completedAt?: any;
+  recurrence?: RecurrenceRule;
+  recurrenceGroupId?: string | null;
 };
 
 type SettingsScreenProps = {
   showBackButton?: boolean;
 };
 
+type RoutineGroup = {
+  id: string;
+  title: string;
+  recurrence: RecurrenceRule;
+  time: string;
+  nextDate: string;
+  activeCount: number;
+  completedCount: number;
+  tasks: Task[];
+};
+
 const notificationTimeOptions = ["6:30 AM", "7:00 AM", "8:00 AM", "9:00 AM"];
 const eveningTimeOptions = ["8:00 PM", "9:00 PM", "10:00 PM"];
+const feedbackTypes = ["Bug", "Confusing", "Idea", "Praise"] as const;
 
 export default function SettingsScreen({
   showBackButton = true,
@@ -78,8 +112,16 @@ export default function SettingsScreen({
       morningSummaryTime: "7:00 AM",
       eveningReminderTime: "9:00 PM",
     });
+  const [notificationAudit, setNotificationAudit] =
+    useState<ScheduledNotificationAudit | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusTone, setStatusTone] = useState<StatusTone>("idle");
+  const [feedbackType, setFeedbackType] =
+    useState<(typeof feedbackTypes)[number]>("Bug");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [dangerBusy, setDangerBusy] = useState(false);
+  const today = formatDateKey(new Date());
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -106,10 +148,29 @@ export default function SettingsScreen({
   }, [profile.displayName, profile.petNickname]);
 
   useEffect(() => {
+    const user = auth.currentUser;
+    if (!user?.email) return;
+
+    void setDoc(
+      doc(db, "publicProfiles", user.uid),
+      {
+        uid: user.uid,
+        email: user.email.toLowerCase(),
+        displayName: profile.displayName ?? null,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+  }, [profile.displayName]);
+
+  useEffect(() => {
     let active = true;
 
     void getNotificationSettings().then((settings) => {
       if (active) setNotificationSettings(settings);
+    });
+    void getScheduledNotificationAudit().then((audit) => {
+      if (active) setNotificationAudit(audit);
     });
 
     return () => {
@@ -133,6 +194,55 @@ export default function SettingsScreen({
     };
   }, [profile.activePetKey, tasks]);
 
+  const routineGroups = useMemo<RoutineGroup[]>(() => {
+    const grouped = new Map<string, Task[]>();
+
+    tasks.forEach((task) => {
+      if (!task.recurrenceGroupId || !task.recurrence || task.recurrence === "none") {
+        return;
+      }
+
+      grouped.set(task.recurrenceGroupId, [
+        ...(grouped.get(task.recurrenceGroupId) ?? []),
+        task,
+      ]);
+    });
+
+    return [...grouped.entries()]
+      .map(([id, groupTasks]) => {
+        const sortedTasks = [...groupTasks].sort((a, b) => {
+          if (a.date !== b.date) return a.date.localeCompare(b.date);
+          return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+        });
+        const activeTasks = sortedTasks.filter(
+          (task) =>
+            task.date >= today &&
+            !task.completed &&
+            (task.status ?? "pending") !== "skipped"
+        );
+        const nextTask =
+          activeTasks[0] ??
+          sortedTasks.find((task) => task.date >= today) ??
+          sortedTasks[sortedTasks.length - 1];
+
+        return {
+          id,
+          title: nextTask?.title ?? "Recurring routine",
+          recurrence: nextTask?.recurrence ?? "daily",
+          time: nextTask?.time ?? "Any time",
+          nextDate: nextTask?.date ?? today,
+          activeCount: activeTasks.length,
+          completedCount: sortedTasks.filter((task) => task.completed).length,
+          tasks: sortedTasks,
+        };
+      })
+      .filter((routine) => routine.activeCount > 0)
+      .sort((a, b) => {
+        if (a.nextDate !== b.nextDate) return a.nextDate.localeCompare(b.nextDate);
+        return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
+      });
+  }, [tasks, today]);
+
   const profileDirty =
     displayName !== (profile.displayName ?? "") ||
     petNickname !== (profile.petNickname ?? "");
@@ -147,6 +257,112 @@ export default function SettingsScreen({
   const appName = Constants.expoConfig?.name ?? "Daily Discipline";
   const appVersion = Constants.expoConfig?.version ?? "1.0.0";
 
+  const refreshAudit = async () => {
+    const audit = await getScheduledNotificationAudit();
+    setNotificationAudit(audit);
+    return audit;
+  };
+
+  const deleteCollectionDocs = async (
+    uid: string,
+    collectionName: "tasks" | "focusSessions" | "feedback"
+  ) => {
+    const snapshot = await getDocs(collection(db, "users", uid, collectionName));
+    if (snapshot.empty) return [];
+
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((document) => batch.delete(document.ref));
+    await batch.commit();
+
+    return snapshot.docs.map((document) => document.id);
+  };
+
+  const resetUserData = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || dangerBusy) return;
+
+    setDangerBusy(true);
+
+    try {
+      const taskIds = await deleteCollectionDocs(uid, "tasks");
+      await cancelManyTaskNotifications(taskIds);
+      await deleteCollectionDocs(uid, "focusSessions");
+      await deleteCollectionDocs(uid, "feedback");
+      await saveProfile({
+        activePetKey: null,
+        petNickname: null,
+        focusDurationMinutes: 25,
+      });
+      await refreshNotificationState(uid);
+      await refreshAudit();
+
+      setStatusTone("success");
+      setStatusMessage("Test data reset. Your account and theme stayed intact.");
+    } finally {
+      setDangerBusy(false);
+    }
+  };
+
+  const confirmResetData = () => {
+    Alert.alert(
+      "Reset app data?",
+      "This deletes tasks, focus sessions, feedback, and reward progress. Your login stays active.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset Data",
+          style: "destructive",
+          onPress: () => {
+            void resetUserData();
+          },
+        },
+      ]
+    );
+  };
+
+  const deleteAccount = async () => {
+    const user = auth.currentUser;
+    if (!user || dangerBusy) return;
+
+    setDangerBusy(true);
+
+    try {
+      const uid = user.uid;
+      const taskIds = await deleteCollectionDocs(uid, "tasks");
+      await cancelManyTaskNotifications(taskIds);
+      await deleteCollectionDocs(uid, "focusSessions");
+      await deleteCollectionDocs(uid, "feedback");
+      const profileBatch = writeBatch(db);
+      profileBatch.delete(doc(db, "users", uid));
+      await profileBatch.commit();
+      await deleteUser(user);
+    } catch {
+      setStatusTone("warning");
+      setStatusMessage(
+        "Account delete needs a fresh login. Log out, log back in, then try again."
+      );
+    } finally {
+      setDangerBusy(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      "Delete account?",
+      "This permanently deletes this tester account and its app data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Account",
+          style: "destructive",
+          onPress: () => {
+            void deleteAccount();
+          },
+        },
+      ]
+    );
+  };
+
   const handleSaveProfile = async () => {
     setProfileSaving(true);
 
@@ -155,6 +371,18 @@ export default function SettingsScreen({
         displayName: displayName.trim() || null,
         petNickname: petNickname.trim() || null,
       });
+      if (auth.currentUser?.email) {
+        await setDoc(
+          doc(db, "publicProfiles", auth.currentUser.uid),
+          {
+            uid: auth.currentUser.uid,
+            email: auth.currentUser.email.toLowerCase(),
+            displayName: displayName.trim() || null,
+            updatedAt: new Date(),
+          },
+          { merge: true }
+        );
+      }
       setStatusTone("success");
       setStatusMessage(
         "Profile updated. Your app voice and companion name are saved."
@@ -172,9 +400,12 @@ export default function SettingsScreen({
 
     try {
       await refreshNotificationState(uid);
+      const audit = await refreshAudit();
       setStatusTone("success");
       setStatusMessage(
-        "Reminder schedule refreshed for evening and tomorrow morning."
+        audit.duplicateCount > 0
+          ? "Reminder schedule refreshed. Duplicate cleanup will finish on the next refresh if any remain."
+          : "Reminder schedule refreshed and duplicate check is clean."
       );
     } finally {
       setRemindersBusy(false);
@@ -195,6 +426,7 @@ export default function SettingsScreen({
         await refreshNotificationState(uid);
       }
 
+      await refreshAudit();
       setStatusTone("success");
       setStatusMessage("Notification preferences saved and synced.");
     } finally {
@@ -218,9 +450,93 @@ export default function SettingsScreen({
           "Notification permission is still off, so the test could not be sent."
         );
       }
+      await refreshAudit();
     } finally {
       setRemindersBusy(false);
     }
+  };
+
+  const submitFeedback = async () => {
+    const uid = auth.currentUser?.uid;
+    const message = feedbackText.trim();
+
+    if (!uid || !message || feedbackBusy) {
+      setStatusTone("warning");
+      setStatusMessage("Write a quick note before sending feedback.");
+      return;
+    }
+
+    setFeedbackBusy(true);
+
+    try {
+      await addDoc(collection(db, "users", uid, "feedback"), {
+        type: feedbackType,
+        message,
+        email: auth.currentUser?.email ?? null,
+        appVersion,
+        theme: themeName,
+        createdAt: new Date(),
+      });
+
+      setFeedbackText("");
+      setStatusTone("success");
+      setStatusMessage("Feedback sent. This will help polish the tester build.");
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
+
+  const endRoutine = async (routine: RoutineGroup) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const targets = routine.tasks.filter(
+      (task) =>
+        task.date >= today &&
+        !task.completed &&
+        (task.status ?? "pending") !== "skipped"
+    );
+
+    if (targets.length === 0) {
+      setStatusTone("warning");
+      setStatusMessage("That routine has no open future tasks to remove.");
+      return;
+    }
+
+    const batch = writeBatch(db);
+
+    targets.forEach((task) => {
+      batch.delete(doc(db, "users", uid, "tasks", task.id));
+    });
+
+    await cancelManyTaskNotifications(targets.map((task) => task.id));
+    await batch.commit();
+    await syncMorningSummaryNotification(uid);
+    await refreshAudit();
+
+    setStatusTone("success");
+    setStatusMessage(
+      `${routine.title} routine ended. Completed history stayed intact.`
+    );
+  };
+
+  const confirmEndRoutine = (routine: RoutineGroup) => {
+    Alert.alert(
+      "End this routine?",
+      `This removes ${routine.activeCount} open or future task${
+        routine.activeCount === 1 ? "" : "s"
+      } for ${routine.title}. Completed history stays in your stats.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "End Routine",
+          style: "destructive",
+          onPress: () => {
+            void endRoutine(routine);
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -235,11 +551,53 @@ export default function SettingsScreen({
             <Text style={[styles.backText, { color: colors.tint }]}>Back</Text>
           </TouchableOpacity>
         )}
-        <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
-        <Text style={[styles.subtitle, { color: colors.subtle }]}>
-          Personalize the app, check reminders, and keep the system feeling
-          owned.
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={[styles.headerKicker, { color: colors.tint }]}>
+              Control Center
+            </Text>
+            <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
+            <Text style={[styles.subtitle, { color: colors.subtle }]}>
+              Manage profile, routines, reminders, tester feedback, and account
+              controls.
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.headerBadge,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.headerBadgeValue, { color: colors.text }]}>
+              {routineGroups.length}
+            </Text>
+            <Text style={[styles.headerBadgeLabel, { color: colors.subtle }]}>
+              Routines
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Accountability Friends
         </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Add friends by email so you can see each other&apos;s daily progress
+          and send quick check-ins.
+        </Text>
+        <TouchableOpacity
+          style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+          onPress={() => router.push("/friends" as never)}
+        >
+          <Text style={styles.primaryButtonText}>Open Friends</Text>
+        </TouchableOpacity>
       </View>
 
       <View
@@ -457,6 +815,81 @@ export default function SettingsScreen({
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Routine Manager
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          See repeating plans in one place. End a routine when it no longer fits
+          without deleting completed history.
+        </Text>
+
+        {routineGroups.length > 0 ? (
+          routineGroups.map((routine) => (
+            <View
+              key={routine.id}
+              style={[
+                styles.routineRow,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.routineCopy}>
+                <Text style={[styles.routineTitle, { color: colors.text }]}>
+                  {routine.title}
+                </Text>
+                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                  {recurrenceLabels[routine.recurrence]} at {routine.time} · next{" "}
+                  {getRelativeDateLabel(routine.nextDate)}
+                </Text>
+                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                  {routine.activeCount} open repeat
+                  {routine.activeCount === 1 ? "" : "s"} ·{" "}
+                  {routine.completedCount} completed
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.routineEndButton,
+                  { backgroundColor: colors.surface, borderColor: colors.warning },
+                ]}
+                onPress={() => confirmEndRoutine(routine)}
+              >
+                <Text style={[styles.routineEndText, { color: colors.warning }]}>
+                  End
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        ) : (
+          <View
+            style={[
+              styles.emptySettingsCard,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+              No active routines yet
+            </Text>
+            <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+              Add something like &quot;Gym at 6 PM every day&quot; and it will
+              show up here.
+            </Text>
+            <TouchableOpacity
+              style={[styles.inlineActionButton, { backgroundColor: colors.tint }]}
+              onPress={() => router.push("/(tabs)/explore" as never)}
+            >
+              <Text style={styles.inlineActionText}>Create Routine</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           Companion Collection
         </Text>
         <View style={styles.petGrid}>
@@ -524,6 +957,73 @@ export default function SettingsScreen({
           Use these tools after changing lots of tasks or if you want to confirm
           reminders are still healthy on-device.
         </Text>
+
+        {notificationAudit && (
+          <View
+            style={[
+              styles.auditCard,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.auditHeader}>
+              <View>
+                <Text style={[styles.auditTitle, { color: colors.text }]}>
+                  Reminder Health
+                </Text>
+                <Text style={[styles.auditSubtitle, { color: colors.subtle }]}>
+                  {notificationAudit.duplicateCount === 0
+                    ? "No duplicate reminders detected."
+                    : `${notificationAudit.duplicateCount} duplicate reminder${
+                        notificationAudit.duplicateCount === 1 ? "" : "s"
+                      } detected.`}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.auditPill,
+                  {
+                    backgroundColor:
+                      notificationAudit.duplicateCount === 0
+                        ? colors.success
+                        : colors.warning,
+                  },
+                ]}
+              >
+                <Text style={styles.auditPillText}>
+                  {notificationAudit.total} total
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.auditStats}>
+              <Text style={[styles.auditStatText, { color: colors.subtle }]}>
+                Tasks {notificationAudit.taskReminderCount}
+              </Text>
+              <Text style={[styles.auditStatText, { color: colors.subtle }]}>
+                Follow-ups {notificationAudit.missedFollowUpCount}
+              </Text>
+              <Text style={[styles.auditStatText, { color: colors.subtle }]}>
+                Base{" "}
+                {notificationAudit.morningSummaryCount +
+                  notificationAudit.eveningReminderCount}
+              </Text>
+            </View>
+
+            {notificationAudit.nextNotifications.length > 0 && (
+              <View style={styles.auditUpcoming}>
+                {notificationAudit.nextNotifications.slice(0, 3).map((item) => (
+                  <Text
+                    key={item.id}
+                    style={[styles.auditUpcomingText, { color: colors.subtle }]}
+                    numberOfLines={1}
+                  >
+                    {item.title} · {item.kind}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         <View style={styles.settingRows}>
           {[
@@ -649,7 +1149,7 @@ export default function SettingsScreen({
             disabled={remindersBusy}
           >
             <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
-              {remindersBusy ? "Working..." : "Refresh Reminders"}
+              {remindersBusy ? "Working..." : "Refresh & Clean"}
             </Text>
           </TouchableOpacity>
 
@@ -669,6 +1169,124 @@ export default function SettingsScreen({
             {statusMessage}
           </Text>
         ) : null}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Tester Feedback
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Send bugs, confusing moments, or ideas straight into Firestore while
+          testing.
+        </Text>
+
+        <View style={styles.feedbackTypeRow}>
+          {feedbackTypes.map((type) => {
+            const selected = feedbackType === type;
+            return (
+              <TouchableOpacity
+                key={type}
+                style={[
+                  styles.feedbackTypeChip,
+                  {
+                    backgroundColor: selected ? colors.tint : colors.background,
+                    borderColor: selected ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() => setFeedbackType(type)}
+              >
+                <Text
+                  style={[
+                    styles.feedbackTypeText,
+                    { color: selected ? "#fff" : colors.text },
+                  ]}
+                >
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <TextInput
+          style={[
+            styles.feedbackInput,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          placeholder="What should I fix, improve, or keep?"
+          placeholderTextColor={colors.subtle}
+          value={feedbackText}
+          onChangeText={setFeedbackText}
+          multiline
+        />
+
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            {
+              backgroundColor:
+                feedbackText.trim() && !feedbackBusy ? colors.tint : colors.border,
+            },
+          ]}
+          onPress={submitFeedback}
+          disabled={!feedbackText.trim() || feedbackBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {feedbackBusy ? "Sending..." : "Send Feedback"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.card,
+            borderWidth: 1,
+            borderColor: colors.danger,
+            shadowColor: colors.danger,
+          },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.danger }]}>
+          Tester Data Controls
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Use these when a tester wants a clean start or wants their account
+          removed.
+        </Text>
+
+        <TouchableOpacity
+          style={[
+            styles.dangerOutlineButton,
+            { backgroundColor: colors.surface, borderColor: colors.warning },
+          ]}
+          onPress={confirmResetData}
+          disabled={dangerBusy}
+        >
+          <Text style={[styles.dangerOutlineText, { color: colors.warning }]}>
+            {dangerBusy ? "Working..." : "Reset App Data"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.dangerSolidButton, { backgroundColor: colors.danger }]}
+          onPress={confirmDeleteAccount}
+          disabled={dangerBusy}
+        >
+          <Text style={styles.dangerSolidText}>
+            {dangerBusy ? "Working..." : "Delete Account"}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <View
@@ -715,14 +1333,50 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 20,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  headerKicker: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  headerBadge: {
+    borderWidth: 1,
+    borderRadius: 20,
+    minWidth: 82,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  headerBadgeValue: {
+    fontSize: 25,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  headerBadgeLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
   backText: {
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 14,
   },
   title: {
-    fontSize: 32,
-    fontWeight: "700",
+    fontSize: 34,
+    fontWeight: "900",
+    letterSpacing: -0.7,
     marginBottom: 8,
   },
   subtitle: {
@@ -869,6 +1523,165 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginBottom: 10,
+  },
+  feedbackTypeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  feedbackTypeChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  feedbackTypeText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  feedbackInput: {
+    borderWidth: 1,
+    borderRadius: 16,
+    minHeight: 104,
+    padding: 14,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: "top",
+  },
+  dangerOutlineButton: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  dangerOutlineText: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  dangerSolidButton: {
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  dangerSolidText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  routineRow: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  routineCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  routineTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  routineMeta: {
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  routineEndButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  routineEndText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  emptySettingsCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 10,
+  },
+  emptySettingsTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 6,
+  },
+  emptySettingsText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  inlineActionButton: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginTop: 12,
+  },
+  inlineActionText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  auditCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  auditHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  auditTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  auditSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    maxWidth: 210,
+  },
+  auditPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  auditPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  auditStats: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 12,
+  },
+  auditStatText: {
+    fontSize: 12,
+    fontWeight: "800",
+    marginRight: 12,
+    marginBottom: 4,
+  },
+  auditUpcoming: {
+    marginTop: 8,
+  },
+  auditUpcomingText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   settingRows: {
     marginTop: 8,

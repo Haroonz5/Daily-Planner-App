@@ -352,7 +352,12 @@ export default function AddTask() {
       );
     }
 
-    return { warnings, suggestion };
+    return {
+      warnings,
+      suggestion,
+      dayTaskCount: projectedTaskCount,
+      closeTaskCount: closeTasks.length,
+    };
   }, [formattedTime, priority, selectedDateKey, selectedDateLabel, tasks, title]);
 
   const selectedDayTaskCount = tasks.filter(
@@ -821,11 +826,30 @@ export default function AddTask() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <Text style={styles.emoji}>📝</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Plan Your Tasks</Text>
-          <Text style={[styles.subtitle, { color: colors.subtle }]}>
-            Add something for later today, tomorrow, or weeks ahead.
-          </Text>
+          <View style={styles.headerCopy}>
+            <Text style={[styles.headerKicker, { color: colors.tint }]}>
+              Planner
+            </Text>
+            <Text style={[styles.title, { color: colors.text }]}>Add Task</Text>
+            <Text style={[styles.subtitle, { color: colors.subtle }]}>
+              Plan one task, repeat a routine, or let AI turn messy notes into
+              a schedule.
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.headerBadge,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.headerBadgeValue, { color: colors.text }]}>
+              {tasks.filter((task) => task.date >= todayKey).length}
+            </Text>
+            <Text style={[styles.headerBadgeLabel, { color: colors.subtle }]}>
+              Planned
+            </Text>
+          </View>
         </View>
 
         <View
@@ -845,6 +869,29 @@ export default function AddTask() {
           <Text style={styles.plannerHeroBody}>
             Turn messy ideas into tasks, break big work into steps, and reality-check the day before it gets overloaded.
           </Text>
+
+          <View style={styles.plannerHeroStats}>
+            <View style={styles.plannerHeroStat}>
+              <Text style={styles.plannerHeroStatValue}>
+                {planningInsights.dayTaskCount}
+              </Text>
+              <Text style={styles.plannerHeroStatLabel}>day load</Text>
+            </View>
+            <View style={styles.plannerHeroDivider} />
+            <View style={styles.plannerHeroStat}>
+              <Text style={styles.plannerHeroStatValue}>
+                {planningInsights.closeTaskCount}
+              </Text>
+              <Text style={styles.plannerHeroStatLabel}>nearby</Text>
+            </View>
+            <View style={styles.plannerHeroDivider} />
+            <View style={styles.plannerHeroStat}>
+              <Text style={styles.plannerHeroStatValue}>
+                {recurringDates.length}
+              </Text>
+              <Text style={styles.plannerHeroStatLabel}>creates</Text>
+            </View>
+          </View>
         </View>
 
         <View
@@ -1753,15 +1800,49 @@ export default function AddTask() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { alignItems: "center", paddingTop: 60, paddingBottom: 32 },
-  emoji: { fontSize: 48, marginBottom: 12 },
-  title: { fontSize: 32, fontWeight: "700", textAlign: "center" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 22,
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  headerKicker: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  headerBadge: {
+    borderWidth: 1,
+    borderRadius: 20,
+    minWidth: 82,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  headerBadgeValue: {
+    fontSize: 25,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  headerBadgeLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
+  title: { fontSize: 34, fontWeight: "900", letterSpacing: -0.7 },
   subtitle: {
     fontSize: 14,
-    marginTop: 6,
-    textAlign: "center",
-    lineHeight: 21,
-    paddingHorizontal: 30,
+    marginTop: 7,
+    lineHeight: 20,
   },
   plannerHero: {
     marginHorizontal: 24,
@@ -1802,6 +1883,35 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.84)",
     fontSize: 14,
     lineHeight: 21,
+  },
+  plannerHeroStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    borderRadius: 20,
+    paddingVertical: 12,
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  plannerHeroStat: {
+    flex: 1,
+    alignItems: "center",
+  },
+  plannerHeroStatValue: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  plannerHeroStatLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
+  plannerHeroDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "rgba(255,255,255,0.22)",
   },
   templateCard: {
     borderWidth: 1,

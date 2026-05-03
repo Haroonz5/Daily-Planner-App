@@ -11,6 +11,9 @@ Daily Discipline is a mobile productivity app built with Expo and React Native. 
 - Unlockable companion pets as consistency rewards
 - Custom pet sprites instead of plain emojis
 - Daily progress tracking and weekly stats
+- Discipline Score Breakdown showing how the score is calculated
+- Accountability friends with progress sharing, friend requests, and check-ins
+- Focus Mode with optional Strict Focus app-switch strike tracking
 - Multiple app themes, including light and dark themes
 - Cleaner floating bottom navigation
 - Local notifications for task reminders
@@ -22,7 +25,11 @@ Daily Discipline is a mobile productivity app built with Expo and React Native. 
 - AI daily feedback based on actual completion
 - AI pattern feedback based on skips, timing, and reschedules
 - AI weekly review with wins and next-week focus
+- AI weekly coach plan on the Stats screen
 - AI task breakdown for large or vague tasks
+- Tester feedback capture in Settings
+- Tester data reset and account deletion controls
+- Reminder health and duplicate notification cleanup
 - EAS build setup for internal testers
 - Docker/Render setup for deploying the AI backend
 
@@ -96,9 +103,11 @@ my-app/
     (tabs)/
       index.tsx        # Today screen
       explore.tsx      # Add Task screen
-      stats.tsx        # Stats screen
+      stats.tsx        # Stats, score breakdown, and weekly coach
       _layout.tsx      # Bottom tab navigation
     summary.tsx        # Daily summary and AI feedback
+    focus.tsx          # Focus timer and Strict Focus mode
+    friends.tsx        # Accountability friends
     settings.tsx
     login.tsx
     signup.tsx
@@ -111,8 +120,8 @@ my-app/
 
   assets/
     images/
-      pets/            # Companion pet sprites
       icon.png         # App icon
+    pets/              # Companion pet sprites
 
   components/
     ambient-background.tsx
@@ -219,6 +228,13 @@ Tester setup lives in:
 
 ```txt
 docs/TESTING_AND_RELEASE.md
+docs/TESTER_HANDOFF.md
+```
+
+Before sharing a build, run:
+
+```bash
+npm run qa
 ```
 
 The app includes `eas.json` profiles for preview, simulator, and production
@@ -227,13 +243,14 @@ deployed before sending builds to testers.
 
 ## Current Status
 
-The app currently supports task planning, reminders, AI scheduling tools, XP rewards, companion pets, multiple themes, and improved UI polish.
+The app currently supports task planning, reminders, AI scheduling tools, XP rewards, companion pets, accountability friends, Strict Focus sessions, multiple themes, and improved UI polish.
 
 The next possible improvements would be:
 
 - Deeper pet progression
 - Streak protection
 - More companion customization
+- Native-level focus blocking with a custom development build
 - Production deployment
 
 

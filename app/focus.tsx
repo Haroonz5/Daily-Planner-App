@@ -9,7 +9,14 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  AppState,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { PetSprite } from "@/components/pet-sprite";
@@ -46,6 +53,8 @@ type FocusSession = {
   taskId: string | null;
   taskTitle: string;
   minutes: number;
+  strictFocus?: boolean;
+  distractionStrikes?: number;
   completedAt?: any;
   createdAt?: any;
 };
@@ -71,7 +80,16 @@ export default function FocusScreen() {
   const [timerState, setTimerState] = useState<TimerState>("idle");
   const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [strictFocusEnabled, setStrictFocusEnabled] = useState(false);
+  const [distractionStrikes, setDistractionStrikes] = useState(0);
+  const [strictFocusMessage, setStrictFocusMessage] = useState("");
   const loggedSessionRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
+
+  const resetStrictFocusState = useCallback(() => {
+    setDistractionStrikes(0);
+    setStrictFocusMessage("");
+  }, []);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -122,6 +140,46 @@ export default function FocusScreen() {
   }, [timerState]);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const leftActiveApp =
+        appStateRef.current === "active" &&
+        (nextState === "inactive" || nextState === "background");
+
+      if (strictFocusEnabled && timerState === "running" && leftActiveApp) {
+        setDistractionStrikes((current) => {
+          const next = current + 1;
+
+          if (next >= 3) {
+            setTimerState("idle");
+            setSecondsLeft(sessionMinutes * 60);
+            loggedSessionRef.current = false;
+            setStrictFocusMessage(
+              "Strict Focus ended after 3 app switches. Reset and try a clean block."
+            );
+          } else {
+            setTimerState("paused");
+            setStrictFocusMessage(
+              `${next}/3 distraction strike${
+                next === 1 ? "" : "s"
+              }. The timer paused so you can return on purpose.`
+            );
+          }
+
+          return next;
+        });
+
+        Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Warning
+        ).catch(() => {});
+      }
+
+      appStateRef.current = nextState;
+    });
+
+    return () => subscription.remove();
+  }, [sessionMinutes, strictFocusEnabled, timerState]);
+
+  useEffect(() => {
     if (timerState === "running" && secondsLeft === 0) {
       setTimerState("done");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
@@ -142,6 +200,8 @@ export default function FocusScreen() {
       taskId: task?.id ?? null,
       taskTitle: task?.title ?? "Untitled focus block",
       minutes: sessionMinutes,
+      strictFocus: strictFocusEnabled,
+      distractionStrikes,
       completedAt: new Date(),
       createdAt: new Date(),
     });
@@ -153,7 +213,7 @@ export default function FocusScreen() {
         lastActionAt: new Date(),
       });
     }
-  }, [sessionMinutes]);
+  }, [distractionStrikes, sessionMinutes, strictFocusEnabled]);
 
   const focusData = useMemo(() => {
     const totalXp = tasks.reduce((sum, task) => sum + getTaskXp(task), 0);
@@ -263,6 +323,7 @@ export default function FocusScreen() {
     setSecondsLeft(minutes * 60);
     setTimerState("idle");
     loggedSessionRef.current = false;
+    resetStrictFocusState();
     await saveProfile({ focusDurationMinutes: minutes });
   };
 
@@ -279,6 +340,7 @@ export default function FocusScreen() {
 
     if (timerState === "idle" || timerState === "done") {
       loggedSessionRef.current = false;
+      resetStrictFocusState();
     }
 
     setTimerState("running");
@@ -289,6 +351,7 @@ export default function FocusScreen() {
     setTimerState("idle");
     setSecondsLeft(sessionMinutes * 60);
     loggedSessionRef.current = false;
+    resetStrictFocusState();
   };
 
   return (
@@ -352,6 +415,81 @@ export default function FocusScreen() {
               </TouchableOpacity>
             );
           })}
+        </View>
+
+        <View
+          style={[
+            styles.strictFocusPanel,
+            {
+              backgroundColor: colors.surface,
+              borderColor: strictFocusEnabled ? colors.tint : colors.border,
+            },
+          ]}
+        >
+          <View style={styles.strictFocusHeader}>
+            <View style={styles.strictFocusCopy}>
+              <Text style={[styles.strictFocusTitle, { color: colors.text }]}>
+                Strict Focus
+              </Text>
+              <Text style={[styles.strictFocusBody, { color: colors.subtle }]}>
+                Leaving the app pauses the timer and counts as a strike. After
+                3 strikes, the block resets.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.strictToggle,
+                {
+                  backgroundColor: strictFocusEnabled
+                    ? colors.tint
+                    : colors.background,
+                  borderColor: strictFocusEnabled ? colors.tint : colors.border,
+                },
+              ]}
+              onPress={() => {
+                if (timerState === "running") return;
+                setStrictFocusEnabled((current) => !current);
+                resetStrictFocusState();
+              }}
+              disabled={timerState === "running"}
+            >
+              <Text
+                style={[
+                  styles.strictToggleText,
+                  { color: strictFocusEnabled ? "#fff" : colors.text },
+                ]}
+              >
+                {strictFocusEnabled ? "On" : "Off"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.strictStrikeRow}>
+            {[0, 1, 2].map((strike) => (
+              <View
+                key={strike}
+                style={[
+                  styles.strictStrikeDot,
+                  {
+                    backgroundColor:
+                      strike < distractionStrikes
+                        ? colors.warning
+                        : colors.border,
+                  },
+                ]}
+              />
+            ))}
+            <Text style={[styles.strictStrikeText, { color: colors.subtle }]}>
+              {distractionStrikes}/3 app switches
+            </Text>
+          </View>
+
+          {!!strictFocusMessage && (
+            <Text style={[styles.strictFocusMessage, { color: colors.warning }]}>
+              {strictFocusMessage}
+            </Text>
+          )}
         </View>
 
         <Text style={[styles.timerValue, { color: colors.text }]}>
@@ -446,6 +584,7 @@ export default function FocusScreen() {
                 setTimerState("idle");
                 setSecondsLeft(sessionMinutes * 60);
                 loggedSessionRef.current = false;
+                resetStrictFocusState();
               }}
             >
               <View style={styles.queueCopy}>
@@ -483,6 +622,9 @@ export default function FocusScreen() {
                 </Text>
                 <Text style={[styles.queueMeta, { color: colors.subtle }]}>
                   {session.minutes} min focus block
+                  {session.strictFocus
+                    ? ` • strict ${session.distractionStrikes ?? 0}/3`
+                    : ""}
                 </Text>
               </View>
             </View>
@@ -598,6 +740,61 @@ const styles = StyleSheet.create({
   timerPresetText: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  strictFocusPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 18,
+  },
+  strictFocusHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  strictFocusCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  strictFocusTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  strictFocusBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  strictToggle: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  strictToggleText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  strictStrikeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+  },
+  strictStrikeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    marginRight: 6,
+  },
+  strictStrikeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 3,
+  },
+  strictFocusMessage: {
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 8,
   },
   timerValue: {
     fontSize: 48,

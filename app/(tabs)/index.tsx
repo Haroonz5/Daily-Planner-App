@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Modal,
@@ -559,6 +560,27 @@ export default function HomeScreen() {
                 body: `${activePet.name} is warmed up. Start with the smallest task on the list.`,
                 tone: colors.tint,
               };
+
+  const patternAction = useMemo(() => {
+    const insight = patternFeedback?.insights[0];
+    if (!insight) return null;
+
+    const text = `${insight.title} ${insight.body} ${insight.action}`.toLowerCase();
+
+    if (openTodayTasks === 0) {
+      return { label: "Add A Task", type: "add" as const };
+    }
+
+    if (/move|resched|time|window|crowded|overload|trim/.test(text)) {
+      return { label: "Reset My Day", type: "reset" as const };
+    }
+
+    if (/focus|block|start|attention/.test(text)) {
+      return { label: "Open Focus", type: "focus" as const };
+    }
+
+    return { label: "Review Stats", type: "stats" as const };
+  }, [openTodayTasks, patternFeedback]);
 
   const buildAdaptiveTimes = (count: number, excludedIds: Set<string>) => {
     const now = new Date();
@@ -1525,14 +1547,31 @@ export default function HomeScreen() {
 
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <View>
-              <Text style={[styles.greeting, { color: colors.subtle }]}>
-                Good day 🌸
+            <View style={styles.headerCopy}>
+              <Text style={[styles.headerKicker, { color: colors.tint }]}>
+                Command Center
               </Text>
               <Text style={[styles.title, { color: colors.text }]}>Today</Text>
+              <Text style={[styles.headerSubtitle, { color: colors.subtle }]}>
+                Execute the plan, protect momentum, and adjust before the day
+                slips.
+              </Text>
             </View>
 
             <View style={styles.headerActions}>
+              <View
+                style={[
+                  styles.headerScoreBadge,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.headerScoreValue, { color: colors.text }]}>
+                  {todayReadiness.score}
+                </Text>
+                <Text style={[styles.headerScoreLabel, { color: colors.subtle }]}>
+                  Ready
+                </Text>
+              </View>
               <TouchableOpacity
                 onPress={() => setThemeModalVisible(true)}
                 style={[styles.iconButton, { backgroundColor: colors.surface }]}
@@ -1972,6 +2011,51 @@ export default function HomeScreen() {
                   </View>
                 ))
               )}
+
+              {!patternBusy && patternAction && (
+                <View style={styles.patternActionRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.patternActionButton,
+                      { backgroundColor: colors.tint },
+                    ]}
+                    onPress={() => {
+                      if (patternAction.type === "reset") {
+                        void resetMyDay();
+                        return;
+                      }
+
+                      if (patternAction.type === "focus") {
+                        router.push("/focus");
+                        return;
+                      }
+
+                      if (patternAction.type === "add") {
+                        router.push("/(tabs)/explore" as never);
+                        return;
+                      }
+
+                      router.push("/(tabs)/stats" as never);
+                    }}
+                  >
+                    <Text style={styles.patternActionButtonText}>
+                      {patternAction.label}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.patternSecondaryButton,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => router.push("/(tabs)/stats" as never)}
+                  >
+                    <Text style={[styles.patternSecondaryButtonText, { color: colors.text }]}>
+                      Details
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 
@@ -2054,7 +2138,26 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {todayTasks.length === 0 ? (
+          {!tasksLoaded ? (
+            <View
+              style={[
+                styles.loadingCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <ActivityIndicator color={colors.tint} size="small" />
+              <Text style={[styles.loadingTitle, { color: colors.text }]}>
+                Loading your plan
+              </Text>
+              <Text style={[styles.loadingText, { color: colors.subtle }]}>
+                Pulling tasks, reminders, and reward progress into place.
+              </Text>
+            </View>
+          ) : todayTasks.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🌤️</Text>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -2063,6 +2166,12 @@ export default function HomeScreen() {
               <Text style={[styles.emptySubtitle, { color: colors.subtle }]}>
                 Add a few tasks tonight so tomorrow starts with direction.
               </Text>
+              <TouchableOpacity
+                style={[styles.emptyActionButton, { backgroundColor: colors.tint }]}
+                onPress={() => router.push("/(tabs)/explore" as never)}
+              >
+                <Text style={styles.emptyActionText}>Add First Task</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View
@@ -2833,16 +2942,51 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-end",
+    alignItems: "center",
     paddingHorizontal: 24,
     paddingTop: 60,
-    paddingBottom: 16,
+    paddingBottom: 20,
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 14,
   },
   headerActions: {
     flexDirection: "row",
+    alignItems: "center",
   },
-  greeting: { fontSize: 14, marginBottom: 4 },
-  title: { fontSize: 32, fontWeight: "700" },
+  headerKicker: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  title: { fontSize: 34, fontWeight: "900", letterSpacing: -0.7 },
+  headerSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  headerScoreBadge: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+    minWidth: 64,
+  },
+  headerScoreValue: {
+    fontSize: 21,
+    fontWeight: "900",
+    lineHeight: 24,
+  },
+  headerScoreLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 1,
+    textTransform: "uppercase",
+  },
   momentumCard: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -3304,6 +3448,33 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 7,
   },
+  patternActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+  },
+  patternActionButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: "center",
+    marginRight: 8,
+  },
+  patternActionButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  patternSecondaryButton: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  patternSecondaryButtonText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
   missedBanner: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -3414,6 +3585,29 @@ const styles = StyleSheet.create({
     marginTop: 80,
     paddingHorizontal: 40,
   },
+  loadingCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 22,
+    alignItems: "center",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  loadingTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  loadingText: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+  },
   emptyEmoji: { fontSize: 52, marginBottom: 16 },
   emptyTitle: {
     fontSize: 22,
@@ -3425,6 +3619,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     lineHeight: 22,
+  },
+  emptyActionButton: {
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    marginTop: 18,
+  },
+  emptyActionText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
   },
   futureSection: {
     marginTop: 32,

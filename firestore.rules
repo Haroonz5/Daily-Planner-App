@@ -10,12 +10,93 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function hasFriendDoc(ownerUid, friendUid) {
+      return exists(/databases/$(database)/documents/users/$(ownerUid)/friends/$(friendUid));
+    }
+
+    function acceptedRequestBy(requesterUid, recipientUid) {
+      return exists(/databases/$(database)/documents/friendRequests/$(requesterUid + "_" + recipientUid)) &&
+        get(/databases/$(database)/documents/friendRequests/$(requesterUid + "_" + recipientUid)).data.status == "accepted";
+    }
+
+    function acceptedFriendLink(userId, friendId) {
+      return acceptedRequestBy(userId, friendId) ||
+        acceptedRequestBy(friendId, userId);
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
       match /tasks/{taskId} {
         allow read, write: if isOwner(userId);
       }
+
+      match /focusSessions/{sessionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /feedback/{feedbackId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /friends/{friendId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) ||
+          (isSignedIn() &&
+            request.auth.uid == friendId &&
+            acceptedFriendLink(userId, friendId));
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /publicProfiles/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    match /publicProgress/{userId} {
+      allow read: if isOwner(userId) || hasFriendDoc(userId, request.auth.uid);
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if isSignedIn() &&
+        (resource.data.requesterUid == request.auth.uid ||
+          resource.data.recipientUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        requestId == request.auth.uid + "_" + request.resource.data.recipientUid &&
+        request.resource.data.requesterUid == request.auth.uid &&
+        request.resource.data.recipientUid is string &&
+        request.resource.data.status == "pending";
+
+      allow update: if isSignedIn() &&
+        resource.data.recipientUid == request.auth.uid &&
+        request.resource.data.requesterUid == resource.data.requesterUid &&
+        request.resource.data.recipientUid == resource.data.recipientUid &&
+        request.resource.data.status in ["accepted", "declined"];
+
+      allow delete: if isSignedIn() &&
+        (resource.data.requesterUid == request.auth.uid ||
+          resource.data.recipientUid == request.auth.uid);
+    }
+
+    match /accountabilityNudges/{nudgeId} {
+      allow read: if isSignedIn() &&
+        (resource.data.fromUid == request.auth.uid ||
+          resource.data.toUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        request.resource.data.fromUid == request.auth.uid &&
+        request.resource.data.toUid is string &&
+        (hasFriendDoc(request.auth.uid, request.resource.data.toUid) ||
+          hasFriendDoc(request.resource.data.toUid, request.auth.uid));
+
+      allow update, delete: if isSignedIn() &&
+        (resource.data.fromUid == request.auth.uid ||
+          resource.data.toUid == request.auth.uid);
     }
   }
 }

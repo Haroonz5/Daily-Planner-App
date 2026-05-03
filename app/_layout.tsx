@@ -116,6 +116,7 @@ export default function RootLayout() {
     const inSettings = firstSegment === "settings";
     const inPetHome = firstSegment === "pet-home";
     const inWeek = firstSegment === "week";
+    const inFriends = firstSegment === "friends";
     const inTutorial = firstSegment === "tutorial";
     const inOnboarding = firstSegment === "onboarding";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
@@ -145,6 +146,7 @@ export default function RootLayout() {
         inSettings ||
         inPetHome ||
         inWeek ||
+        inFriends ||
         inTutorial)
     ) {
       router.replace("/login");
@@ -262,6 +264,7 @@ export default function RootLayout() {
             <Stack.Screen name="focus" options={{ headerShown: false }} />
             <Stack.Screen name="pet-home" options={{ headerShown: false }} />
             <Stack.Screen name="week" options={{ headerShown: false }} />
+            <Stack.Screen name="friends" options={{ headerShown: false }} />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
             <Stack.Screen name="modal" options={{ headerShown: false }} />
           </Stack>

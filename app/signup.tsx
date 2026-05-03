@@ -58,6 +58,17 @@ export default function Signup() {
         { merge: true }
       );
 
+      await setDoc(
+        doc(db, "publicProfiles", credential.user.uid),
+        {
+          uid: credential.user.uid,
+          email: normalizedEmail,
+          displayName: null,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+
       router.replace("/tutorial" as never);
     } catch {
       setError("Could not create account. Try again.");

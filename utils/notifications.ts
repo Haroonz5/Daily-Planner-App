@@ -23,6 +23,21 @@ export type NotificationSettings = {
   eveningReminderTime: string;
 };
 
+export type ScheduledNotificationAudit = {
+  total: number;
+  taskReminderCount: number;
+  missedFollowUpCount: number;
+  morningSummaryCount: number;
+  eveningReminderCount: number;
+  duplicateCount: number;
+  nextNotifications: {
+    id: string;
+    title: string;
+    kind: string;
+    taskId?: string;
+  }[];
+};
+
 const TASK_NOTIFICATION_IDS_KEY = "taskNotificationIds";
 const MORNING_SUMMARY_NOTIFICATION_KEY = "morningSummaryNotificationId";
 const EVENING_REMINDER_NOTIFICATION_KEY = "eveningReminderNotificationId";
@@ -44,9 +59,29 @@ const NOTIFICATION_KINDS = {
   morningSummary: "morning-summary",
   taskDue: "task-due",
   taskMissed: "task-missed",
+  test: "test",
 } as const;
 
 type TaskNotificationMap = Record<string, string[]>;
+
+const getTaskDueNotificationId = (taskId: string) =>
+  `daily-discipline-task-${taskId}-due`;
+
+const getTaskMissedNotificationId = (taskId: string) =>
+  `daily-discipline-task-${taskId}-missed`;
+
+const getNotificationData = (request: Notifications.NotificationRequest) =>
+  (request.content.data ?? {}) as {
+    kind?: string;
+    taskId?: string;
+  };
+
+const getNotificationAuditKey = (request: Notifications.NotificationRequest) => {
+  const data = getNotificationData(request);
+  return data.taskId
+    ? `${data.kind ?? "unknown"}:${data.taskId}`
+    : `${data.kind ?? "unknown"}:${request.content.title ?? request.identifier}`;
+};
 
 const parseTaskDateTime = (dateString: string, timeString: string) => {
   const [year, month, day] = dateString.split("-").map(Number);
@@ -228,9 +263,24 @@ export const ensureBaseReminders = async () => {
 export const cancelTaskNotifications = async (taskId: string) => {
   const notificationMap = await loadTaskNotificationMap();
   const ids = notificationMap[taskId] ?? [];
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(
+    () => []
+  );
+  const idsToCancel = new Set([
+    ...ids,
+    getTaskDueNotificationId(taskId),
+    getTaskMissedNotificationId(taskId),
+  ]);
+
+  scheduled.forEach((request) => {
+    const data = getNotificationData(request);
+    if (data.taskId === taskId) {
+      idsToCancel.add(request.identifier);
+    }
+  });
 
   await Promise.all(
-    ids.map((id) =>
+    [...idsToCancel].map((id) =>
       Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
     )
   );
@@ -268,6 +318,7 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
       : task.title;
 
   const dueId = await Notifications.scheduleNotificationAsync({
+    identifier: getTaskDueNotificationId(task.id),
     content: {
       title: dueTitle,
       body: dueBody,
@@ -284,6 +335,7 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
   if (settings.missedFollowUpEnabled) {
     const missedDate = new Date(dueDate.getTime() + 15 * 60 * 1000);
     const missedId = await Notifications.scheduleNotificationAsync({
+      identifier: getTaskMissedNotificationId(task.id),
       content: {
         title: "Still waiting on this one",
         body: `${task.title} was due at ${task.time}. Move now or reschedule honestly.`,
@@ -300,6 +352,72 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
   const notificationMap = await loadTaskNotificationMap();
   notificationMap[task.id] = ids;
   await saveTaskNotificationMap(notificationMap);
+};
+
+export const getScheduledNotificationAudit =
+  async (): Promise<ScheduledNotificationAudit> => {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(
+      () => []
+    );
+    const keyCounts = new Map<string, number>();
+
+    scheduled.forEach((request) => {
+      const key = getNotificationAuditKey(request);
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+    });
+
+    const duplicateCount = [...keyCounts.values()].reduce(
+      (sum, count) => sum + Math.max(0, count - 1),
+      0
+    );
+
+    const countKind = (kind: string) =>
+      scheduled.filter((request) => getNotificationData(request).kind === kind)
+        .length;
+
+    return {
+      total: scheduled.length,
+      taskReminderCount: countKind(NOTIFICATION_KINDS.taskDue),
+      missedFollowUpCount: countKind(NOTIFICATION_KINDS.taskMissed),
+      morningSummaryCount: countKind(NOTIFICATION_KINDS.morningSummary),
+      eveningReminderCount: countKind(NOTIFICATION_KINDS.eveningReminder),
+      duplicateCount,
+      nextNotifications: scheduled.slice(0, 5).map((request) => {
+        const data = getNotificationData(request);
+        return {
+          id: request.identifier,
+          title: request.content.title ?? "Scheduled reminder",
+          kind: data.kind ?? "unknown",
+          taskId: data.taskId,
+        };
+      }),
+    };
+  };
+
+export const cleanupDuplicateScheduledNotifications = async () => {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync().catch(
+    () => []
+  );
+  const seenKeys = new Set<string>();
+  const duplicateIds: string[] = [];
+
+  scheduled.forEach((request) => {
+    const key = getNotificationAuditKey(request);
+    if (seenKeys.has(key)) {
+      duplicateIds.push(request.identifier);
+      return;
+    }
+
+    seenKeys.add(key);
+  });
+
+  await Promise.all(
+    duplicateIds.map((id) =>
+      Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+    )
+  );
+
+  return duplicateIds.length;
 };
 
 export const syncMorningSummaryNotification = async (uid: string) => {
@@ -384,6 +502,7 @@ export const syncMorningSummaryNotification = async (uid: string) => {
 export const refreshNotificationState = async (uid: string) => {
   await ensureBaseReminders();
   await syncMorningSummaryNotification(uid);
+  await cleanupDuplicateScheduledNotifications();
 };
 
 export const scheduleQuickTestNotification = async () => {
@@ -396,6 +515,7 @@ export const scheduleQuickTestNotification = async () => {
     content: {
       title: "Daily Discipline Test",
       body: "If you saw this, your reminders are ready to work.",
+      data: { kind: NOTIFICATION_KINDS.test },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
