@@ -22,6 +22,7 @@ import {
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
 import { Colors } from "@/constants/theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   breakDownTask,
   parseNaturalTasks,
@@ -72,6 +73,32 @@ type TaskTemplate = {
   priority: TaskPriority;
   recurrence: RecurrenceRule;
   time: string;
+};
+
+type EnergyMode = "light" | "steady" | "lockedIn";
+
+const energyModeBudgets: Record<
+  EnergyMode,
+  { label: string; maxMinutes: number; maxTasks: number; copy: string }
+> = {
+  light: {
+    label: "Light Day",
+    maxMinutes: 180,
+    maxTasks: 3,
+    copy: "Keep the plan small and protect the essentials.",
+  },
+  steady: {
+    label: "Steady Day",
+    maxMinutes: 360,
+    maxTasks: 5,
+    copy: "Balanced planning for a normal day.",
+  },
+  lockedIn: {
+    label: "Locked In",
+    maxMinutes: 540,
+    maxTasks: 8,
+    copy: "Higher output, but still avoid fantasy scheduling.",
+  },
 };
 
 const priorityColors: Record<TaskPriority, string> = {
@@ -137,6 +164,11 @@ const defaultTaskTemplates: TaskTemplate[] = [
   },
 ];
 
+const getTaskSaveErrorMessage = (error: any) =>
+  error?.code === "permission-denied"
+    ? "Firebase blocked saving tasks. Log out and back in, then deploy the latest Firestore rules."
+    : error?.message ?? "Something went wrong while saving tasks.";
+
 const getDefaultFutureDate = () => {
   const date = new Date();
   date.setDate(date.getDate() + 2);
@@ -146,6 +178,7 @@ const getDefaultFutureDate = () => {
 
 export default function AddTask() {
   const { themeName } = useAppTheme();
+  const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -238,6 +271,8 @@ export default function AddTask() {
     0
   );
   const templates = [...defaultTaskTemplates, ...customTemplates];
+  const energyMode = (profile.energyMode ?? "steady") as EnergyMode;
+  const energyBudget = energyModeBudgets[energyMode] ?? energyModeBudgets.steady;
 
   const planningInsights = useMemo(() => {
     const selectedDayTasks = tasks.filter((task) => task.date === selectedDateKey);
@@ -445,7 +480,29 @@ export default function AddTask() {
           })),
           timezone,
         });
-        setRealityCheck(check);
+        const exceedsEnergy =
+          check.totalMinutes > energyBudget.maxMinutes ||
+          check.taskCount > energyBudget.maxTasks;
+
+        setRealityCheck(
+          exceedsEnergy
+            ? {
+                ...check,
+                severity:
+                  check.severity === "clear" ? "watch" : check.severity,
+                warnings: [
+                  ...check.warnings,
+                  `${energyBudget.label} target: ${Math.round(
+                    energyBudget.maxMinutes / 60
+                  )} hours or ${energyBudget.maxTasks} active tasks.`,
+                ],
+                suggestions: [
+                  ...check.suggestions,
+                  "Switch energy mode if you truly have more capacity, or trim the lowest-value task.",
+                ],
+              }
+            : check
+        );
       }
     } catch (e: any) {
       setError(e.message ?? "The AI planner could not read that yet.");
@@ -632,9 +689,9 @@ export default function AddTask() {
             status: "pending",
           })
         )
-      );
+      ).catch(() => {});
 
-      await syncMorningSummaryNotification(uid);
+      await syncMorningSummaryNotification(uid).catch(() => {});
 
       resetForm();
       setError("");
@@ -643,7 +700,7 @@ export default function AddTask() {
       );
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
-      setError(e.message ?? "Something went wrong while adding the breakdown.");
+      setError(getTaskSaveErrorMessage(e));
     }
   };
 
@@ -718,9 +775,9 @@ export default function AddTask() {
             status: "pending",
           })
         )
-      );
+      ).catch(() => {});
 
-      await syncMorningSummaryNotification(uid);
+      await syncMorningSummaryNotification(uid).catch(() => {});
 
       setNaturalInput("");
       setParsedTasks([]);
@@ -731,7 +788,7 @@ export default function AddTask() {
       setSuccessMessage(`${createdTasks.length} AI-planned task${createdTasks.length === 1 ? "" : "s"} added.`);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
-      setError(e.message ?? "Something went wrong while adding AI-planned tasks.");
+      setError(getTaskSaveErrorMessage(e));
     }
   };
 
@@ -798,9 +855,9 @@ export default function AddTask() {
             status: "pending",
           })
         )
-      );
+      ).catch(() => {});
 
-      await syncMorningSummaryNotification(uid);
+      await syncMorningSummaryNotification(uid).catch(() => {});
 
       resetForm();
       setError("");
@@ -813,7 +870,7 @@ export default function AddTask() {
       setSuccessMessage(success);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
-      setError(e.message ?? "Something went wrong while adding the task.");
+      setError(getTaskSaveErrorMessage(e));
     }
   };
 
@@ -894,6 +951,69 @@ export default function AddTask() {
               </Text>
               <Text style={styles.plannerHeroStatLabel}>creates</Text>
             </View>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.energyPlannerCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <View style={styles.energyPlannerHeader}>
+            <View style={styles.energyPlannerCopy}>
+              <Text style={[styles.energyPlannerEyebrow, { color: colors.tint }]}>
+                Mood-Based Planning
+              </Text>
+              <Text style={[styles.energyPlannerTitle, { color: colors.text }]}>
+                {energyBudget.label}
+              </Text>
+              <Text style={[styles.energyPlannerBody, { color: colors.subtle }]}>
+                {energyBudget.copy} AI reality checks will compare drafts against this capacity.
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.energyPlannerPill,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.energyPlannerPillText, { color: colors.subtle }]}>
+                {Math.round(energyBudget.maxMinutes / 60)}h max
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.energyPlannerChips}>
+            {(Object.keys(energyModeBudgets) as EnergyMode[]).map((mode) => {
+              const selected = mode === energyMode;
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[
+                    styles.energyPlannerChip,
+                    {
+                      backgroundColor: selected ? colors.tint : colors.surface,
+                      borderColor: selected ? colors.tint : colors.border,
+                    },
+                  ]}
+                  onPress={() => saveProfile({ energyMode: mode })}
+                >
+                  <Text
+                    style={[
+                      styles.energyPlannerChipText,
+                      { color: selected ? "#fff" : colors.text },
+                    ]}
+                  >
+                    {energyModeBudgets[mode].label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -1915,6 +2035,69 @@ const styles = StyleSheet.create({
     width: 1,
     height: 28,
     backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  energyPlannerCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    marginHorizontal: 24,
+    marginBottom: 18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  energyPlannerHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  energyPlannerCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  energyPlannerEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  energyPlannerTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  energyPlannerBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  energyPlannerPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  energyPlannerPillText: {
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  energyPlannerChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginTop: 14,
+  },
+  energyPlannerChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    margin: 4,
+  },
+  energyPlannerChipText: {
+    fontSize: 12,
+    fontWeight: "900",
   },
   templateCard: {
     borderWidth: 1,

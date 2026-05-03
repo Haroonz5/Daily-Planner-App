@@ -12,7 +12,10 @@ export type AppThemeName =
   | "emberNight"
   | "amazonLight"
   | "githubDark"
-  | "auroraDark";
+  | "auroraDark"
+  | "voidBlack"
+  | "slateSteel"
+  | "roseQuartz";
 
 type ThemePalette = {
   text: string;
@@ -45,6 +48,9 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   amazonLight: "Amazon Light",
   githubDark: "GitHub Dark",
   auroraDark: "Aurora Dark",
+  voidBlack: "Void Black",
+  slateSteel: "Slate Steel",
+  roseQuartz: "Rose Quartz",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -251,6 +257,57 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     warning: "#fbbf24",
     statusBar: "light",
     navigationTone: "dark",
+  },
+  voidBlack: {
+    text: "#f7f8f5",
+    background: "#020302",
+    card: "#0a0d0b",
+    surface: "#111712",
+    tint: "#9eff6e",
+    icon: "#8da28c",
+    tabIconDefault: "#576356",
+    tabIconSelected: "#9eff6e",
+    subtle: "#a8b4a5",
+    border: "#1f2a20",
+    danger: "#ff6f6f",
+    success: "#7cff9e",
+    warning: "#ffd166",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  slateSteel: {
+    text: "#edf4fb",
+    background: "#111821",
+    card: "#192331",
+    surface: "#223044",
+    tint: "#7db4ff",
+    icon: "#94a8be",
+    tabIconDefault: "#627384",
+    tabIconSelected: "#7db4ff",
+    subtle: "#b4c3d2",
+    border: "#2d3e52",
+    danger: "#ff8d8d",
+    success: "#77d8a1",
+    warning: "#f3c76f",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  roseQuartz: {
+    text: "#412b37",
+    background: "#fff7fb",
+    card: "#ffffff",
+    surface: "#f8e7ef",
+    tint: "#d65f93",
+    icon: "#956b7f",
+    tabIconDefault: "#bd95a8",
+    tabIconSelected: "#d65f93",
+    subtle: "#7e6673",
+    border: "#efd4df",
+    danger: "#d84f68",
+    success: "#5fae8a",
+    warning: "#d99a42",
+    statusBar: "dark",
+    navigationTone: "light",
   },
 };
 

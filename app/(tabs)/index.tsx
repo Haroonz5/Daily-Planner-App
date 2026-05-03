@@ -5,6 +5,7 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  setDoc,
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -21,7 +22,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Swipeable } from "react-native-gesture-handler";
 
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
@@ -86,6 +86,41 @@ type Task = {
 };
 
 type EditScope = "single" | "future";
+type EnergyMode = "light" | "steady" | "lockedIn";
+
+const energyModes: {
+  key: EnergyMode;
+  label: string;
+  shortLabel: string;
+  maxOpenTasks: number;
+  maxHighPriority: number;
+  copy: string;
+}[] = [
+  {
+    key: "light",
+    label: "Light Day",
+    shortLabel: "Light",
+    maxOpenTasks: 3,
+    maxHighPriority: 1,
+    copy: "Tired mode. Protect essentials and keep the plan small.",
+  },
+  {
+    key: "steady",
+    label: "Steady Day",
+    shortLabel: "Steady",
+    maxOpenTasks: 5,
+    maxHighPriority: 2,
+    copy: "Normal mode. Balanced pressure with room for real life.",
+  },
+  {
+    key: "lockedIn",
+    label: "Locked In",
+    shortLabel: "Locked",
+    maxOpenTasks: 8,
+    maxHighPriority: 4,
+    copy: "High-output mode. Push harder, but keep the schedule honest.",
+  },
+];
 
 const priorityColors: Record<Priority, string> = {
   Low: "#8dcf9f",
@@ -317,6 +352,13 @@ export default function HomeScreen() {
       tasks: groupTasks,
     }));
   }, [futureTasks]);
+  const nextOpenTask = useMemo(
+    () =>
+      todayTasks.find(
+        (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+      ) ?? null,
+    [todayTasks]
+  );
   const completed = todayTasks.filter((t) => t.completed).length;
   const openTodayTasks = todayTasks.filter(
     (task) => !task.completed && (task.status ?? "pending") !== "skipped"
@@ -330,6 +372,55 @@ export default function HomeScreen() {
   const activePet = getActivePet(totalXp, profile.activePetKey);
   const unlockedPets = getUnlockedPets(totalXp);
   const behaviorCallout = getBehaviorCallout(tasks, today);
+  const energyMode = (profile.energyMode ?? "steady") as EnergyMode;
+  const activeEnergyMode =
+    energyModes.find((mode) => mode.key === energyMode) ?? energyModes[1];
+  const energyPlan = useMemo(() => {
+    const openTasks = todayTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    );
+    const highOpenTasks = openTasks.filter(
+      (task) => (task.priority ?? "Medium") === "High"
+    );
+    const overflow = Math.max(0, openTasks.length - activeEnergyMode.maxOpenTasks);
+    const highOverflow = Math.max(
+      0,
+      highOpenTasks.length - activeEnergyMode.maxHighPriority
+    );
+
+    const suggestedTrim = [...openTasks]
+      .sort((a, b) => {
+        const rankA = priorityRank[a.priority ?? "Medium"];
+        const rankB = priorityRank[b.priority ?? "Medium"];
+        if (rankA !== rankB) return rankB - rankA;
+        return (parseTimeToMinutes(b.time) ?? 0) - (parseTimeToMinutes(a.time) ?? 0);
+      })
+      .slice(0, Math.max(overflow, highOverflow));
+
+    const status =
+      overflow === 0 && highOverflow === 0
+        ? "Matched"
+        : overflow >= 3 || highOverflow >= 2
+          ? "Too Heavy"
+          : "Trim";
+
+    const guidance =
+      status === "Matched"
+        ? `${activeEnergyMode.label} fits today's open workload. Keep the next action obvious.`
+        : `${activeEnergyMode.label} is lighter than today's plan. Move ${Math.max(
+            overflow,
+            highOverflow,
+            1
+          )} task${Math.max(overflow, highOverflow, 1) === 1 ? "" : "s"} or reset the day.`;
+
+    return {
+      status,
+      guidance,
+      openCount: openTasks.length,
+      highOpenCount: highOpenTasks.length,
+      suggestedTrim,
+    };
+  }, [activeEnergyMode, todayTasks]);
   const momentumTitle =
     todayTasks.length === 0
       ? "Build a clean target"
@@ -569,6 +660,40 @@ export default function HomeScreen() {
                 tone: colors.tint,
               };
 
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !tasksLoaded) return;
+
+    void setDoc(
+      doc(db, "users", uid, "widgetSummary", "today"),
+      {
+        date: today,
+        nextTaskTitle: nextOpenTask?.title ?? "All clear",
+        nextTaskTime: nextOpenTask?.time ?? null,
+        completed,
+        total: todayTasks.length,
+        progressPercent: Math.round(progressPercent),
+        petName: profile.petNickname?.trim() || activePet.name,
+        petKey: activePet.key,
+        energyMode,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    ).catch(() => {});
+  }, [
+    activePet.key,
+    activePet.name,
+    completed,
+    energyMode,
+    nextOpenTask?.time,
+    nextOpenTask?.title,
+    profile.petNickname,
+    progressPercent,
+    tasksLoaded,
+    today,
+    todayTasks.length,
+  ]);
+
   const patternAction = useMemo(() => {
     const insight = patternFeedback?.insights[0];
     if (!insight) return null;
@@ -778,7 +903,7 @@ export default function HomeScreen() {
 
     await cancelTaskNotifications(task.id);
     await deleteDoc(doc(db, "users", uid, "tasks", task.id));
-    await syncMorningSummaryNotification(uid);
+    await syncMorningSummaryNotification(uid).catch(() => {});
   };
 
   const deleteTaskAndFutureRepeats = async (task: Task) => {
@@ -795,7 +920,7 @@ export default function HomeScreen() {
     });
 
     await batch.commit();
-    await syncMorningSummaryNotification(uid);
+    await syncMorningSummaryNotification(uid).catch(() => {});
     setDeleteCandidate(null);
   };
 
@@ -836,7 +961,7 @@ export default function HomeScreen() {
       });
     }
 
-    await syncMorningSummaryNotification(uid);
+    await syncMorningSummaryNotification(uid).catch(() => {});
     closeEditModal();
   };
 
@@ -1008,7 +1133,7 @@ export default function HomeScreen() {
       }
     }
 
-    await syncMorningSummaryNotification(uid);
+    await syncMorningSummaryNotification(uid).catch(() => {});
     closeEditModal();
   };
 
@@ -1143,136 +1268,122 @@ export default function HomeScreen() {
     );
   };
 
-  const renderRightActions = (task: Task) => (
-    <TouchableOpacity
-      style={[styles.swipeDelete, { backgroundColor: colors.danger }]}
-      onPress={() => handleDelete(task)}
-    >
-      <Text style={styles.swipeDeleteText}>Delete</Text>
-    </TouchableOpacity>
-  );
-
   const renderTask = (item: Task, showDate?: boolean) => {
     const isSkipped = (item.status ?? "pending") === "skipped";
 
     return (
-      <Swipeable
+      <View
         key={item.id}
-        renderRightActions={() => renderRightActions(item)}
-        overshootRight={false}
+        style={[
+          styles.task,
+          { borderBottomColor: colors.border },
+          isCurrentTask(item) &&
+            !isSkipped && [
+              styles.currentTask,
+              {
+                backgroundColor: colors.surface,
+                borderLeftColor: colors.tint,
+              },
+            ],
+        ]}
       >
         <View
           style={[
-            styles.task,
-            { borderBottomColor: colors.border },
-            isCurrentTask(item) &&
-              !isSkipped && [
-                styles.currentTask,
-                {
-                  backgroundColor: colors.surface,
-                  borderLeftColor: colors.tint,
-                },
-              ],
+            styles.taskPriorityRail,
+            { backgroundColor: priorityColors[item.priority ?? "Medium"] },
           ]}
+        />
+
+        <TouchableOpacity
+          onPress={() => toggleComplete(item)}
+          style={styles.checkboxWrap}
         >
           <View
             style={[
-              styles.taskPriorityRail,
-              { backgroundColor: priorityColors[item.priority ?? "Medium"] },
+              styles.checkbox,
+              { borderColor: colors.tint },
+              item.completed && {
+                backgroundColor: colors.tint,
+                borderColor: colors.tint,
+              },
+              isSkipped && {
+                backgroundColor: colors.surface,
+                borderColor: colors.warning,
+              },
             ]}
-          />
-
-          <TouchableOpacity
-            onPress={() => toggleComplete(item)}
-            style={styles.checkboxWrap}
           >
-            <View
+            {item.completed && <Text style={styles.checkmark}>✓</Text>}
+            {isSkipped && (
+              <Text style={[styles.skipMark, { color: colors.warning }]}>»</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => openEditModal(item)}
+          style={styles.taskContent}
+          activeOpacity={0.8}
+        >
+          <Text
+            style={[
+              styles.taskTitle,
+              { color: colors.text },
+              (item.completed || isSkipped) && styles.strikethrough,
+              (item.completed || isSkipped) && { color: colors.subtle },
+            ]}
+          >
+            {item.title}
+          </Text>
+
+          <Text
+            style={[
+              styles.taskTime,
+              { color: colors.subtle },
+              isCurrentTask(item) &&
+                !isSkipped && { color: colors.tint, fontWeight: "600" },
+            ]}
+          >
+            {item.time}
+            {showDate ? ` · ${item.date}` : ""}
+            {isCurrentTask(item) && !showDate && !isSkipped ? " · Now" : ""}
+            {isSkipped && !showDate ? " · Skipped" : ""}
+          </Text>
+
+          {item.recurrence && item.recurrence !== "none" && (
+            <Text style={[styles.taskRecurrence, { color: colors.subtle }]}>
+              Repeats {recurrenceLabels[item.recurrence].toLowerCase()}
+            </Text>
+          )}
+
+          {renderPriority(item.priority)}
+
+          {!!item.notes && (
+            <Text
+              style={[styles.taskNotes, { color: colors.subtle }]}
+              numberOfLines={2}
+            >
+              {item.notes}
+            </Text>
+          )}
+
+          {!showDate && !item.completed && !isSkipped && (
+            <TouchableOpacity
               style={[
-                styles.checkbox,
-                { borderColor: colors.tint },
-                item.completed && {
-                  backgroundColor: colors.tint,
-                  borderColor: colors.tint,
-                },
-                isSkipped && {
+                styles.skipButton,
+                {
                   backgroundColor: colors.surface,
-                  borderColor: colors.warning,
+                  borderColor: colors.border,
                 },
               ]}
+              onPress={() => setSkipCandidate(item)}
             >
-              {item.completed && <Text style={styles.checkmark}>✓</Text>}
-              {isSkipped && (
-                <Text style={[styles.skipMark, { color: colors.warning }]}>»</Text>
-              )}
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => openEditModal(item)}
-            style={styles.taskContent}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.taskTitle,
-                { color: colors.text },
-                (item.completed || isSkipped) && styles.strikethrough,
-                (item.completed || isSkipped) && { color: colors.subtle },
-              ]}
-            >
-              {item.title}
-            </Text>
-
-            <Text
-              style={[
-                styles.taskTime,
-                { color: colors.subtle },
-                isCurrentTask(item) &&
-                  !isSkipped && { color: colors.tint, fontWeight: "600" },
-              ]}
-            >
-              {item.time}
-              {showDate ? ` · ${item.date}` : ""}
-              {isCurrentTask(item) && !showDate && !isSkipped ? " · Now" : ""}
-              {isSkipped && !showDate ? " · Skipped" : ""}
-            </Text>
-
-            {item.recurrence && item.recurrence !== "none" && (
-              <Text style={[styles.taskRecurrence, { color: colors.subtle }]}>
-                Repeats {recurrenceLabels[item.recurrence].toLowerCase()}
+              <Text style={[styles.skipButtonText, { color: colors.warning }]}>
+                Skip Task
               </Text>
-            )}
-
-            {renderPriority(item.priority)}
-
-            {!!item.notes && (
-              <Text
-                style={[styles.taskNotes, { color: colors.subtle }]}
-                numberOfLines={2}
-              >
-                {item.notes}
-              </Text>
-            )}
-
-            {!showDate && !item.completed && !isSkipped && (
-              <TouchableOpacity
-                style={[
-                  styles.skipButton,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                  },
-                ]}
-                onPress={() => setSkipCandidate(item)}
-              >
-                <Text style={[styles.skipButtonText, { color: colors.warning }]}>
-                  Skip Task
-                </Text>
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Swipeable>
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -1713,6 +1824,98 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
+          </View>
+
+          <View
+            style={[
+              styles.energyCard,
+              {
+                backgroundColor: colors.card,
+                borderColor:
+                  energyPlan.status === "Matched"
+                    ? colors.success
+                    : energyPlan.status === "Too Heavy"
+                      ? colors.danger
+                      : colors.warning,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <View style={styles.energyHeader}>
+              <View style={styles.energyHeaderCopy}>
+                <Text style={[styles.energyEyebrow, { color: colors.tint }]}>
+                  Energy Mode
+                </Text>
+                <Text style={[styles.energyTitle, { color: colors.text }]}>
+                  {activeEnergyMode.label}
+                </Text>
+                <Text style={[styles.energyBody, { color: colors.subtle }]}>
+                  {energyPlan.guidance}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.energyStatusPill,
+                  {
+                    backgroundColor:
+                      energyPlan.status === "Matched"
+                        ? colors.success
+                        : energyPlan.status === "Too Heavy"
+                          ? colors.danger
+                          : colors.warning,
+                  },
+                ]}
+              >
+                <Text style={styles.energyStatusText}>{energyPlan.status}</Text>
+              </View>
+            </View>
+
+            <View style={styles.energyModeRow}>
+              {energyModes.map((mode) => {
+                const selected = mode.key === energyMode;
+                return (
+                  <TouchableOpacity
+                    key={mode.key}
+                    style={[
+                      styles.energyModeChip,
+                      {
+                        backgroundColor: selected ? colors.tint : colors.surface,
+                        borderColor: selected ? colors.tint : colors.border,
+                      },
+                    ]}
+                    onPress={() => saveProfile({ energyMode: mode.key })}
+                  >
+                    <Text
+                      style={[
+                        styles.energyModeText,
+                        { color: selected ? "#fff" : colors.text },
+                      ]}
+                    >
+                      {mode.shortLabel}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.energyMetaRow}>
+              <Text style={[styles.energyMetaText, { color: colors.subtle }]}>
+                {energyPlan.openCount}/{activeEnergyMode.maxOpenTasks} open
+              </Text>
+              <Text style={[styles.energyMetaText, { color: colors.subtle }]}>
+                {energyPlan.highOpenCount}/{activeEnergyMode.maxHighPriority} high
+              </Text>
+            </View>
+
+            {energyPlan.suggestedTrim.length > 0 && (
+              <Text style={[styles.energyTrimText, { color: colors.warning }]}>
+                Move later if needed:{" "}
+                {energyPlan.suggestedTrim
+                  .map((task) => task.title)
+                  .slice(0, 2)
+                  .join(", ")}
+              </Text>
+            )}
           </View>
 
           <View
@@ -2572,11 +2775,7 @@ export default function HomeScreen() {
 
               <TouchableOpacity
                 style={[styles.primaryButton, { backgroundColor: colors.tint }]}
-                onPress={() =>
-                  saveTaskEdits(
-                    isRecurringSeriesTask(editingTask) ? "single" : "single"
-                  )
-                }
+                onPress={() => saveTaskEdits("single")}
               >
                 <Text style={styles.primaryButtonText}>
                   {isRecurringSeriesTask(editingTask) ? "Save Only This" : "Save"}
@@ -2617,6 +2816,33 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </>
             )}
+
+            <TouchableOpacity
+              style={[
+                styles.fullWidthOutlineButton,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.danger,
+                },
+              ]}
+              onPress={() => {
+                if (!editingTask) return;
+                const targetTask = editingTask;
+                closeEditModal();
+                void handleDelete(targetTask);
+              }}
+            >
+              <Text
+                style={[
+                  styles.fullWidthOutlineText,
+                  { color: colors.danger },
+                ]}
+              >
+                {isRecurringSeriesTask(editingTask)
+                  ? "Delete Options"
+                  : "Delete Task"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -3148,6 +3374,82 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textTransform: "uppercase",
   },
+  energyCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  energyHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  energyHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  energyEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  energyTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  energyBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  energyStatusPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  energyStatusText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  energyModeRow: {
+    flexDirection: "row",
+    marginTop: 14,
+  },
+  energyModeChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  energyModeText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  energyMetaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+  },
+  energyMetaText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  energyTrimText: {
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 10,
+  },
   petCard: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -3575,18 +3877,6 @@ const styles = StyleSheet.create({
   skipButtonText: {
     fontSize: 12,
     fontWeight: "700",
-  },
-  swipeDelete: {
-    justifyContent: "center",
-    alignItems: "center",
-    width: 96,
-    marginVertical: 4,
-    borderRadius: 16,
-  },
-  swipeDeleteText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
   },
   emptyContainer: {
     alignItems: "center",

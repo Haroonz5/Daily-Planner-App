@@ -8,7 +8,9 @@ export type UserProfile = {
   activePetKey?: string | null;
   petNickname?: string | null;
   displayName?: string | null;
+  energyMode?: "light" | "steady" | "lockedIn" | null;
   focusDurationMinutes?: number | null;
+  habitatStyle?: "garden" | "dojo" | "cosmic" | null;
   tutorialCompleted?: boolean | null;
 };
 

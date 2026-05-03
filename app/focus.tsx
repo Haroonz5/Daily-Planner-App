@@ -45,6 +45,7 @@ type Task = {
   rescheduledCount?: number;
   focusSessionCount?: number;
   focusMinutes?: number;
+  cleanFocusSessions?: number;
   originalTime?: string;
 };
 
@@ -222,6 +223,10 @@ export default function FocusScreen() {
       await updateDoc(doc(db, "users", uid, "tasks", task.id), {
         focusSessionCount: increment(1),
         focusMinutes: increment(sessionMinutes),
+        cleanFocusSessions:
+          strictFocusEnabled && distractionStrikes === 0
+            ? increment(1)
+            : increment(0),
         lastActionAt: new Date(),
       });
     }
@@ -445,7 +450,8 @@ export default function FocusScreen() {
               </Text>
               <Text style={[styles.strictFocusBody, { color: colors.subtle }]}>
                 Leaving the app pauses the timer and counts as a strike. After
-                3 strikes, the block resets.
+                3 strikes, the block resets. A clean strict block gives the task
+                an extra XP bonus.
               </Text>
             </View>
 

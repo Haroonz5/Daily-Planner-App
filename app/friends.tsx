@@ -68,12 +68,47 @@ type Nudge = {
   createdAt?: any;
 };
 
+type ChallengeType = "combinedFive" | "cleanDay" | "highPriorityRescue";
+
+type FriendChallenge = {
+  id: string;
+  title: string;
+  type: ChallengeType;
+  createdByUid: string;
+  participantUids: string[];
+  participantNames: Record<string, string>;
+  date: string;
+  status?: "active" | "completed";
+  createdAt?: any;
+};
+
 type Task = {
   id: string;
   date: string;
   completed: boolean;
   priority?: "Low" | "Medium" | "High";
   status?: "pending" | "completed" | "skipped";
+};
+
+const challengeTemplates: Record<
+  ChallengeType,
+  { title: string; body: string; targetLabel: string }
+> = {
+  combinedFive: {
+    title: "5-Win Team Push",
+    body: "Together, complete 5 tasks today.",
+    targetLabel: "combined completions",
+  },
+  cleanDay: {
+    title: "No-Skip Pact",
+    body: "Both people finish the day without skipping.",
+    targetLabel: "clean plans",
+  },
+  highPriorityRescue: {
+    title: "High Priority Rescue",
+    body: "Both people clear or move every high-priority task.",
+    targetLabel: "high-priority pressure",
+  },
 };
 
 const getDisplayName = (profile: Partial<FriendProfile>) =>
@@ -108,6 +143,7 @@ export default function FriendsScreen() {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendProgress, setFriendProgress] = useState<Record<string, FriendProgress>>({});
   const [nudges, setNudges] = useState<Nudge[]>([]);
+  const [challenges, setChallenges] = useState<FriendChallenge[]>([]);
   const [friendEmail, setFriendEmail] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -272,6 +308,31 @@ export default function FriendsScreen() {
   useEffect(() => {
     if (!uid) return;
 
+    const challengesQuery = query(
+      collection(db, "friendChallenges"),
+      where("participantUids", "array-contains", uid)
+    );
+
+    return onSnapshot(
+      challengesQuery,
+      (snapshot) => {
+        setChallenges(
+          snapshot.docs
+            .map((document) => ({
+              id: document.id,
+              ...document.data(),
+            })) as FriendChallenge[]
+        );
+      },
+      () => {
+        setStatusMessage("Friend challenges need the latest Firestore rules.");
+      }
+    );
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
     const todayTasks = tasks.filter((task) => task.date === today);
     const completed = todayTasks.filter((task) => task.completed).length;
     const skipped = todayTasks.filter(
@@ -334,6 +395,31 @@ export default function FriendsScreen() {
     () => outgoingRequests.filter((request) => request.status === "pending"),
     [outgoingRequests]
   );
+  const myProgress = useMemo<FriendProgress>(() => {
+    const todayTasks = tasks.filter((task) => task.date === today);
+    const completed = todayTasks.filter((task) => task.completed).length;
+    const skipped = todayTasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+    const open = todayTasks.filter(
+      (task) => !task.completed && (task.status ?? "pending") !== "skipped"
+    ).length;
+    const highOpen = todayTasks.filter(
+      (task) =>
+        (task.priority ?? "Medium") === "High" &&
+        !task.completed &&
+        (task.status ?? "pending") !== "skipped"
+    ).length;
+
+    return {
+      today,
+      total: todayTasks.length,
+      completed,
+      open,
+      skipped,
+      highOpen,
+    };
+  }, [tasks, today]);
   const unseenNudges = useMemo(
     () =>
       nudges
@@ -341,6 +427,51 @@ export default function FriendsScreen() {
         .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
     [nudges]
   );
+  const activeChallenges = useMemo(
+    () =>
+      challenges
+        .filter((challenge) => challenge.date === today)
+        .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
+    [challenges, today]
+  );
+
+  const getChallengeProgress = (challenge: FriendChallenge) => {
+    const friendUid = challenge.participantUids.find((participantUid) => participantUid !== uid);
+    const otherProgress = friendUid ? friendProgress[friendUid] : null;
+    const participants = [myProgress, otherProgress].filter(Boolean) as FriendProgress[];
+
+    if (challenge.type === "combinedFive") {
+      const completed = participants.reduce(
+        (sum, progress) => sum + progress.completed,
+        0
+      );
+      return {
+        value: Math.min(100, Math.round((completed / 5) * 100)),
+        label: `${completed}/5 tasks complete`,
+        complete: completed >= 5,
+      };
+    }
+
+    if (challenge.type === "cleanDay") {
+      const cleanCount = participants.filter(
+        (progress) => progress.total > 0 && progress.skipped === 0
+      ).length;
+      return {
+        value: participants.length ? Math.round((cleanCount / participants.length) * 100) : 0,
+        label: `${cleanCount}/${participants.length || 2} clean plans`,
+        complete: participants.length >= 2 && cleanCount === participants.length,
+      };
+    }
+
+    const rescuedCount = participants.filter(
+      (progress) => progress.total > 0 && progress.highOpen === 0
+    ).length;
+    return {
+      value: participants.length ? Math.round((rescuedCount / participants.length) * 100) : 0,
+      label: `${rescuedCount}/${participants.length || 2} high-priority queues clear`,
+      complete: participants.length >= 2 && rescuedCount === participants.length,
+    };
+  };
 
   const sendFriendRequest = async () => {
     if (!uid || !email || !myProfile) return;
@@ -479,6 +610,41 @@ export default function FriendsScreen() {
     }
   };
 
+  const startChallenge = async (
+    friend: FriendProfile,
+    type: ChallengeType = "combinedFive"
+  ) => {
+    if (!uid || !email || !myProfile) return;
+
+    const template = challengeTemplates[type];
+    const challengeId = `${today}_${[uid, friend.uid].sort().join("_")}_${type}`;
+
+    try {
+      await setDoc(
+        doc(db, "friendChallenges", challengeId),
+        {
+          title: template.title,
+          type,
+          createdByUid: uid,
+          participantUids: [uid, friend.uid],
+          participantNames: {
+            [uid]: myProfile.displayName ?? email,
+            [friend.uid]: getDisplayName(friend),
+          },
+          date: today,
+          status: "active",
+          createdAt: new Date(),
+        },
+        { merge: true }
+      );
+
+      setStatusMessage(`${template.title} started with ${getDisplayName(friend)}.`);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      setStatusMessage("Could not start that challenge yet. Deploy the latest Firestore rules first.");
+    }
+  };
+
   const markNudgeSeen = async (nudge: Nudge) => {
     await updateDoc(doc(db, "accountabilityNudges", nudge.id), {
       seen: true,
@@ -515,6 +681,67 @@ export default function FriendsScreen() {
           This keeps pressure social but lightweight: progress cards, friend
           requests, and quick nudges.
         </Text>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.text }]}>Friend Challenges</Text>
+        <Text style={[styles.cardText, { color: colors.subtle }]}>
+          Turn accountability into a daily team push. Start a challenge from any friend card.
+        </Text>
+
+        {activeChallenges.length === 0 ? (
+          <View style={[styles.challengeEmpty, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.challengeEmptyTitle, { color: colors.text }]}>
+              No active challenge today
+            </Text>
+            <Text style={[styles.challengeEmptyText, { color: colors.subtle }]}>
+              Pick a friend below and start a 5-win push, no-skip pact, or high-priority rescue.
+            </Text>
+          </View>
+        ) : (
+          activeChallenges.slice(0, 4).map((challenge) => {
+            const template = challengeTemplates[challenge.type];
+            const progress = getChallengeProgress(challenge);
+
+            return (
+              <View
+                key={challenge.id}
+                style={[
+                  styles.challengeCard,
+                  { backgroundColor: colors.background, borderColor: colors.border },
+                ]}
+              >
+                <View style={styles.challengeHeader}>
+                  <View style={styles.challengeCopy}>
+                    <Text style={[styles.challengeTitle, { color: colors.text }]}>
+                      {challenge.title}
+                    </Text>
+                    <Text style={[styles.challengeMeta, { color: colors.subtle }]}>
+                      {template.body}
+                    </Text>
+                  </View>
+                  <Text style={[styles.challengePercent, { color: colors.tint }]}>
+                    {progress.value}%
+                  </Text>
+                </View>
+                <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: `${progress.value}%`,
+                        backgroundColor: progress.complete ? colors.success : colors.tint,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.challengeMeta, { color: colors.subtle }]}>
+                  {progress.label} • {template.targetLabel}
+                </Text>
+              </View>
+            );
+          })
+        )}
       </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
@@ -660,14 +887,41 @@ export default function FriendsScreen() {
                   <Text style={[styles.friendMeta, { color: colors.subtle }]}>
                     Updated {toDateLabel(progress?.updatedAt)}
                   </Text>
-                  <TouchableOpacity
-                    style={[styles.nudgeButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                    onPress={() => sendNudge(friend)}
-                  >
-                    <Text style={[styles.nudgeText, { color: colors.tint }]}>
-                      Check In
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.friendActionRow}>
+                    <TouchableOpacity
+                      style={[styles.nudgeButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={() => startChallenge(friend)}
+                    >
+                      <Text style={[styles.nudgeText, { color: colors.tint }]}>
+                        Challenge
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.nudgeButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                      onPress={() => sendNudge(friend)}
+                    >
+                      <Text style={[styles.nudgeText, { color: colors.tint }]}>
+                        Check In
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.challengeQuickRow}>
+                  {(["combinedFive", "cleanDay", "highPriorityRescue"] as ChallengeType[]).map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.challengeQuickChip,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                      ]}
+                      onPress={() => startChallenge(friend, type)}
+                    >
+                      <Text style={[styles.challengeQuickText, { color: colors.subtle }]}>
+                        {challengeTemplates[type].title}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
             );
@@ -777,6 +1031,51 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 10,
   },
+  challengeEmpty: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+  },
+  challengeEmptyTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  challengeEmptyText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  challengeCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 10,
+  },
+  challengeHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  challengeCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  challengeTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  challengeMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  challengePercent: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
   input: {
     borderWidth: 1,
     borderRadius: 16,
@@ -869,14 +1168,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 12,
   },
+  friendActionRow: {
+    flexDirection: "row",
+  },
   nudgeButton: {
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
+    marginLeft: 8,
   },
   nudgeText: {
     fontSize: 12,
+    fontWeight: "900",
+  },
+  challengeQuickRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 12,
+    marginHorizontal: -4,
+  },
+  challengeQuickChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    margin: 4,
+  },
+  challengeQuickText: {
+    fontSize: 11,
     fontWeight: "900",
   },
 });

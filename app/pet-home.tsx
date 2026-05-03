@@ -32,6 +32,32 @@ type Task = {
   originalTime?: string;
 };
 
+type HabitatStyle = "garden" | "dojo" | "cosmic";
+
+const habitatStyles: Record<
+  HabitatStyle,
+  { title: string; body: string; accent: string; unlockHint: string }
+> = {
+  garden: {
+    title: "Growth Garden",
+    body: "Soft, calm, and built for steady routines.",
+    accent: "#8dcf9f",
+    unlockHint: "Default habitat",
+  },
+  dojo: {
+    title: "Discipline Dojo",
+    body: "Sharper, cleaner, and made for focus streaks.",
+    accent: "#f2b97f",
+    unlockHint: "Unlocks naturally as XP grows",
+  },
+  cosmic: {
+    title: "Cosmic Den",
+    body: "A rare-feeling room for late-game momentum.",
+    accent: "#87c3ff",
+    unlockHint: "Best with higher-tier companions",
+  },
+};
+
 export default function PetHomeScreen() {
   const router = useRouter();
   const { themeName } = useAppTheme();
@@ -164,6 +190,9 @@ export default function PetHomeScreen() {
   }, [profile.activePetKey, tasks]);
 
   const activeName = profile.petNickname?.trim() || petData.activePet.name;
+  const activeHabitatKey = (profile.habitatStyle ?? "garden") as HabitatStyle;
+  const activeHabitat =
+    habitatStyles[activeHabitatKey] ?? habitatStyles.garden;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -179,6 +208,62 @@ export default function PetHomeScreen() {
           <Text style={[styles.subtitle, { color: colors.subtle }]}>
             Your companion grows with consistency, not perfection.
           </Text>
+        </View>
+
+        <View
+          style={[
+            styles.habitatCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: activeHabitat.accent,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.habitatGlow,
+              { backgroundColor: activeHabitat.accent },
+            ]}
+          />
+          <Text style={[styles.habitatKicker, { color: activeHabitat.accent }]}>
+            Pet Habitat
+          </Text>
+          <Text style={[styles.habitatTitle, { color: colors.text }]}>
+            {activeHabitat.title}
+          </Text>
+          <Text style={[styles.habitatBody, { color: colors.subtle }]}>
+            {activeHabitat.body}
+          </Text>
+
+          <View style={styles.habitatPicker}>
+            {(Object.keys(habitatStyles) as HabitatStyle[]).map((habitatKey) => {
+              const habitat = habitatStyles[habitatKey];
+              const selected = habitatKey === activeHabitatKey;
+              return (
+                <TouchableOpacity
+                  key={habitatKey}
+                  style={[
+                    styles.habitatChip,
+                    {
+                      backgroundColor: selected ? habitat.accent : colors.surface,
+                      borderColor: selected ? habitat.accent : colors.border,
+                    },
+                  ]}
+                  onPress={() => saveProfile({ habitatStyle: habitatKey })}
+                >
+                  <Text
+                    style={[
+                      styles.habitatChipText,
+                      { color: selected ? "#fff" : colors.text },
+                    ]}
+                  >
+                    {habitat.title}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
         <View
@@ -411,6 +496,59 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginTop: 8,
+  },
+  habitatCard: {
+    borderRadius: 28,
+    borderWidth: 1,
+    padding: 18,
+    marginBottom: 16,
+    overflow: "hidden",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
+    shadowRadius: 22,
+    elevation: 5,
+  },
+  habitatGlow: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    right: -70,
+    top: -70,
+    opacity: 0.18,
+  },
+  habitatKicker: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  habitatTitle: {
+    fontSize: 24,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  habitatBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  habitatPicker: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginTop: 14,
+  },
+  habitatChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    margin: 4,
+  },
+  habitatChipText: {
+    fontSize: 12,
+    fontWeight: "900",
   },
   heroCard: {
     alignItems: "center",
