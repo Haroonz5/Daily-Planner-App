@@ -1,90 +1,113 @@
 # Daily Discipline
 
-Daily Discipline is a mobile productivity app built with Expo and React Native. It helps users plan tasks, stay realistic about their schedule, build consistency through XP, unlock companion pets, and use AI tools to turn messy plans into clear action.
+Daily Discipline is a mobile productivity app built with Expo, React Native, Firebase, and a FastAPI AI backend. It is designed to help users plan realistic days, recover from missed tasks, build consistency through XP, unlock companion pets, and stay accountable with friends.
 
-## Features
+The goal is not just to be another to-do list. Daily Discipline combines task planning, AI coaching, focus sessions, rewards, reminders, and social accountability into one habit-building system.
 
-- Create tasks for today, tomorrow, or a custom future date
-- Schedule tasks with exact dates and times
-- Mark tasks as completed, skipped, or rescheduled
-- XP reward system based on task completion and priority
-- Unlockable companion pets as consistency rewards
-- Custom pet sprites instead of plain emojis
-- Daily progress tracking and weekly stats
-- Discipline Score Breakdown showing how the score is calculated
-- Accountability friends with progress sharing, friend requests, and check-ins
-- Focus Mode with optional Strict Focus app-switch strike tracking
-- Multiple app themes, including light and dark themes
-- Cleaner floating bottom navigation
-- Local notifications for task reminders
-- Morning summary and evening planning reminders
-- AI natural-language task input
-- AI recurring task detection, like "Gym at 6 PM every day"
-- AI reality check for overloaded schedules
-- AI rescheduling for missed tasks
-- AI daily feedback based on actual completion
-- AI pattern feedback based on skips, timing, and reschedules
-- AI weekly review with wins and next-week focus
-- AI weekly coach plan on the Stats screen
-- AI task breakdown for large or vague tasks
-- Tester feedback capture in Settings
-- Tester data reset and account deletion controls
-- Reminder health and duplicate notification cleanup
+## Highlights
+
+- Natural-language AI task planning
+- AI reality checks for overloaded days
+- AI rescheduling suggestions for missed tasks
+- AI daily feedback, pattern feedback, weekly review, and task breakdowns
+- Today dashboard with readiness score, energy mode, recovery missions, and adaptive rescheduling
+- Task scheduling for today, tomorrow, custom future dates, and recurring routines
+- XP system with unlockable companion pets and custom pet sprites
+- Pet Home with habitat selection and companion progress
+- Focus Mode with Strict Focus app-switch strike tracking
+- Extra XP for clean Strict Focus sessions
+- Accountability friends, progress sharing, nudges, and friend challenges
+- Stats dashboard with Discipline Score, weekly review, time-window analysis, and XP progress
+- Month calendar and next-7-days planner
+- Local notifications for task reminders, morning summaries, and evening planning
+- Multiple themes, including light, dark, GitHub Dark, Amazon Light, Void Black, Slate Steel, and Rose Quartz
+- Tester feedback, reminder health, data reset, and account deletion tools
 - EAS build setup for internal testers
-- Docker/Render setup for deploying the AI backend
+- Render/Docker setup for the AI backend
+
+## Screens And Core Flows
+
+### Today
+
+The Today screen acts as the main command center. It shows the user's daily progress, XP, active companion, readiness score, missed-task recovery, energy mode, AI pattern coaching, future plans, and quick links to focus, week view, and summary.
+
+### Add Task
+
+Users can add tasks manually or type natural language such as:
+
+```txt
+Gym at 6 PM every day, study for 2 hours at 8 PM
+```
+
+The app can parse the text into structured tasks, detect recurrence, estimate duration, run a reality check, and schedule the tasks.
+
+### Stats
+
+The Stats screen shows Discipline Score, XP, streaks, weekly progress, time-window quality, plan-vs-reality data, task mix, AI weekly review, and next-week focus recommendations.
+
+### Focus Mode
+
+Focus Mode lets users start a timed focus session tied to a task. Strict Focus tracks app switches, pauses the timer when the user leaves the app, and resets after too many strikes. Clean strict sessions give extra XP.
+
+### Friends
+
+Users can add accountability friends by email, share daily progress, send check-ins, and start daily challenges such as a 5-win team push, no-skip pact, or high-priority rescue.
+
+### Pet Home
+
+Users unlock pets through XP and can choose an active companion. The Pet Home includes companion mood, bond progress, reward badges, pet collection, and habitat selection.
 
 ## AI Features
 
-The app includes a FastAPI backend for AI-powered productivity tools.
+The app includes a FastAPI backend with OpenAI support and local fallback logic.
 
-### Natural Language Task Input
+### Natural-Language Task Input
 
-Users can type something like:
+Turns messy text into scheduled tasks with:
 
-```txt
-Gym at 6 PM, study for 2 hours at 8 PM
-```
-
-The app turns that into structured tasks with dates, times, priorities, and estimated durations.
+- title
+- date
+- time
+- priority
+- duration estimate
+- recurrence rule
+- notes
 
 ### Reality Check
 
-Before adding tasks, the app checks if the day is becoming unrealistic.
-
-Example:
-
-```txt
-You scheduled about 9 hours of work today. Consider trimming or moving a lower-priority task.
-```
+Checks whether a proposed plan is realistic before tasks are added. Energy Mode affects the warning threshold, so a Light Day warns sooner than a Locked In day.
 
 ### AI Reschedule
 
-When a task is missed, the app suggests a better time later in the day based on the remaining schedule.
+When tasks are missed, the app can suggest better times based on the remaining schedule.
+
+### Pattern Feedback
+
+Looks for repeated skips, weak time windows, reschedule friction, and stronger execution windows.
 
 ### Daily Feedback
 
-The summary screen gives personalized feedback based on completed, skipped, pending, and rescheduled tasks.
+Generates a short end-of-day message based on actual completions, skips, pending tasks, and reschedules.
+
+### Weekly Review
+
+Creates a weekly coaching summary with wins, risks, and next-week focus items.
 
 ### Task Breakdown
 
-Large tasks like:
+Breaks large tasks like:
 
 ```txt
 Study for biology exam
 ```
 
-can be broken into smaller scheduled steps.
-
-### Pattern Feedback And Weekly Review
-
-The Today screen can surface behavior patterns like strongest time windows,
-repeated skips, and reschedule friction. The Stats screen includes a weekly AI
-review with wins, risks, and next-week focus items.
+into smaller scheduled steps with time estimates.
 
 ## Tech Stack
 
-- Expo
-- React Native
+- Expo 54
+- React Native 0.81
+- React 19
 - TypeScript
 - Expo Router
 - Firebase Authentication
@@ -93,7 +116,9 @@ review with wins, risks, and next-week focus items.
 - AsyncStorage
 - FastAPI
 - Python
-- OpenAI API with local fallbacks
+- OpenAI API
+- EAS Build
+- Render-ready Docker backend
 
 ## Project Structure
 
@@ -101,31 +126,37 @@ review with wins, risks, and next-week focus items.
 my-app/
   app/
     (tabs)/
-      index.tsx        # Today screen
-      explore.tsx      # Add Task screen
-      stats.tsx        # Stats, score breakdown, and weekly coach
+      index.tsx        # Today dashboard
+      explore.tsx      # Add Task and AI planner
+      stats.tsx        # Stats, Discipline Score, weekly AI review
+      settings.tsx     # Settings tab wrapper
       _layout.tsx      # Bottom tab navigation
+    focus.tsx          # Focus Mode and Strict Focus
+    friends.tsx        # Accountability friends and challenges
+    pet-home.tsx       # Pet collection, bond, habitat
     summary.tsx        # Daily summary and AI feedback
-    focus.tsx          # Focus timer and Strict Focus mode
-    friends.tsx        # Accountability friends
-    settings.tsx
+    week.tsx           # Month calendar and next-7-days planner
+    settings.tsx       # Full settings screen
+    onboarding.tsx     # First-time onboarding
+    tutorial.tsx       # In-app tutorial
     login.tsx
     signup.tsx
-    onboarding.tsx
 
   ai/
     main.py            # FastAPI AI backend
     requirements.txt
+    Dockerfile
     README.md
 
   assets/
-    images/
-      icon.png         # App icon
-    pets/              # Companion pet sprites
+    images/            # App icon, splash, favicon, cover assets
+    pets/              # Companion pet PNGs
 
   components/
     ambient-background.tsx
+    haptic-tab.tsx
     pet-sprite.tsx
+    ui/
 
   constants/
     appTheme.ts
@@ -137,9 +168,17 @@ my-app/
     use-user-profile.ts
 
   utils/
-    ai.ts              # Frontend AI API client
+    ai.ts
     notifications.ts
     task-helpers.ts
+
+  docs/
+    TESTER_HANDOFF.md
+
+  firestore.rules
+  firebase.json
+  eas.json
+  render.yaml
 ```
 
 ## Getting Started
@@ -150,38 +189,57 @@ my-app/
 npm install
 ```
 
-### 2. Start the Expo App
+### 2. Start Expo
 
 ```bash
 npx expo start
 ```
 
-Then scan the QR code with Expo Go.
+Then scan the QR code with Expo Go or run on a simulator.
+
+### 3. Run Quality Checks
+
+```bash
+npm run qa
+```
+
+This runs TypeScript checking and ESLint.
+
+## Firebase Setup
+
+The app uses Firebase Auth and Cloud Firestore.
+
+Required Firebase features:
+
+- Email/password authentication
+- Cloud Firestore
+- Firestore security rules from `firestore.rules`
+
+Deploy Firestore rules with:
+
+```bash
+npx firebase-tools@latest login
+npx firebase-tools@latest deploy --only firestore:rules
+```
+
+Friend requests, accountability nudges, friend challenges, public progress sharing, and widget summary data all depend on the latest rules being deployed.
 
 ## AI Backend Setup
 
-### 1. Go to the AI Folder
+The app works with local fallbacks, but the full AI features use the FastAPI backend in `ai/`.
+
+### 1. Create A Python Environment
 
 ```bash
 cd ai
-```
-
-### 2. Create a Virtual Environment
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-### 3. Install Python Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Add Environment Variables
+### 2. Add Environment Variables
 
-Create an `.env` file inside the `ai/` folder:
+Create `ai/.env`:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
@@ -189,23 +247,44 @@ OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
 ```
 
-The app still has local fallbacks if no OpenAI key is provided.
+If no OpenAI key is provided, the backend still uses local fallback logic.
 
-### 5. Run the AI Server
+### 3. Run The Backend
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 6. Connect Expo to the AI Backend
+Or from the project root:
 
-When testing on a physical phone, use your Mac’s local network IP instead of `localhost`.
+```bash
+npm run ai:dev
+```
 
-Example:
+### 4. Connect Expo To The Backend
+
+For a physical phone, use your computer's local network IP instead of `localhost`:
 
 ```bash
 EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8000 npx expo start -c
 ```
+
+For a deployed backend:
+
+```bash
+EXPO_PUBLIC_AI_API_URL=https://your-backend-url npx expo start -c
+```
+
+## AI Backend Endpoints
+
+- `GET /health`
+- `POST /v1/parse-tasks`
+- `POST /v1/reality-check`
+- `POST /v1/reschedule`
+- `POST /v1/daily-feedback`
+- `POST /v1/pattern-feedback`
+- `POST /v1/weekly-review`
+- `POST /v1/breakdown-task`
 
 ## Available Scripts
 
@@ -214,46 +293,60 @@ npm run start
 npm run ios
 npm run android
 npm run web
-npm run typecheck
 npm run lint
+npm run typecheck
+npm run qa
 npm run ai:dev
 npm run eas:preview
 npm run eas:simulator
 npm run eas:production
 ```
 
-## Testing And Release
+## Testing With Other People
 
-Tester setup lives in:
-
-```txt
-docs/TESTING_AND_RELEASE.md
-docs/TESTER_HANDOFF.md
-```
-
-Before sharing a build, run:
+Before sending the app to testers:
 
 ```bash
 npm run qa
+npx firebase-tools@latest deploy --only firestore:rules
 ```
 
-The app includes `eas.json` profiles for preview, simulator, and production
-builds. The AI backend includes a Dockerfile and `render.yaml` so it can be
-deployed before sending builds to testers.
+Create an internal EAS build:
 
-## Current Status
+```bash
+npx eas-cli@latest login
+npx eas-cli@latest build --profile preview --platform all
+```
 
-The app currently supports task planning, reminders, AI scheduling tools, XP rewards, companion pets, accountability friends, Strict Focus sessions, multiple themes, and improved UI polish.
+If using a deployed AI backend, add it as an EAS secret:
 
-The next possible improvements would be:
+```bash
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-backend-url
+```
 
-- Deeper pet progression
-- Streak protection
-- More companion customization
-- Native-level focus blocking with a custom development build
-- Production deployment
+Tester instructions are in:
 
+```txt
+docs/TESTER_HANDOFF.md
+```
+
+## Current Limitations
+
+- Expo Go does not fully support production notification behavior. Use a development build for more realistic notification testing.
+- Strict Focus cannot truly block other apps in Expo Go. It detects app switching, pauses the timer, and records strikes.
+- The app writes widget-ready summary data, but a real iOS/Android home-screen widget still requires native widget work in a custom build.
+- Friend features require the latest Firestore rules to be deployed.
+
+## Roadmap Ideas
+
+- Native home-screen widget
+- Deeper friend challenge history
+- More pet habitat unlocks
+- Full native distraction blocking through platform-specific focus integrations
+- Push notifications and cloud functions for friend nudges
+- App Store / Play Store production release
 
 ## Purpose
 
-Daily Discipline is designed to make productivity feel more personal, realistic, and rewarding. Instead of only tracking tasks, the app helps users understand their habits, recover from missed tasks, and build consistency over time.
+Daily Discipline is built around one idea: consistency gets easier when planning is realistic, progress feels rewarding, and recovery is part of the system. The app helps users plan the day, notice patterns, stay accountable, and turn small completed tasks into long-term momentum.
+
