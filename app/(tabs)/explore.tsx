@@ -186,6 +186,9 @@ export default function AddTask() {
         })) as Task[];
 
         setTasks(sortTasksBySchedule(fetched));
+      },
+      () => {
+        setTasks([]);
       }
     );
 

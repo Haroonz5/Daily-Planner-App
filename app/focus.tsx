@@ -95,14 +95,20 @@ export default function FocusScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const unsubscribe = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
-      const fetched = snap.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Task[];
+    const unsubscribe = onSnapshot(
+      collection(db, "users", uid, "tasks"),
+      (snap) => {
+        const fetched = snap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as Task[];
 
-      setTasks(sortTasksBySchedule(fetched));
-    });
+        setTasks(sortTasksBySchedule(fetched));
+      },
+      () => {
+        setTasks([]);
+      }
+    );
 
     return unsubscribe;
   }, []);
@@ -111,14 +117,20 @@ export default function FocusScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    return onSnapshot(collection(db, "users", uid, "focusSessions"), (snap) => {
-      setFocusSessions(
-        snap.docs.map((document) => ({
-          id: document.id,
-          ...document.data(),
-        })) as FocusSession[]
-      );
-    });
+    return onSnapshot(
+      collection(db, "users", uid, "focusSessions"),
+      (snap) => {
+        setFocusSessions(
+          snap.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          })) as FocusSession[]
+        );
+      },
+      () => {
+        setFocusSessions([]);
+      }
+    );
   }, []);
 
   useEffect(() => {

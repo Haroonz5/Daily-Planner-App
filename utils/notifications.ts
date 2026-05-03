@@ -447,7 +447,9 @@ export const syncMorningSummaryNotification = async (uid: string) => {
     where("date", "==", tomorrowDate)
   );
 
-  const snapshot = await getDocs(tasksQuery);
+  const snapshot = await getDocs(tasksQuery).catch(() => null);
+  if (!snapshot) return;
+
   const tomorrowTasks = snapshot.docs
     .map((doc) => ({ id: doc.id, ...doc.data() }) as NotificationTask)
     .filter((task) => !task.completed && task.status !== "skipped")

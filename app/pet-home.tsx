@@ -43,14 +43,20 @@ export default function PetHomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    return onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
-      setTasks(
-        snap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Task[]
-      );
-    });
+    return onSnapshot(
+      collection(db, "users", uid, "tasks"),
+      (snap) => {
+        setTasks(
+          snap.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          })) as Task[]
+        );
+      },
+      () => {
+        setTasks([]);
+      }
+    );
   }, []);
 
   const petData = useMemo(() => {

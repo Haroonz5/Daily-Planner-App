@@ -27,14 +27,20 @@ export function useUserProfile() {
       }
 
       const profileRef = doc(db, "users", user.uid);
-      unsubscribeProfile = onSnapshot(profileRef, (snapshot) => {
-        if (!snapshot.exists()) {
-          setProfile({});
-          return;
-        }
+      unsubscribeProfile = onSnapshot(
+        profileRef,
+        (snapshot) => {
+          if (!snapshot.exists()) {
+            setProfile({});
+            return;
+          }
 
-        setProfile((snapshot.data() as UserProfile) ?? {});
-      });
+          setProfile((snapshot.data() as UserProfile) ?? {});
+        },
+        () => {
+          setProfile({});
+        }
+      );
     });
 
     return () => {
@@ -47,7 +53,9 @@ export function useUserProfile() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    await setDoc(doc(db, "users", uid), updates, { merge: true });
+    await setDoc(doc(db, "users", uid), updates, { merge: true }).catch(
+      () => {}
+    );
   };
 
   return { profile, saveProfile };

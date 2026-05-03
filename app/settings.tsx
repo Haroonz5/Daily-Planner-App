@@ -136,6 +136,9 @@ export default function SettingsScreen({
         })) as Task[];
 
         setTasks(fetched);
+      },
+      () => {
+        setTasks([]);
       }
     );
 
@@ -160,7 +163,7 @@ export default function SettingsScreen({
         updatedAt: new Date(),
       },
       { merge: true }
-    );
+    ).catch(() => {});
   }, [profile.displayName]);
 
   useEffect(() => {
@@ -371,6 +374,7 @@ export default function SettingsScreen({
         displayName: displayName.trim() || null,
         petNickname: petNickname.trim() || null,
       });
+      let publicProfileSynced = true;
       if (auth.currentUser?.email) {
         await setDoc(
           doc(db, "publicProfiles", auth.currentUser.uid),
@@ -381,12 +385,20 @@ export default function SettingsScreen({
             updatedAt: new Date(),
           },
           { merge: true }
+        ).catch(() => {
+          publicProfileSynced = false;
+          setStatusTone("warning");
+          setStatusMessage(
+            "Profile saved, but friend profile sync needs deployed Firestore rules."
+          );
+        });
+      }
+      if (publicProfileSynced) {
+        setStatusTone("success");
+        setStatusMessage(
+          "Profile updated. Your app voice and companion name are saved."
         );
       }
-      setStatusTone("success");
-      setStatusMessage(
-        "Profile updated. Your app voice and companion name are saved."
-      );
     } finally {
       setProfileSaving(false);
     }

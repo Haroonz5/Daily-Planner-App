@@ -120,14 +120,25 @@ export default function FriendsScreen() {
     if (!uid || !email) return;
 
     const profileRef = doc(db, "publicProfiles", uid);
-    const unsubscribe = onSnapshot(profileRef, (snapshot) => {
-      const fallback = {
-        uid,
-        email,
-        displayName: null,
-      };
-      setMyProfile((snapshot.data() as FriendProfile | undefined) ?? fallback);
-    });
+    const fallback = {
+      uid,
+      email,
+      displayName: null,
+    };
+    const unsubscribe = onSnapshot(
+      profileRef,
+      (snapshot) => {
+        setMyProfile(
+          (snapshot.data() as FriendProfile | undefined) ?? fallback
+        );
+      },
+      () => {
+        setMyProfile(fallback);
+        setStatusMessage(
+          "Friends need the latest Firestore rules deployed before they can sync."
+        );
+      }
+    );
 
     void setDoc(
       profileRef,
@@ -137,7 +148,11 @@ export default function FriendsScreen() {
         updatedAt: new Date(),
       },
       { merge: true }
-    );
+    ).catch(() => {
+      setStatusMessage(
+        "Friends need the latest Firestore rules deployed before they can sync."
+      );
+    });
 
     return unsubscribe;
   }, [email, uid]);
@@ -145,27 +160,39 @@ export default function FriendsScreen() {
   useEffect(() => {
     if (!uid) return;
 
-    return onSnapshot(collection(db, "users", uid, "tasks"), (snapshot) => {
-      setTasks(
-        snapshot.docs.map((document) => ({
-          id: document.id,
-          ...document.data(),
-        })) as Task[]
-      );
-    });
+    return onSnapshot(
+      collection(db, "users", uid, "tasks"),
+      (snapshot) => {
+        setTasks(
+          snapshot.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          })) as Task[]
+        );
+      },
+      () => {
+        setStatusMessage("Could not load your tasks for friend progress.");
+      }
+    );
   }, [uid]);
 
   useEffect(() => {
     if (!uid) return;
 
-    return onSnapshot(collection(db, "users", uid, "friends"), (snapshot) => {
-      setFriends(
-        snapshot.docs.map((document) => ({
-          uid: document.id,
-          ...document.data(),
-        })) as FriendProfile[]
-      );
-    });
+    return onSnapshot(
+      collection(db, "users", uid, "friends"),
+      (snapshot) => {
+        setFriends(
+          snapshot.docs.map((document) => ({
+            uid: document.id,
+            ...document.data(),
+          })) as FriendProfile[]
+        );
+      },
+      () => {
+        setStatusMessage("Friend list needs the latest Firestore rules.");
+      }
+    );
   }, [uid]);
 
   useEffect(() => {
@@ -180,24 +207,36 @@ export default function FriendsScreen() {
       where("requesterUid", "==", uid)
     );
 
-    const unsubscribeIncoming = onSnapshot(incomingQuery, (snapshot) => {
-      setIncomingRequests(
-        snapshot.docs
-          .map((document) => ({
-            id: document.id,
-            ...document.data(),
-          })) as FriendRequest[]
-      );
-    });
-    const unsubscribeOutgoing = onSnapshot(outgoingQuery, (snapshot) => {
-      setOutgoingRequests(
-        snapshot.docs
-          .map((document) => ({
-            id: document.id,
-            ...document.data(),
-          })) as FriendRequest[]
-      );
-    });
+    const unsubscribeIncoming = onSnapshot(
+      incomingQuery,
+      (snapshot) => {
+        setIncomingRequests(
+          snapshot.docs
+            .map((document) => ({
+              id: document.id,
+              ...document.data(),
+            })) as FriendRequest[]
+        );
+      },
+      () => {
+        setStatusMessage("Friend requests need the latest Firestore rules.");
+      }
+    );
+    const unsubscribeOutgoing = onSnapshot(
+      outgoingQuery,
+      (snapshot) => {
+        setOutgoingRequests(
+          snapshot.docs
+            .map((document) => ({
+              id: document.id,
+              ...document.data(),
+            })) as FriendRequest[]
+        );
+      },
+      () => {
+        setStatusMessage("Friend requests need the latest Firestore rules.");
+      }
+    );
 
     return () => {
       unsubscribeIncoming();
@@ -213,15 +252,21 @@ export default function FriendsScreen() {
       where("toUid", "==", uid)
     );
 
-    return onSnapshot(nudgesQuery, (snapshot) => {
-      setNudges(
-        snapshot.docs
-          .map((document) => ({
-            id: document.id,
-            ...document.data(),
-          })) as Nudge[]
-      );
-    });
+    return onSnapshot(
+      nudgesQuery,
+      (snapshot) => {
+        setNudges(
+          snapshot.docs
+            .map((document) => ({
+              id: document.id,
+              ...document.data(),
+            })) as Nudge[]
+        );
+      },
+      () => {
+        setStatusMessage("Check-ins need the latest Firestore rules.");
+      }
+    );
   }, [uid]);
 
   useEffect(() => {
@@ -254,17 +299,26 @@ export default function FriendsScreen() {
         updatedAt: new Date(),
       },
       { merge: true }
-    );
+    ).catch(() => {});
   }, [tasks, today, uid]);
 
   useEffect(() => {
     const unsubscribes = friends.map((friend) =>
-      onSnapshot(doc(db, "publicProgress", friend.uid), (snapshot) => {
-        setFriendProgress((current) => ({
-          ...current,
-          [friend.uid]: snapshot.data() as FriendProgress,
-        }));
-      })
+      onSnapshot(
+        doc(db, "publicProgress", friend.uid),
+        (snapshot) => {
+          const progress = snapshot.data() as FriendProgress | undefined;
+          if (!progress) return;
+
+          setFriendProgress((current) => ({
+            ...current,
+            [friend.uid]: progress,
+          }));
+        },
+        () => {
+          setStatusMessage("Friend progress needs the latest Firestore rules.");
+        }
+      )
     );
 
     return () => {
@@ -366,57 +420,71 @@ export default function FriendsScreen() {
   const acceptRequest = async (request: FriendRequest) => {
     if (!uid || !email || !myProfile) return;
 
-    await updateDoc(doc(db, "friendRequests", request.id), {
-      status: "accepted",
-      respondedAt: new Date(),
-    });
+    try {
+      await updateDoc(doc(db, "friendRequests", request.id), {
+        status: "accepted",
+        respondedAt: new Date(),
+      });
 
-    await setDoc(doc(db, "users", uid, "friends", request.requesterUid), {
-      uid: request.requesterUid,
-      email: request.requesterEmail,
-      displayName: request.requesterName ?? null,
-      linkedAt: new Date(),
-    });
-    await setDoc(doc(db, "users", request.requesterUid, "friends", uid), {
-      uid,
-      email,
-      displayName: myProfile.displayName ?? null,
-      linkedAt: new Date(),
-    });
+      await setDoc(doc(db, "users", uid, "friends", request.requesterUid), {
+        uid: request.requesterUid,
+        email: request.requesterEmail,
+        displayName: request.requesterName ?? null,
+        linkedAt: new Date(),
+      });
+      await setDoc(doc(db, "users", request.requesterUid, "friends", uid), {
+        uid,
+        email,
+        displayName: myProfile.displayName ?? null,
+        linkedAt: new Date(),
+      });
 
-    setStatusMessage(`${getDisplayName({ email: request.requesterEmail, displayName: request.requesterName })} added.`);
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setStatusMessage(`${getDisplayName({ email: request.requesterEmail, displayName: request.requesterName })} added.`);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      setStatusMessage("Could not accept yet. Deploy the latest Firestore rules and try again.");
+    }
   };
 
   const declineRequest = async (request: FriendRequest) => {
-    await updateDoc(doc(db, "friendRequests", request.id), {
-      status: "declined",
-      respondedAt: new Date(),
-    });
-    setStatusMessage("Request declined.");
+    try {
+      await updateDoc(doc(db, "friendRequests", request.id), {
+        status: "declined",
+        respondedAt: new Date(),
+      });
+      setStatusMessage("Request declined.");
+    } catch {
+      setStatusMessage("Could not decline yet. Deploy the latest Firestore rules and try again.");
+    }
   };
 
   const sendNudge = async (friend: FriendProfile) => {
     if (!uid || !email || !myProfile) return;
 
-    await addDoc(collection(db, "accountabilityNudges"), {
-      fromUid: uid,
-      fromEmail: email,
-      fromName: myProfile.displayName ?? null,
-      toUid: friend.uid,
-      message: "Quick accountability check: are you still on your plan today?",
-      seen: false,
-      createdAt: new Date(),
-    });
+    try {
+      await addDoc(collection(db, "accountabilityNudges"), {
+        fromUid: uid,
+        fromEmail: email,
+        fromName: myProfile.displayName ?? null,
+        toUid: friend.uid,
+        message: "Quick accountability check: are you still on your plan today?",
+        seen: false,
+        createdAt: new Date(),
+      });
 
-    setStatusMessage(`Check-in sent to ${getDisplayName(friend)}.`);
-    await Haptics.selectionAsync();
+      setStatusMessage(`Check-in sent to ${getDisplayName(friend)}.`);
+      await Haptics.selectionAsync();
+    } catch {
+      setStatusMessage("Could not send that check-in yet. Deploy the latest Firestore rules first.");
+    }
   };
 
   const markNudgeSeen = async (nudge: Nudge) => {
     await updateDoc(doc(db, "accountabilityNudges", nudge.id), {
       seen: true,
       seenAt: new Date(),
+    }).catch(() => {
+      setStatusMessage("Could not mark that check-in seen yet.");
     });
   };
 

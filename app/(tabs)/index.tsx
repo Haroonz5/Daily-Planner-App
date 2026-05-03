@@ -255,25 +255,33 @@ export default function HomeScreen() {
         );
 
         for (const task of incompleteTasks) {
-          await updateDoc(doc(db, "users", uid, "tasks", task.id), {
-            date: todayDate,
-            lastActionAt: new Date(),
-            recoveryFromDate: yesterdayDate,
-            rescheduledCount: (task.rescheduledCount ?? 0) + 1,
-          });
+          try {
+            await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+              date: todayDate,
+              lastActionAt: new Date(),
+              recoveryFromDate: yesterdayDate,
+              rescheduledCount: (task.rescheduledCount ?? 0) + 1,
+            });
 
-          await syncTaskNotifications({
-            id: task.id,
-            title: task.title,
-            time: task.time,
-            date: todayDate,
-            priority: task.priority,
-            completed: false,
-            status: "pending",
-          });
+            await syncTaskNotifications({
+              id: task.id,
+              title: task.title,
+              time: task.time,
+              date: todayDate,
+              priority: task.priority,
+              completed: false,
+              status: "pending",
+            });
+          } catch {
+            // Ignore permission/network hiccups so the task list can still render.
+          }
         }
 
         setTasks(sortTasksBySchedule(fetched));
+        setTasksLoaded(true);
+      },
+      () => {
+        setTasks([]);
         setTasksLoaded(true);
       }
     );

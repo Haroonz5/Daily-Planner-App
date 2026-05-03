@@ -73,14 +73,20 @@ export default function SummaryScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const unsubscribe = onSnapshot(collection(db, "users", uid, "tasks"), (snap) => {
-      const fetched = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as Task[];
+    const unsubscribe = onSnapshot(
+      collection(db, "users", uid, "tasks"),
+      (snap) => {
+        const fetched = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Task[];
 
-      setTasks(fetched);
-    });
+        setTasks(fetched);
+      },
+      () => {
+        setTasks([]);
+      }
+    );
 
     return unsubscribe;
   }, []);

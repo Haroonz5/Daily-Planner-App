@@ -67,7 +67,7 @@ export default function Signup() {
           updatedAt: new Date(),
         },
         { merge: true }
-      );
+      ).catch(() => {});
 
       router.replace("/tutorial" as never);
     } catch {
