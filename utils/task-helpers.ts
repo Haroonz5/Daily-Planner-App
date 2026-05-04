@@ -1,7 +1,9 @@
 export type TaskPriority = "Low" | "Medium" | "High";
 export type TaskStatus = "pending" | "completed" | "skipped";
-export type RecurrenceRule = "none" | "daily" | "weekdays" | "weekly";
+export type RecurrenceRule = "none" | "daily" | "weekdays" | "weekly" | "custom";
 export type TimeBucket = "early" | "morning" | "afternoon" | "evening";
+
+export const weekdayShortLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export type TaskLike = {
   date: string;
@@ -23,6 +25,23 @@ export const recurrenceLabels: Record<RecurrenceRule, string> = {
   daily: "Daily",
   weekdays: "Weekdays",
   weekly: "Weekly",
+  custom: "Custom Days",
+};
+
+export const normalizeRecurrenceDays = (days?: number[] | null) =>
+  [...new Set((days ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+    .sort((a, b) => a - b);
+
+export const formatRecurrenceLabel = (
+  recurrence: RecurrenceRule,
+  recurrenceDays?: number[] | null
+) => {
+  if (recurrence !== "custom") return recurrenceLabels[recurrence];
+
+  const days = normalizeRecurrenceDays(recurrenceDays);
+  if (days.length === 0) return recurrenceLabels.custom;
+
+  return days.map((day) => weekdayShortLabels[day]).join(", ");
 };
 
 export const parseTimeToMinutes = (time: string) => {
@@ -92,12 +111,15 @@ export const sortTasksBySchedule = <T extends { time: string }>(tasks: T[]) =>
 
 export const buildRecurringDates = (
   startDateKey: string,
-  recurrence: RecurrenceRule
+  recurrence: RecurrenceRule,
+  recurrenceDays?: number[] | null
 ) => {
   if (recurrence === "none") return [startDateKey];
 
   const startDate = parseDateKey(startDateKey);
   const dates: string[] = [];
+  const customDays = normalizeRecurrenceDays(recurrenceDays);
+  if (recurrence === "custom" && customDays.length === 0) return [startDateKey];
   const maxOccurrences = recurrence === "weekly" ? 8 : 10;
   let cursor = new Date(startDate);
 
@@ -108,7 +130,8 @@ export const buildRecurringDates = (
     if (
       recurrence === "daily" ||
       (recurrence === "weekdays" && isWeekday) ||
-      recurrence === "weekly"
+      recurrence === "weekly" ||
+      (recurrence === "custom" && customDays.includes(day))
     ) {
       dates.push(formatDateKey(cursor));
     }

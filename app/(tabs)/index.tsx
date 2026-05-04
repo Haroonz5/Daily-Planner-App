@@ -39,11 +39,11 @@ import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   formatDateKey,
+  formatRecurrenceLabel,
   getRelativeDateLabel,
   getBehaviorCallout,
   getTimeBucket,
   parseTimeToMinutes,
-  recurrenceLabels,
   sortTasksBySchedule,
   type RecurrenceRule,
 } from "../../utils/task-helpers";
@@ -83,6 +83,9 @@ type Task = {
   recoveryFromDate?: string | null;
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
+  recurrenceDays?: number[] | null;
+  skippedOccurrence?: boolean;
+  seriesContinues?: boolean;
 };
 
 type EditScope = "single" | "future";
@@ -877,6 +880,9 @@ export default function HomeScreen() {
     !!task?.recurrence &&
     task.recurrence !== "none";
 
+  const isOpenTask = (task?: Task | null) =>
+    !!task && !task.completed && (task.status ?? "pending") !== "skipped";
+
   const getSeriesTasksFromTask = (
     task: Task,
     options?: { includeCurrent?: boolean }
@@ -1017,16 +1023,21 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid || !skipCandidate) return;
 
+    const isRecurringOccurrence = isRecurringSeriesTask(skipCandidate);
+
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
 
     await updateDoc(doc(db, "users", uid, "tasks", skipCandidate.id), {
       completed: false,
       status: "skipped",
       skippedAt: new Date(),
+      skippedOccurrence: isRecurringOccurrence,
+      seriesContinues: isRecurringOccurrence,
       lastActionAt: new Date(),
     });
 
-    await cancelTaskNotifications(skipCandidate.id);
+    await cancelTaskNotifications(skipCandidate.id).catch(() => {});
+    await syncMorningSummaryNotification(uid).catch(() => {});
     setSkipCandidate(null);
   };
 
@@ -1270,6 +1281,13 @@ export default function HomeScreen() {
 
   const renderTask = (item: Task, showDate?: boolean) => {
     const isSkipped = (item.status ?? "pending") === "skipped";
+    const isRecurring = isRecurringSeriesTask(item);
+    const metaParts = [
+      item.time,
+      showDate ? item.date : "",
+      isCurrentTask(item) && !showDate && !isSkipped ? "Now" : "",
+      isSkipped ? "Skipped" : "",
+    ].filter(Boolean);
 
     return (
       <View
@@ -1343,15 +1361,17 @@ export default function HomeScreen() {
                 !isSkipped && { color: colors.tint, fontWeight: "600" },
             ]}
           >
-            {item.time}
-            {showDate ? ` · ${item.date}` : ""}
-            {isCurrentTask(item) && !showDate && !isSkipped ? " · Now" : ""}
-            {isSkipped && !showDate ? " · Skipped" : ""}
+            {metaParts.join(" · ")}
           </Text>
 
           {item.recurrence && item.recurrence !== "none" && (
             <Text style={[styles.taskRecurrence, { color: colors.subtle }]}>
-              Repeats {recurrenceLabels[item.recurrence].toLowerCase()}
+              {isSkipped
+                ? "Skipped this occurrence. Future repeats stay scheduled."
+                : `Repeats ${formatRecurrenceLabel(
+                    item.recurrence,
+                    item.recurrenceDays
+                  ).toLowerCase()}`}
             </Text>
           )}
 
@@ -1366,7 +1386,7 @@ export default function HomeScreen() {
             </Text>
           )}
 
-          {!showDate && !item.completed && !isSkipped && (
+          {!showDate && isOpenTask(item) && (
             <TouchableOpacity
               style={[
                 styles.skipButton,
@@ -1378,7 +1398,7 @@ export default function HomeScreen() {
               onPress={() => setSkipCandidate(item)}
             >
               <Text style={[styles.skipButtonText, { color: colors.warning }]}>
-                Skip Task
+                {isRecurring ? "Skip Occurrence" : "Skip Task"}
               </Text>
             </TouchableOpacity>
           )}
@@ -2750,7 +2770,8 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={[styles.seriesInfoBody, { color: colors.subtle }]}>
                   Choose whether your changes should affect only this task or this
-                  task and all future repeats.
+                  task and all future repeats. Skipping only affects this one
+                  occurrence.
                 </Text>
               </View>
             )}
@@ -2815,6 +2836,35 @@ export default function HomeScreen() {
                   </Text>
                 </TouchableOpacity>
               </>
+            )}
+
+            {isOpenTask(editingTask) && (
+              <TouchableOpacity
+                style={[
+                  styles.fullWidthOutlineButton,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.warning,
+                  },
+                ]}
+                onPress={() => {
+                  if (!editingTask) return;
+                  const targetTask = editingTask;
+                  closeEditModal();
+                  setSkipCandidate(targetTask);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.fullWidthOutlineText,
+                    { color: colors.warning },
+                  ]}
+                >
+                  {isRecurringSeriesTask(editingTask)
+                    ? "Skip This Occurrence"
+                    : "Skip Task"}
+                </Text>
+              </TouchableOpacity>
             )}
 
             <TouchableOpacity
@@ -3131,12 +3181,21 @@ export default function HomeScreen() {
         <View style={styles.modalBackdrop}>
           <View style={[styles.themeCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Skip This Task?
+              {isRecurringSeriesTask(skipCandidate)
+                ? "Skip This Occurrence?"
+                : "Skip This Task?"}
             </Text>
 
             <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
-              Are you sure? This sounds like an excuse. You can still reschedule
-              it instead if the timing is the problem.
+              {isRecurringSeriesTask(skipCandidate)
+                ? `This only marks ${
+                    skipCandidate?.title ?? "this task"
+                  } on ${
+                    skipCandidate
+                      ? getRelativeDateLabel(skipCandidate.date)
+                      : "this day"
+                  } as skipped. The rest of the recurring series stays scheduled.`
+                : "Are you sure? This sounds like an excuse. You can still reschedule it instead if the timing is the problem."}
             </Text>
 
             <View style={styles.modalActions}>
@@ -3161,7 +3220,11 @@ export default function HomeScreen() {
                 style={[styles.primaryButton, { backgroundColor: colors.warning }]}
                 onPress={handleSkipTask}
               >
-                <Text style={styles.primaryButtonText}>Skip</Text>
+                <Text style={styles.primaryButtonText}>
+                  {isRecurringSeriesTask(skipCandidate)
+                    ? "Skip Occurrence"
+                    : "Skip"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

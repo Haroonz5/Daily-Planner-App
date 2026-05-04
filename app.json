@@ -3,6 +3,7 @@
     "name": "Daily Discipline",
     "slug": "daily-discipline",
     "version": "1.0.0",
+    "description": "An AI-powered discipline planner with task scheduling, focus sessions, companion rewards, and accountability tools.",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "dailydiscipline",

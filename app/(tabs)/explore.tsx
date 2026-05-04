@@ -34,6 +34,7 @@ import {
 import {
   buildRecurringDates,
   formatDateKey,
+  formatRecurrenceLabel,
   formatTimeFromDate,
   getRelativeDateLabel,
   getTimeBucket,
@@ -64,6 +65,7 @@ type Task = {
   originalTime?: string;
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
+  recurrenceDays?: number[] | null;
 };
 
 type TaskTemplate = {
@@ -267,7 +269,12 @@ export default function AddTask() {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const aiDraftOccurrenceCount = parsedTasks.reduce(
     (sum, task) =>
-      sum + buildRecurringDates(task.date, task.recurrence ?? "none").length,
+      sum +
+      buildRecurringDates(
+        task.date,
+        task.recurrence ?? "none",
+        task.recurrenceDays
+      ).length,
     0
   );
   const templates = [...defaultTaskTemplates, ...customTemplates];
@@ -729,7 +736,11 @@ export default function AddTask() {
       parsedTasks.forEach((parsedTask, index) => {
         const safePriority = parsedTask.priority ?? "Medium";
         const taskRecurrence = parsedTask.recurrence ?? "none";
-        const taskDates = buildRecurringDates(parsedTask.date, taskRecurrence);
+        const taskDates = buildRecurringDates(
+          parsedTask.date,
+          taskRecurrence,
+          parsedTask.recurrenceDays
+        );
         const recurrenceGroupId =
           taskRecurrence === "none" ? null : `${uid}-${Date.now()}-ai-${index}`;
 
@@ -752,6 +763,8 @@ export default function AddTask() {
             originalTime: parsedTask.time,
             recurrence: taskRecurrence,
             recurrenceGroupId,
+            recurrenceDays:
+              taskRecurrence === "custom" ? parsedTask.recurrenceDays ?? [] : null,
             aiCreated: true,
           });
 
@@ -834,6 +847,7 @@ export default function AddTask() {
           originalTime: formattedTime,
           recurrence,
           recurrenceGroupId,
+          recurrenceDays: null,
         });
 
         createdTasks.push({
@@ -1227,8 +1241,20 @@ export default function AddTask() {
                   </Text>
                   {task.recurrence && task.recurrence !== "none" && (
                     <Text style={[styles.aiParsedRepeat, { color: colors.tint }]}>
-                      Repeats {recurrenceLabels[task.recurrence].toLowerCase()} · creates{" "}
-                      {buildRecurringDates(task.date, task.recurrence).length} tasks
+                      Repeats{" "}
+                      {formatRecurrenceLabel(
+                        task.recurrence,
+                        task.recurrenceDays
+                      ).toLowerCase()}{" "}
+                      · creates{" "}
+                      {
+                        buildRecurringDates(
+                          task.date,
+                          task.recurrence,
+                          task.recurrenceDays
+                        ).length
+                      }{" "}
+                      tasks
                     </Text>
                   )}
                 </View>

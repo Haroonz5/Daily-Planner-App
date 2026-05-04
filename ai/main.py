@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 Priority = Literal["Low", "Medium", "High"]
-Recurrence = Literal["none", "daily", "weekdays", "weekly"]
+Recurrence = Literal["none", "daily", "weekdays", "weekly", "custom"]
 
 
 class ExistingTask(BaseModel):
@@ -38,6 +38,7 @@ class ParsedTask(BaseModel):
     priority: Priority = "Medium"
     duration_minutes: int | None = Field(default=None, ge=1, le=720)
     recurrence: Recurrence = "none"
+    recurrence_days: list[int] = Field(default_factory=list)
     notes: str = ""
 
 
@@ -212,7 +213,15 @@ TASK_SCHEMA = {
                     "duration_minutes": {"type": ["integer", "null"]},
                     "recurrence": {
                         "type": "string",
-                        "enum": ["none", "daily", "weekdays", "weekly"],
+                        "enum": ["none", "daily", "weekdays", "weekly", "custom"],
+                    },
+                    "recurrence_days": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 6,
+                        },
                     },
                     "notes": {"type": "string"},
                 },
@@ -223,6 +232,7 @@ TASK_SCHEMA = {
                     "priority",
                     "duration_minutes",
                     "recurrence",
+                    "recurrence_days",
                     "notes",
                 ],
             },
@@ -444,9 +454,15 @@ def _task_time_bucket(task: FeedbackTask) -> str:
 
 def _clean_title(segment: str) -> str:
     cleaned = re.sub(
-        r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b",
+        r"\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b",
         "",
         segment,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b",
+        "",
+        cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
@@ -471,17 +487,84 @@ def _clean_title(segment: str) -> str:
     return cleaned[:1].upper() + cleaned[1:] if cleaned else "Task"
 
 
-def _recurrence_from_text(segment: str) -> Recurrence:
+WEEKDAY_ALIASES = {
+    "sun": 0,
+    "sunday": 0,
+    "mon": 1,
+    "monday": 1,
+    "tue": 2,
+    "tues": 2,
+    "tuesday": 2,
+    "wed": 3,
+    "weds": 3,
+    "wednesday": 3,
+    "thu": 4,
+    "thur": 4,
+    "thurs": 4,
+    "thrs": 4,
+    "thursday": 4,
+    "fri": 5,
+    "friday": 5,
+    "sat": 6,
+    "saturday": 6,
+}
+
+
+def _weekday_token_to_day(token: str) -> int | None:
+    return WEEKDAY_ALIASES.get(token.lower().replace(".", ""))
+
+
+def _expand_weekday_range(start_day: int, end_day: int) -> list[int]:
+    days: list[int] = []
+    cursor = start_day
+
+    while True:
+        days.append(cursor)
+        if cursor == end_day:
+            return days
+        cursor = (cursor + 1) % 7
+
+
+def _recurrence_from_text(segment: str) -> tuple[Recurrence, list[int]]:
     lower = segment.lower()
+    weekday_pattern = (
+        r"(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|"
+        r"thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)"
+    )
+    range_match = re.search(
+        rf"\b(?:only\s+|every\s+|on\s+)?{weekday_pattern}\s*(?:-|to|through|thru)\s*{weekday_pattern}\b",
+        lower,
+        re.IGNORECASE,
+    )
+
+    if range_match:
+        start_day = _weekday_token_to_day(range_match.group(1))
+        end_day = _weekday_token_to_day(range_match.group(2))
+
+        if start_day is not None and end_day is not None:
+            days = _expand_weekday_range(start_day, end_day)
+            if days == [1, 2, 3, 4, 5]:
+                return "weekdays", []
+            return "custom", days
 
     if re.search(r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b", lower):
-        return "weekdays"
+        return "weekdays", []
     if re.search(r"\b(every\s+day|everyday|daily|each\s+day)\b", lower):
-        return "daily"
+        return "daily", []
     if re.search(r"\b(every\s+week|weekly|each\s+week)\b", lower):
-        return "weekly"
+        return "weekly", []
 
-    return "none"
+    single_match = re.search(
+        rf"\b(?:only\s+|every\s+){weekday_pattern}s?\b",
+        lower,
+        re.IGNORECASE,
+    )
+    if single_match:
+        day = _weekday_token_to_day(single_match.group(1))
+        if day is not None:
+            return "custom", [day]
+
+    return "none", []
 
 
 def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
@@ -513,6 +596,7 @@ def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
 
         duration = _duration_from_text(segment)
         notes = f"Estimated duration: {duration} minutes" if duration else ""
+        recurrence, recurrence_days = _recurrence_from_text(segment)
 
         parsed_tasks.append(
             ParsedTask(
@@ -521,7 +605,8 @@ def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
                 time=_format_time(hour, minute, period),
                 priority=_priority_from_text(segment),
                 duration_minutes=duration,
-                recurrence=_recurrence_from_text(segment),
+                recurrence=recurrence,
+                recurrence_days=recurrence_days,
                 notes=notes,
             )
         )
@@ -562,11 +647,16 @@ def _openai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
                         "Return only JSON matching this shape: "
                         '{"tasks":[{"title":"Gym","date":"YYYY-MM-DD","time":"6:00 PM",'
                         '"priority":"Low|Medium|High","duration_minutes":60,'
-                        '"recurrence":"none|daily|weekdays|weekly","notes":""}],"warnings":[]}. '
+                        '"recurrence":"none|daily|weekdays|weekly|custom",'
+                        '"recurrence_days":[1,2,3,4],"notes":""}],"warnings":[]}. '
                         "Use the provided default_date when no date is stated. "
                         "If the user says every day, everyday, or daily, set recurrence to daily. "
                         "If the user says weekdays or Monday to Friday, set recurrence to weekdays. "
                         "If the user says weekly or every week, set recurrence to weekly. "
+                        "If the user gives specific days like Mon-Thu, Monday through Thursday, "
+                        "or only Monday and Wednesday, set recurrence to custom and use recurrence_days "
+                        "with 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. "
+                        "Use [] for recurrence_days unless recurrence is custom. "
                         "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
                         "Keep titles short and action-oriented. Do not invent tasks."
                     ),

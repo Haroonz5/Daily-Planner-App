@@ -35,9 +35,9 @@ import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   formatDateKey,
+  formatRecurrenceLabel,
   getRelativeDateLabel,
   parseTimeToMinutes,
-  recurrenceLabels,
   type RecurrenceRule,
 } from "@/utils/task-helpers";
 import {
@@ -69,6 +69,7 @@ type Task = {
   completedAt?: any;
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
+  recurrenceDays?: number[] | null;
 };
 
 type SettingsScreenProps = {
@@ -79,6 +80,7 @@ type RoutineGroup = {
   id: string;
   title: string;
   recurrence: RecurrenceRule;
+  recurrenceDays?: number[] | null;
   time: string;
   nextDate: string;
   activeCount: number;
@@ -232,6 +234,7 @@ export default function SettingsScreen({
           id,
           title: nextTask?.title ?? "Recurring routine",
           recurrence: nextTask?.recurrence ?? "daily",
+          recurrenceDays: nextTask?.recurrenceDays ?? null,
           time: nextTask?.time ?? "Any time",
           nextDate: nextTask?.date ?? today,
           activeCount: activeTasks.length,
@@ -848,7 +851,11 @@ export default function SettingsScreen({
                   {routine.title}
                 </Text>
                 <Text style={[styles.routineMeta, { color: colors.subtle }]}>
-                  {recurrenceLabels[routine.recurrence]} at {routine.time} · next{" "}
+                  {formatRecurrenceLabel(
+                    routine.recurrence,
+                    routine.recurrenceDays
+                  )}{" "}
+                  at {routine.time} · next{" "}
                   {getRelativeDateLabel(routine.nextDate)}
                 </Text>
                 <Text style={[styles.routineMeta, { color: colors.subtle }]}>

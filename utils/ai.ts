@@ -20,6 +20,7 @@ export type ParsedAiTask = {
   durationMinutes?: number | null;
   notes?: string;
   recurrence?: RecurrenceRule;
+  recurrenceDays?: number[] | null;
 };
 
 export type ParseNaturalTasksResult = {
@@ -158,29 +159,106 @@ const getLocalDuration = (text: string) => {
     : Math.round(value);
 };
 
-const recurrenceRules: RecurrenceRule[] = ["none", "daily", "weekdays", "weekly"];
+const recurrenceRules: RecurrenceRule[] = [
+  "none",
+  "daily",
+  "weekdays",
+  "weekly",
+  "custom",
+];
 
 const normalizeRecurrence = (value: unknown): RecurrenceRule =>
   recurrenceRules.includes(value as RecurrenceRule)
     ? (value as RecurrenceRule)
     : "none";
 
-const getLocalRecurrence = (text: string): RecurrenceRule => {
+const weekdayAliases: Record<string, number> = {
+  sun: 0,
+  sunday: 0,
+  mon: 1,
+  monday: 1,
+  tue: 2,
+  tues: 2,
+  tuesday: 2,
+  wed: 3,
+  weds: 3,
+  wednesday: 3,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  thrs: 4,
+  thursday: 4,
+  fri: 5,
+  friday: 5,
+  sat: 6,
+  saturday: 6,
+};
+
+const parseWeekdayToken = (token: string) =>
+  weekdayAliases[token.toLowerCase().replace(/\./g, "")] ?? null;
+
+const expandWeekdayRange = (startDay: number, endDay: number) => {
+  const days: number[] = [];
+  let cursor = startDay;
+
+  while (true) {
+    days.push(cursor);
+    if (cursor === endDay) break;
+    cursor = (cursor + 1) % 7;
+  }
+
+  return days;
+};
+
+const getLocalRecurrenceDetails = (
+  text: string
+): { recurrence: RecurrenceRule; recurrenceDays?: number[] | null } => {
   const lower = text.toLowerCase();
+  const weekdayPattern =
+    "(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)";
+  const rangeMatch = lower.match(
+    new RegExp(
+      `\\b(?:only\\s+|every\\s+|on\\s+)?${weekdayPattern}\\s*(?:-|to|through|thru)\\s*${weekdayPattern}\\b`,
+      "i"
+    )
+  );
+
+  if (rangeMatch) {
+    const startDay = parseWeekdayToken(rangeMatch[1]);
+    const endDay = parseWeekdayToken(rangeMatch[2]);
+
+    if (startDay !== null && endDay !== null) {
+      const days = expandWeekdayRange(startDay, endDay);
+      const weekdays = [1, 2, 3, 4, 5];
+
+      return weekdays.every((day, index) => days[index] === day) &&
+        days.length === weekdays.length
+        ? { recurrence: "weekdays", recurrenceDays: null }
+        : { recurrence: "custom", recurrenceDays: days };
+    }
+  }
 
   if (/\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b/.test(lower)) {
-    return "weekdays";
+    return { recurrence: "weekdays", recurrenceDays: null };
   }
 
   if (/\b(every\s+day|everyday|daily|each\s+day)\b/.test(lower)) {
-    return "daily";
+    return { recurrence: "daily", recurrenceDays: null };
   }
 
   if (/\b(every\s+week|weekly|each\s+week)\b/.test(lower)) {
-    return "weekly";
+    return { recurrence: "weekly", recurrenceDays: null };
   }
 
-  return "none";
+  const singleWeekdayMatch = lower.match(
+    new RegExp(`\\b(?:only\\s+|every\\s+)${weekdayPattern}s?\\b`, "i")
+  );
+  if (singleWeekdayMatch) {
+    const day = parseWeekdayToken(singleWeekdayMatch[1]);
+    if (day !== null) return { recurrence: "custom", recurrenceDays: [day] };
+  }
+
+  return { recurrence: "none", recurrenceDays: null };
 };
 
 const estimateTaskMinutes = (task: {
@@ -224,6 +302,10 @@ const formatMinutesToTaskTime = (minutes: number) => {
 const cleanLocalTitle = (segment: string) => {
   const cleaned = segment
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
+    .replace(
+      /\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b/gi,
+      ""
+    )
     .replace(
       /\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b/gi,
       ""
@@ -279,7 +361,7 @@ const localParseNaturalTasks = (
     }
 
     const durationMinutes = getLocalDuration(segment);
-    const recurrence = getLocalRecurrence(segment);
+    const { recurrence, recurrenceDays } = getLocalRecurrenceDetails(segment);
     return [
       {
         title: cleanLocalTitle(segment),
@@ -292,6 +374,7 @@ const localParseNaturalTasks = (
             : "Medium",
         durationMinutes,
         recurrence,
+        recurrenceDays,
         notes: durationMinutes
           ? `Estimated duration: ${durationMinutes} minutes`
           : "",
@@ -347,6 +430,15 @@ export const parseNaturalTasks = async ({
           : "Medium") as AiTaskPriority,
         durationMinutes: task.duration_minutes ?? task.durationMinutes ?? null,
         recurrence: normalizeRecurrence(task.recurrence),
+        recurrenceDays: Array.isArray(task.recurrence_days)
+          ? task.recurrence_days
+              .map(Number)
+              .filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6)
+          : Array.isArray(task.recurrenceDays)
+            ? task.recurrenceDays
+                .map(Number)
+                .filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6)
+            : null,
         notes: String(task.notes ?? ""),
       })),
       warnings: (data.warnings ?? []).map(String),

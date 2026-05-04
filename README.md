@@ -348,5 +348,4 @@ docs/TESTER_HANDOFF.md
 
 ## Purpose
 
-Daily Discipline is built around one idea: consistency gets easier when planning is realistic, progress feels rewarding, and recovery is part of the system. The app helps users plan the day, notice patterns, stay accountable, and turn small completed tasks into long-term momentum.
-
+Daily Discipline is designed to make productivity feel more personal, realistic, and rewarding. Instead of only tracking tasks, the app helps users understand their habits, recover from missed tasks, and build consistency over time.
