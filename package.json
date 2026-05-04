@@ -11,6 +11,8 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "qa": "npm run typecheck && npx eslint . --no-cache",
+    "qa:device": "npm run qa && npx expo install --check && npx expo config --type public",
+    "deploy:rules": "npx firebase-tools@latest deploy --only firestore:rules",
     "ai:dev": "cd ai && uvicorn main:app --reload --host 0.0.0.0 --port 8000",
     "eas:preview": "eas build --profile preview --platform all",
     "eas:simulator": "eas build --profile simulator --platform ios",

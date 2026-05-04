@@ -779,68 +779,86 @@ export default function SettingsScreen({
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>Themes</Text>
-        {themeOptions.map((theme) => {
-          const preview = Colors[theme];
-          const selected = themeName === theme;
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Choose a look that matches how you want the app to feel today.
+        </Text>
+        <View style={styles.themeGrid}>
+          {themeOptions.map((theme) => {
+            const preview = Colors[theme];
+            const selected = themeName === theme;
+            const toneLabel =
+              preview.navigationTone === "dark" ? "Dark" : "Light";
 
-          return (
-            <TouchableOpacity
-              key={theme}
-              style={[
-                styles.themeOption,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.border,
-                },
-                selected && {
-                  borderColor: colors.tint,
-                  backgroundColor: colors.surface,
-                },
-              ]}
-              onPress={() => setThemeName(theme)}
-            >
-              <View style={styles.themePreview}>
-                <View
-                  style={[
-                    styles.themeSwatch,
-                    {
-                      backgroundColor: preview.background,
-                      borderColor: preview.border,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.themeSwatch,
-                    {
-                      backgroundColor: preview.card,
-                      borderColor: preview.border,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.themeSwatch,
-                    {
-                      backgroundColor: preview.tint,
-                      borderColor: preview.tint,
-                    },
-                  ]}
-                />
-              </View>
+            return (
+              <TouchableOpacity
+                key={theme}
+                activeOpacity={0.84}
+                style={[
+                  styles.themeOption,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                  },
+                  selected && {
+                    borderColor: colors.tint,
+                    backgroundColor: colors.surface,
+                    shadowColor: colors.tint,
+                  },
+                ]}
+                onPress={() => setThemeName(theme)}
+              >
+                <View style={styles.themePreview}>
+                  <View
+                    style={[
+                      styles.themeSwatch,
+                      {
+                        backgroundColor: preview.background,
+                        borderColor: preview.border,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.themeSwatch,
+                      {
+                        backgroundColor: preview.card,
+                        borderColor: preview.border,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.themeSwatch,
+                      {
+                        backgroundColor: preview.tint,
+                        borderColor: preview.tint,
+                      },
+                    ]}
+                  />
+                </View>
 
-              <Text style={[styles.themeLabel, { color: colors.text }]}>
-                {ThemeLabels[theme]}
-              </Text>
-
-              {selected ? (
-                <Text style={[styles.selectedText, { color: colors.tint }]}>
-                  Active
+                <Text
+                  numberOfLines={1}
+                  style={[styles.themeLabel, { color: colors.text }]}
+                >
+                  {ThemeLabels[theme]}
                 </Text>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
+
+                <Text
+                  style={[
+                    styles.selectedText,
+                    {
+                      backgroundColor: selected ? colors.tint : colors.surface,
+                      color: selected ? colors.background : colors.subtle,
+                    },
+                  ]}
+                >
+                  {selected ? "Active" : toneLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
 
       <View
@@ -1558,34 +1576,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-  themeOption: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 10,
+  themeGrid: {
     flexDirection: "row",
-    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginTop: 2,
+  },
+  themeOption: {
+    width: "48%",
+    minHeight: 108,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+    justifyContent: "space-between",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 2,
   },
   themePreview: {
     flexDirection: "row",
     alignItems: "center",
-    marginRight: 12,
+    marginBottom: 12,
   },
   themeSwatch: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1,
-    marginRight: 6,
+    marginRight: -3,
   },
   themeLabel: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 10,
   },
   selectedText: {
-    fontSize: 12,
-    fontWeight: "700",
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 11,
+    fontWeight: "800",
   },
   statRow: {
     flexDirection: "row",

@@ -32,11 +32,17 @@ Run these before sharing:
 npm run qa
 ```
 
+Run the stronger device-readiness check:
+
+```bash
+npm run qa:device
+```
+
 Deploy Firestore rules after logging into Firebase:
 
 ```bash
 npx firebase-tools@latest login
-npx firebase-tools@latest deploy --only firestore:rules
+npm run deploy:rules
 ```
 
 Create an internal tester build:
@@ -67,6 +73,11 @@ npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL -
 - Friends can send requests, see daily progress, and send check-ins.
 - Strict Focus pauses when the tester leaves the app and records a strike.
 - Bottom tabs do not cover buttons at the bottom of any screen.
+- Notification action buttons are tested from a development or preview build, not Expo Go.
+- Completing a task from the notification updates Today, Stats, XP, and scheduled reminders.
+- Focus Mode music starts, loops quietly, and stops when the session ends.
+- Pet nicknames stay saved after changing tabs, closing the app, and reopening.
+- Firestore rules are deployed before testing friends, nudges, challenges, feedback, and progress sharing.
 
 ## Known Testing Notes
 

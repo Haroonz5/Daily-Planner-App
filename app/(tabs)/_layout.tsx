@@ -107,6 +107,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Today",
+          tabBarAccessibilityLabel: "Today tab",
           tabBarIcon: ({ color, focused }) => (
             renderDockIcon("house.fill", focused, color)
           ),
@@ -116,6 +117,7 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: "Add Task",
+          tabBarAccessibilityLabel: "Add task tab",
           tabBarIcon: ({ color, focused }) => (
             renderDockIcon("plus.circle.fill", focused, color)
           ),
@@ -125,6 +127,7 @@ export default function TabLayout() {
         name="stats"
         options={{
           title: "Stats",
+          tabBarAccessibilityLabel: "Stats tab",
           tabBarIcon: ({ color, focused }) => (
             renderDockIcon("chart.bar.fill", focused, color)
           ),
@@ -134,6 +137,7 @@ export default function TabLayout() {
         name="settings"
         options={{
           title: "Settings",
+          tabBarAccessibilityLabel: "Settings tab",
           tabBarIcon: ({ color, focused }) => (
             renderDockIcon("gearshape.fill", focused, color)
           ),

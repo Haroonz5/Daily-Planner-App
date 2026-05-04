@@ -6,8 +6,7 @@ Use this checklist when you are ready to let other people test Daily Discipline.
 
 ```bash
 npm install
-npm run typecheck
-npx eslint . --no-cache
+npm run qa:device
 npm run ai:dev
 ```
 
@@ -26,7 +25,28 @@ Test on a real phone:
 - Confirm task reminders are not duplicated.
 - Open Today, Add Task, Stats, Summary, Focus, and Settings.
 
-## 2. Deploy The AI Backend
+## 2. Real Device Final Pass
+
+Expo Go is good for layout and most app behavior, but notification action buttons,
+background delivery, and the full sound/haptic experience need a development,
+preview, or production build.
+
+Before sending a tester build:
+
+```bash
+npm run qa:device
+npm run deploy:rules
+```
+
+Then confirm:
+
+- A task reminder appears once and shows the Complete action.
+- Tapping Complete from the notification marks the task complete in the app.
+- Focus Mode music starts, loops quietly, and stops when the session ends.
+- Pet names stay saved after changing tabs and reopening the app.
+- Friends, accountability nudges, challenges, feedback, and progress sharing do not show permission errors.
+
+## 3. Deploy The AI Backend
 
 The repo includes a Dockerfile for the AI service and a Render blueprint.
 
@@ -55,7 +75,7 @@ After deployment, copy the public backend URL. It should respond at:
 https://your-backend-url/health
 ```
 
-## 3. Build Tester Apps With EAS
+## 4. Build Tester Apps With EAS
 
 Install or run EAS:
 
@@ -88,7 +108,7 @@ Production build:
 npx eas-cli@latest build --profile production --platform all
 ```
 
-## 4. Tester Notes
+## 5. Tester Notes
 
 Ask testers to report:
 

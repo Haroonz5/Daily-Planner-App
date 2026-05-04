@@ -21,6 +21,12 @@ export const themeOptions: AppThemeName[] = [
   "voidBlack",
   "slateSteel",
   "roseQuartz",
+  "forestMist",
+  "latteCream",
+  "citrusPop",
+  "neonNoir",
+  "royalIndigo",
+  "monochromePro",
 ];
 
 export const getStoredTheme = async (): Promise<AppThemeName> => {
