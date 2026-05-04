@@ -8,6 +8,7 @@ export type PetKey =
   | "tiger"
   | "eagle"
   | "dragon";
+export type PetNicknameMap = Partial<Record<PetKey, string | null>>;
 
 export type RewardTask = {
   completed: boolean;
@@ -30,6 +31,25 @@ export type PetTier = {
   unlockXp: number;
   description: string;
 };
+
+export const getPetNickname = (
+  petKey: PetKey,
+  petNicknames?: PetNicknameMap | null,
+  legacyNickname?: string | null
+) => {
+  const hasNicknameMap =
+    !!petNicknames && Object.keys(petNicknames).length > 0;
+  const petNickname = petNicknames?.[petKey]?.trim();
+  if (petNickname) return petNickname;
+
+  return hasNicknameMap ? "" : legacyNickname?.trim() ?? "";
+};
+
+export const getPetDisplayName = (
+  pet: Pick<PetTier, "key" | "name">,
+  petNicknames?: PetNicknameMap | null,
+  legacyNickname?: string | null
+) => getPetNickname(pet.key, petNicknames, legacyNickname) || pet.name;
 
 export const PET_TIERS: PetTier[] = [
   {

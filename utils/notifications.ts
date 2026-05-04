@@ -1,8 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 
-import { db } from "../constants/firebaseConfig";
+import { auth, db } from "../constants/firebaseConfig";
 
 export type NotificationTask = {
   id: string;
@@ -44,6 +44,8 @@ const EVENING_REMINDER_NOTIFICATION_KEY = "eveningReminderNotificationId";
 const NOTIFICATION_SETTINGS_KEY = "notificationSettings";
 const MORNING_SUMMARY_NOTIFICATION_ID = "daily-discipline-morning-summary";
 const EVENING_REMINDER_NOTIFICATION_ID = "daily-discipline-evening-reminder";
+const TASK_NOTIFICATION_CATEGORY_ID = "dailyDisciplineTaskActions";
+const COMPLETE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineCompleteTask";
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   taskRemindersEnabled: true,
@@ -64,6 +66,26 @@ const NOTIFICATION_KINDS = {
 
 type TaskNotificationMap = Record<string, string[]>;
 
+export const configureTaskNotificationActions = async () => {
+  await Notifications.setNotificationCategoryAsync(
+    TASK_NOTIFICATION_CATEGORY_ID,
+    [
+      {
+        identifier: COMPLETE_TASK_NOTIFICATION_ACTION_ID,
+        buttonTitle: "Complete",
+        options: {
+          opensAppToForeground: true,
+          isAuthenticationRequired: false,
+        },
+      },
+    ],
+    {
+      showTitle: true,
+      showSubtitle: true,
+    }
+  ).catch(() => {});
+};
+
 const getTaskDueNotificationId = (taskId: string) =>
   `daily-discipline-task-${taskId}-due`;
 
@@ -75,6 +97,35 @@ const getNotificationData = (request: Notifications.NotificationRequest) =>
     kind?: string;
     taskId?: string;
   };
+
+export const completeTaskFromNotificationResponse = async (
+  response: Notifications.NotificationResponse
+) => {
+  if (response.actionIdentifier !== COMPLETE_TASK_NOTIFICATION_ACTION_ID) {
+    return false;
+  }
+
+  const uid = auth.currentUser?.uid;
+  const taskId = getNotificationData(response.notification.request).taskId;
+  if (!uid || !taskId) return false;
+
+  await updateDoc(doc(db, "users", uid, "tasks", taskId), {
+    completed: true,
+    status: "completed",
+    completedAt: new Date(),
+    skippedAt: null,
+    lastActionAt: new Date(),
+    completedFromNotification: true,
+  });
+
+  await cancelTaskNotifications(taskId).catch(() => {});
+  await syncMorningSummaryNotification(uid).catch(() => {});
+  await Notifications.dismissNotificationAsync(
+    response.notification.request.identifier
+  ).catch(() => {});
+
+  return true;
+};
 
 const getNotificationAuditKey = (request: Notifications.NotificationRequest) => {
   const data = getNotificationData(request);
@@ -249,6 +300,7 @@ export const ensureBaseReminders = async () => {
       title: "Plan tomorrow tonight",
       body: "Don't leave tomorrow to chance. Set your tasks tonight so morning has direction.",
       data: { kind: NOTIFICATION_KINDS.eveningReminder },
+      sound: true,
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DAILY,
@@ -322,7 +374,14 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
     content: {
       title: dueTitle,
       body: dueBody,
-      data: { kind: NOTIFICATION_KINDS.taskDue, taskId: task.id },
+      data: {
+        kind: NOTIFICATION_KINDS.taskDue,
+        taskId: task.id,
+        taskTitle: task.title,
+      },
+      categoryIdentifier: TASK_NOTIFICATION_CATEGORY_ID,
+      sound: true,
+      vibrate: [0, 180, 80, 180],
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -339,7 +398,14 @@ export const syncTaskNotifications = async (task: NotificationTask) => {
       content: {
         title: "Still waiting on this one",
         body: `${task.title} was due at ${task.time}. Move now or reschedule honestly.`,
-        data: { kind: NOTIFICATION_KINDS.taskMissed, taskId: task.id },
+        data: {
+          kind: NOTIFICATION_KINDS.taskMissed,
+          taskId: task.id,
+          taskTitle: task.title,
+        },
+        categoryIdentifier: TASK_NOTIFICATION_CATEGORY_ID,
+        sound: true,
+        vibrate: [0, 140, 70, 140],
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -491,6 +557,7 @@ export const syncMorningSummaryNotification = async (uid: string) => {
       title: "This is what past you said",
       body,
       data: { kind: NOTIFICATION_KINDS.morningSummary },
+      sound: true,
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -518,6 +585,8 @@ export const scheduleQuickTestNotification = async () => {
       title: "Daily Discipline Test",
       body: "If you saw this, your reminders are ready to work.",
       data: { kind: NOTIFICATION_KINDS.test },
+      sound: true,
+      vibrate: [0, 120, 60, 120],
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,

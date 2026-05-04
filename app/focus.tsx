@@ -1,4 +1,3 @@
-import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import {
   addDoc,
@@ -20,9 +19,21 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { PetSprite } from "@/components/pet-sprite";
-import { getActivePet, getTaskXp, type Priority } from "@/constants/rewards";
+import {
+  getActivePet,
+  getPetDisplayName,
+  getTaskXp,
+  type Priority,
+} from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import {
+  playSelectionFeedback,
+  playTaskCompleteFeedback,
+  playWarningFeedback,
+  startCalmFocusMusic,
+  stopCalmFocusMusic,
+} from "@/utils/feedback";
 import { cancelTaskNotifications, syncTaskNotifications } from "../utils/notifications";
 import { formatDateKey, sortTasksBySchedule } from "../utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
@@ -181,25 +192,34 @@ export default function FocusScreen() {
           return next;
         });
 
-        Haptics.notificationAsync(
-          Haptics.NotificationFeedbackType.Warning
-        ).catch(() => {});
+        playWarningFeedback(profile).catch(() => {});
       }
 
       appStateRef.current = nextState;
     });
 
     return () => subscription.remove();
-  }, [sessionMinutes, strictFocusEnabled, timerState]);
+  }, [profile, sessionMinutes, strictFocusEnabled, timerState]);
 
   useEffect(() => {
     if (timerState === "running" && secondsLeft === 0) {
       setTimerState("done");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-        () => {}
-      );
+      playTaskCompleteFeedback(profile).catch(() => {});
     }
-  }, [secondsLeft, timerState]);
+  }, [profile, secondsLeft, timerState]);
+
+  useEffect(() => {
+    if (timerState !== "running") {
+      stopCalmFocusMusic().catch(() => {});
+      return;
+    }
+
+    startCalmFocusMusic(profile).catch(() => {});
+
+    return () => {
+      stopCalmFocusMusic().catch(() => {});
+    };
+  }, [profile, timerState]);
 
   const today = formatDateKey(new Date());
 
@@ -265,7 +285,11 @@ export default function FocusScreen() {
       completedSessionsToday,
       focusMinutesToday,
       total: todayTasks.length,
-      petLabel: profile.petNickname?.trim() || activePet.name,
+      petLabel: getPetDisplayName(
+        activePet,
+        profile.petNicknames,
+        profile.petNickname
+      ),
       displayName: profile.displayName?.trim() || "You",
     };
   }, [
@@ -273,6 +297,7 @@ export default function FocusScreen() {
     profile.activePetKey,
     profile.displayName,
     profile.petNickname,
+    profile.petNicknames,
     selectedTaskId,
     tasks,
     today,
@@ -298,8 +323,6 @@ export default function FocusScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
     await updateDoc(doc(db, "users", uid, "tasks", task.id), {
       completed: true,
       status: "completed",
@@ -309,6 +332,7 @@ export default function FocusScreen() {
     });
 
     await cancelTaskNotifications(task.id);
+    await playTaskCompleteFeedback(profile);
   };
 
   const handleUndo = async (task: Task) => {
@@ -342,10 +366,11 @@ export default function FocusScreen() {
     loggedSessionRef.current = false;
     resetStrictFocusState();
     await saveProfile({ focusDurationMinutes: minutes });
+    await playSelectionFeedback(profile);
   };
 
   const handleStartPause = async () => {
-    await Haptics.selectionAsync();
+    await playSelectionFeedback(profile);
     if (timerState === "running") {
       setTimerState("paused");
       return;
@@ -364,7 +389,7 @@ export default function FocusScreen() {
   };
 
   const handleResetTimer = async () => {
-    await Haptics.selectionAsync();
+    await playSelectionFeedback(profile);
     setTimerState("idle");
     setSecondsLeft(sessionMinutes * 60);
     loggedSessionRef.current = false;
@@ -374,6 +399,7 @@ export default function FocusScreen() {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
@@ -676,13 +702,16 @@ export default function FocusScreen() {
         )}
       </View>
 
-      <View style={{ height: 40 }} />
+      <View style={styles.bottomSpacer} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: {
+    paddingBottom: 96,
+  },
   header: {
     paddingHorizontal: 24,
     paddingTop: 60,
@@ -946,5 +975,8 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     lineHeight: 21,
+  },
+  bottomSpacer: {
+    height: 8,
   },
 });

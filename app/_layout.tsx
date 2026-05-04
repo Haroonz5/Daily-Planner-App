@@ -20,7 +20,11 @@ import {
   setStoredTheme,
 } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
-import { ensureBaseReminders } from "../utils/notifications";
+import {
+  completeTaskFromNotificationResponse,
+  configureTaskNotificationActions,
+  ensureBaseReminders,
+} from "../utils/notifications";
 import { auth, db } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
@@ -103,8 +107,31 @@ export default function RootLayout() {
       }),
     });
 
+    configureTaskNotificationActions().catch(() => {});
     ensureBaseReminders().catch(() => {});
+
+    const responseSubscription =
+      Notifications.addNotificationResponseReceivedListener((response) => {
+        completeTaskFromNotificationResponse(response).catch(() => {});
+      });
+
+    return () => {
+      responseSubscription.remove();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const response = Notifications.getLastNotificationResponse();
+    if (!response) return;
+
+    completeTaskFromNotificationResponse(response)
+      .then((handled) => {
+        if (handled) Notifications.clearLastNotificationResponse();
+      })
+      .catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     if (loading || !themeLoaded || onboardingSeen === null) return;

@@ -1,4 +1,3 @@
-import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import {
   collection,
@@ -29,6 +28,7 @@ import { PetSprite } from "@/components/pet-sprite";
 import {
   PET_TIERS,
   getActivePet,
+  getPetDisplayName,
   getPetProgress,
   getTaskXp,
   getUnlockedPets,
@@ -60,6 +60,12 @@ import {
   syncMorningSummaryNotification,
   syncTaskNotifications,
 } from "../../utils/notifications";
+import {
+  playPetUnlockFeedback,
+  playSelectionFeedback,
+  playTaskCompleteFeedback,
+  playWarningFeedback,
+} from "../../utils/feedback";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -373,6 +379,11 @@ export default function HomeScreen() {
   const petProgress = getPetProgress(totalXp);
   const strongestPet = petProgress.currentPet;
   const activePet = getActivePet(totalXp, profile.activePetKey);
+  const activePetDisplayName = getPetDisplayName(
+    activePet,
+    profile.petNicknames,
+    profile.petNickname
+  );
   const unlockedPets = getUnlockedPets(totalXp);
   const behaviorCallout = getBehaviorCallout(tasks, today);
   const energyMode = (profile.energyMode ?? "steady") as EnergyMode;
@@ -636,30 +647,30 @@ export default function HomeScreen() {
     todayTasks.length === 0
       ? {
           title: "Curious",
-          body: `${activePet.name} is waiting for one clear mission to follow.`,
+          body: `${activePetDisplayName} is waiting for one clear mission to follow.`,
           tone: colors.warning,
         }
       : missedTasksToday.length > 0
         ? {
             title: "Concerned",
-            body: `${activePet.name} noticed a slipped task. Reschedule it before it turns into noise.`,
+            body: `${activePetDisplayName} noticed a slipped task. Reschedule it before it turns into noise.`,
             tone: colors.danger,
           }
         : progressPercent === 100
           ? {
               title: "Proud",
-              body: `${activePet.name} is absolutely glowing. Clean execution hits different.`,
+              body: `${activePetDisplayName} is absolutely glowing. Clean execution hits different.`,
               tone: colors.success,
             }
           : completed > 0
             ? {
                 title: "Energized",
-                body: `${activePet.name} can feel the momentum. One more task keeps it rolling.`,
+                body: `${activePetDisplayName} can feel the momentum. One more task keeps it rolling.`,
                 tone: colors.tint,
               }
             : {
                 title: "Ready",
-                body: `${activePet.name} is warmed up. Start with the smallest task on the list.`,
+                body: `${activePetDisplayName} is warmed up. Start with the smallest task on the list.`,
                 tone: colors.tint,
               };
 
@@ -676,7 +687,7 @@ export default function HomeScreen() {
         completed,
         total: todayTasks.length,
         progressPercent: Math.round(progressPercent),
-        petName: profile.petNickname?.trim() || activePet.name,
+        petName: activePetDisplayName,
         petKey: activePet.key,
         energyMode,
         updatedAt: new Date(),
@@ -685,12 +696,11 @@ export default function HomeScreen() {
     ).catch(() => {});
   }, [
     activePet.key,
-    activePet.name,
+    activePetDisplayName,
     completed,
     energyMode,
     nextOpenTask?.time,
     nextOpenTask?.title,
-    profile.petNickname,
     progressPercent,
     tasksLoaded,
     today,
@@ -823,9 +833,9 @@ export default function HomeScreen() {
     if (previousPetKeyRef.current !== currentPetKey) {
       previousPetKeyRef.current = currentPetKey;
       setUnlockedPet(strongestPet);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      void playPetUnlockFeedback(profile);
     }
-  }, [strongestPet, tasksLoaded]);
+  }, [profile, strongestPet, tasksLoaded]);
 
   useEffect(() => {
     if (!tasksLoaded) return;
@@ -992,8 +1002,6 @@ export default function HomeScreen() {
 
     const nextCompleted = !task.completed;
 
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
     await updateDoc(doc(db, "users", uid, "tasks", task.id), {
       completed: nextCompleted,
       status: nextCompleted ? "completed" : "pending",
@@ -1004,9 +1012,10 @@ export default function HomeScreen() {
 
     if (nextCompleted) {
       triggerCompletionBurst(task.title);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await playTaskCompleteFeedback(profile);
       await cancelTaskNotifications(task.id);
     } else {
+      await playSelectionFeedback(profile);
       await syncTaskNotifications({
         id: task.id,
         title: task.title,
@@ -1025,7 +1034,7 @@ export default function HomeScreen() {
 
     const isRecurringOccurrence = isRecurringSeriesTask(skipCandidate);
 
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    await playWarningFeedback(profile);
 
     await updateDoc(doc(db, "users", uid, "tasks", skipCandidate.id), {
       completed: false,
@@ -1052,7 +1061,7 @@ export default function HomeScreen() {
 
   const handleSetActivePet = async (pet: PetTier) => {
     await saveProfile({ activePetKey: pet.key });
-    await Haptics.selectionAsync();
+    await playSelectionFeedback(profile);
     setPetCollectionVisible(false);
   };
 
@@ -1684,7 +1693,13 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          scrollEventThrottle={16}
+        >
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={[styles.headerKicker, { color: colors.tint }]}>
@@ -1963,7 +1978,7 @@ export default function HomeScreen() {
                     Active Companion
                   </Text>
                   <Text style={[styles.petName, { color: colors.text }]}>
-                    {activePet.name}
+                    {activePetDisplayName}
                   </Text>
                   <Text style={[styles.petDescription, { color: colors.subtle }]}>
                     {activePet.description}
@@ -2023,7 +2038,7 @@ export default function HomeScreen() {
               />
               <View style={styles.petMoodCopy}>
                 <Text style={[styles.petMoodTitle, { color: colors.text }]}>
-                  {activePet.name} feels {petMood.title}
+                  {activePetDisplayName} feels {petMood.title}
                 </Text>
                 <Text style={[styles.petMoodBody, { color: colors.subtle }]}>
                   {petMood.body}
@@ -2504,7 +2519,7 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
 
-          <View style={{ height: 120 }} />
+          <View style={styles.bottomSpacer} />
         </ScrollView>
       </View>
 
@@ -3236,6 +3251,9 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  scrollContent: {
+    paddingBottom: 150,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -4502,5 +4520,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "900",
     marginTop: 4,
+  },
+  bottomSpacer: {
+    height: 16,
   },
 });

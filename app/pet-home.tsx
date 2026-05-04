@@ -9,6 +9,7 @@ import { useAppTheme } from "@/constants/appTheme";
 import {
   PET_TIERS,
   getActivePet,
+  getPetDisplayName,
   getPetProgress,
   getTaskXp,
   getUnlockedPets,
@@ -189,7 +190,11 @@ export default function PetHomeScreen() {
     };
   }, [profile.activePetKey, tasks]);
 
-  const activeName = profile.petNickname?.trim() || petData.activePet.name;
+  const activeName = getPetDisplayName(
+    petData.activePet,
+    profile.petNicknames,
+    profile.petNickname
+  );
   const activeHabitatKey = (profile.habitatStyle ?? "garden") as HabitatStyle;
   const activeHabitat =
     habitatStyles[activeHabitatKey] ?? habitatStyles.garden;
@@ -414,7 +419,11 @@ export default function PetHomeScreen() {
                 >
                   <PetSprite petKey={pet.key} size={50} style={styles.petTileSprite} />
                   <Text style={[styles.petTileName, { color: colors.text }]}>
-                    {pet.name}
+                    {getPetDisplayName(
+                      pet,
+                      profile.petNicknames,
+                      profile.petNickname
+                    )}
                   </Text>
                   <Text style={[styles.petTileMeta, { color: colors.subtle }]}>
                     {unlocked ? (active ? "Active" : "Unlocked") : `${pet.unlockXp} XP`}

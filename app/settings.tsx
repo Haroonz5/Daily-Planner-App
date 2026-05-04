@@ -25,6 +25,8 @@ import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { PetSprite } from "@/components/pet-sprite";
 import {
   getActivePet,
+  getPetDisplayName,
+  getPetNickname,
   getLevelData,
   getPetProgress,
   getTaskXp,
@@ -149,8 +151,7 @@ export default function SettingsScreen({
 
   useEffect(() => {
     setDisplayName(profile.displayName ?? "");
-    setPetNickname(profile.petNickname ?? "");
-  }, [profile.displayName, profile.petNickname]);
+  }, [profile.displayName]);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -198,6 +199,21 @@ export default function SettingsScreen({
       levelData,
     };
   }, [profile.activePetKey, tasks]);
+
+  const savedActivePetNickname = getPetNickname(
+    rewardData.activePet.key,
+    profile.petNicknames,
+    profile.petNickname
+  );
+  const activePetDisplayName = getPetDisplayName(
+    rewardData.activePet,
+    profile.petNicknames,
+    profile.petNickname
+  );
+
+  useEffect(() => {
+    setPetNickname(savedActivePetNickname);
+  }, [savedActivePetNickname]);
 
   const routineGroups = useMemo<RoutineGroup[]>(() => {
     const grouped = new Map<string, Task[]>();
@@ -251,7 +267,7 @@ export default function SettingsScreen({
 
   const profileDirty =
     displayName !== (profile.displayName ?? "") ||
-    petNickname !== (profile.petNickname ?? "");
+    petNickname !== savedActivePetNickname;
 
   const statusColor =
     statusTone === "success"
@@ -297,6 +313,7 @@ export default function SettingsScreen({
       await saveProfile({
         activePetKey: null,
         petNickname: null,
+        petNicknames: null,
         focusDurationMinutes: 25,
       });
       await refreshNotificationState(uid);
@@ -373,9 +390,16 @@ export default function SettingsScreen({
     setProfileSaving(true);
 
     try {
+      const nextPetNickname = petNickname.trim() || null;
+      const nextPetNicknames = {
+        ...(profile.petNicknames ?? {}),
+        [rewardData.activePet.key]: nextPetNickname,
+      };
+
       await saveProfile({
         displayName: displayName.trim() || null,
-        petNickname: petNickname.trim() || null,
+        petNickname: nextPetNickname,
+        petNicknames: nextPetNicknames,
       });
       let publicProfileSynced = true;
       if (auth.currentUser?.email) {
@@ -626,7 +650,7 @@ export default function SettingsScreen({
           {auth.currentUser?.email ?? "Signed in"}
         </Text>
         <Text style={[styles.profileHint, { color: colors.subtle }]}>
-          Active companion: {petNickname.trim() || rewardData.activePet.name}
+          Active companion: {activePetDisplayName}
         </Text>
 
         <Text style={[styles.inputLabel, { color: colors.subtle }]}>
@@ -677,6 +701,75 @@ export default function SettingsScreen({
             {profileSaving ? "Saving..." : "Save Profile"}
           </Text>
         </TouchableOpacity>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Feel & Feedback
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Tune the satisfying parts of the app: completion sounds, focus music,
+          and phone vibrations.
+        </Text>
+
+        <View style={styles.settingRows}>
+          {[
+            {
+              label: "Sound effects",
+              value: profile.soundEnabled !== false,
+              updates: { soundEnabled: profile.soundEnabled === false },
+            },
+            {
+              label: "Calm focus music",
+              value: profile.calmFocusMusicEnabled !== false,
+              updates: {
+                calmFocusMusicEnabled:
+                  profile.calmFocusMusicEnabled === false,
+              },
+            },
+            {
+              label: "Phone vibrations",
+              value: profile.hapticsEnabled !== false,
+              updates: { hapticsEnabled: profile.hapticsEnabled === false },
+            },
+          ].map((item) => (
+            <View
+              key={item.label}
+              style={[
+                styles.settingToggleRow,
+                { borderBottomColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.settingToggleLabel, { color: colors.text }]}>
+                {item.label}
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.settingToggleButton,
+                  {
+                    backgroundColor: item.value ? colors.tint : colors.surface,
+                    borderColor: item.value ? colors.tint : colors.border,
+                  },
+                ]}
+                onPress={() => saveProfile(item.updates)}
+              >
+                <Text
+                  style={[
+                    styles.settingToggleText,
+                    { color: item.value ? "#fff" : colors.subtle },
+                  ]}
+                >
+                  {item.value ? "On" : "Off"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
       </View>
 
       <View
@@ -934,6 +1027,13 @@ export default function SettingsScreen({
                 onPress={() => {
                   if (isUnlocked) {
                     saveProfile({ activePetKey: pet.key });
+                    setPetNickname(
+                      getPetNickname(
+                        pet.key,
+                        profile.petNicknames,
+                        profile.petNickname
+                      )
+                    );
                     setStatusTone("success");
                     setStatusMessage(
                       `${pet.name} is now your active companion.`
@@ -948,7 +1048,11 @@ export default function SettingsScreen({
                   style={styles.petCardSprite}
                 />
                 <Text style={[styles.petCardName, { color: colors.text }]}>
-                  {pet.name}
+                  {getPetDisplayName(
+                    pet,
+                    profile.petNicknames,
+                    profile.petNickname
+                  )}
                 </Text>
                 <Text style={[styles.petCardMeta, { color: colors.subtle }]}>
                   {isUnlocked

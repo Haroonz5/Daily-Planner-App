@@ -3,15 +3,20 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 
 import { auth, db } from "@/constants/firebaseConfig";
+import type { PetNicknameMap } from "@/constants/rewards";
 
 export type UserProfile = {
   activePetKey?: string | null;
   petNickname?: string | null;
+  petNicknames?: PetNicknameMap | null;
   displayName?: string | null;
   energyMode?: "light" | "steady" | "lockedIn" | null;
   focusDurationMinutes?: number | null;
   habitatStyle?: "garden" | "dojo" | "cosmic" | null;
   tutorialCompleted?: boolean | null;
+  soundEnabled?: boolean | null;
+  hapticsEnabled?: boolean | null;
+  calmFocusMusicEnabled?: boolean | null;
 };
 
 export function useUserProfile() {
