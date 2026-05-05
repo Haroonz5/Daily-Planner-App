@@ -24,10 +24,16 @@ service cloud.firestore {
         acceptedRequestBy(friendId, userId);
     }
 
+    function isFriend(userId, friendId) {
+      return isSignedIn() && hasFriendDoc(userId, friendId);
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
       match /tasks/{taskId} {
+        // Routines are stored on task docs through recurrenceGroupId, so owner-only
+        // task access protects normal tasks, future tasks, and rolling routines together.
         allow read, write: if isOwner(userId);
       }
 
@@ -60,7 +66,7 @@ service cloud.firestore {
     }
 
     match /publicProgress/{userId} {
-      allow read: if isOwner(userId) || hasFriendDoc(userId, request.auth.uid);
+      allow read: if isOwner(userId) || isFriend(userId, request.auth.uid);
       allow create, update: if isOwner(userId);
       allow delete: if isOwner(userId);
     }
@@ -80,6 +86,7 @@ service cloud.firestore {
         resource.data.recipientUid == request.auth.uid &&
         request.resource.data.requesterUid == resource.data.requesterUid &&
         request.resource.data.recipientUid == resource.data.recipientUid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.status in ["accepted", "declined"];
 
       allow delete: if isSignedIn() &&
@@ -98,7 +105,13 @@ service cloud.firestore {
         (hasFriendDoc(request.auth.uid, request.resource.data.toUid) ||
           hasFriendDoc(request.resource.data.toUid, request.auth.uid));
 
-      allow update, delete: if isSignedIn() &&
+      allow update: if isSignedIn() &&
+        (resource.data.fromUid == request.auth.uid ||
+          resource.data.toUid == request.auth.uid) &&
+        request.resource.data.fromUid == resource.data.fromUid &&
+        request.resource.data.toUid == resource.data.toUid;
+
+      allow delete: if isSignedIn() &&
         (resource.data.fromUid == request.auth.uid ||
           resource.data.toUid == request.auth.uid);
     }
@@ -113,7 +126,12 @@ service cloud.firestore {
         request.resource.data.participantUids is list &&
         request.resource.data.participantUids.size() == 2;
 
-      allow update, delete: if isSignedIn() &&
+      allow update: if isSignedIn() &&
+        request.auth.uid in resource.data.participantUids &&
+        request.resource.data.createdByUid == resource.data.createdByUid &&
+        request.resource.data.participantUids == resource.data.participantUids;
+
+      allow delete: if isSignedIn() &&
         request.auth.uid in resource.data.participantUids;
     }
   }

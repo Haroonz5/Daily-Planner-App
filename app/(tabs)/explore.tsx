@@ -52,6 +52,10 @@ import {
   syncTaskNotifications,
 } from "../../utils/notifications";
 import { ensureRollingRoutineTasks } from "../../utils/routines";
+import {
+  playSaveFeedback,
+  playSelectionFeedback,
+} from "../../utils/feedback";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Task = {
@@ -568,13 +572,14 @@ export default function AddTask() {
     setTime(nextTime);
   };
 
-  const applyTemplate = (template: TaskTemplate) => {
+  const applyTemplate = async (template: TaskTemplate) => {
     setTitle(template.title);
     setNotes(template.notes ?? "");
     setPriority(template.priority);
     setRecurrence(template.recurrence);
     applyTimePreset(template.time);
     setError("");
+    await playSelectionFeedback(profile);
     setSuccessMessage(`${template.title} template loaded.`);
     setTimeout(() => setSuccessMessage(""), 1800);
   };
@@ -600,6 +605,7 @@ export default function AddTask() {
 
     setCustomTemplates(nextTemplates);
     await AsyncStorage.setItem(TASK_TEMPLATES_KEY, JSON.stringify(nextTemplates));
+    await playSaveFeedback(profile);
     setError("");
     setSuccessMessage(`${nextTemplate.title} saved as a quick template.`);
     setTimeout(() => setSuccessMessage(""), 2200);
@@ -614,6 +620,7 @@ export default function AddTask() {
 
     setCustomTemplates(nextTemplates);
     await AsyncStorage.setItem(TASK_TEMPLATES_KEY, JSON.stringify(nextTemplates));
+    await playSelectionFeedback(profile);
     setSuccessMessage("Custom template removed.");
     setTimeout(() => setSuccessMessage(""), 1800);
   };

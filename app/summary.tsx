@@ -18,6 +18,7 @@ import {
   getDailyFeedback,
   type DailyFeedbackResult,
 } from "@/utils/ai";
+import { playShareFeedback } from "@/utils/feedback";
 import {
   cancelTaskNotifications,
   syncMorningSummaryNotification,
@@ -141,6 +142,7 @@ export default function SummaryScreen() {
     // I added this as a lightweight share card so progress can leave the app
     // without needing a native image-capture dependency yet.
     await Share.share({ message: shareCard });
+    await playShareFeedback(profile);
   };
   const reviewTasks = useMemo(
     () =>

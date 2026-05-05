@@ -48,6 +48,12 @@ import {
   type RoutineCoachResult,
 } from "@/utils/ai";
 import {
+  playRoutineFeedback,
+  playSaveFeedback,
+  playSelectionFeedback,
+  playWarningFeedback,
+} from "@/utils/feedback";
+import {
   cancelManyTaskNotifications,
   getScheduledNotificationAudit,
   getNotificationSettings,
@@ -99,6 +105,9 @@ type RoutineGroup = {
   totalCount: number;
   healthScore: number;
   healthLabel: string;
+  currentStreak: number;
+  bestStreak: number;
+  recentCompletionRate: number;
   tasks: Task[];
 };
 
@@ -284,6 +293,35 @@ export default function SettingsScreen({
             : healthScore >= 55
               ? "Needs tuning"
               : "High friction";
+        const attemptedTasks = sortedTasks.filter(
+          (task) =>
+            task.date <= today ||
+            task.completed ||
+            (task.status ?? "pending") === "skipped"
+        );
+        const recentTasks = attemptedTasks.slice(-7);
+        const recentCompleted = recentTasks.filter((task) => task.completed).length;
+        const recentCompletionRate = recentTasks.length
+          ? Math.round((recentCompleted / recentTasks.length) * 100)
+          : 0;
+        let currentStreak = 0;
+        for (const task of [...attemptedTasks].reverse()) {
+          if (task.completed) {
+            currentStreak += 1;
+            continue;
+          }
+          break;
+        }
+        let bestStreak = 0;
+        let runningStreak = 0;
+        attemptedTasks.forEach((task) => {
+          if (task.completed) {
+            runningStreak += 1;
+            bestStreak = Math.max(bestStreak, runningStreak);
+            return;
+          }
+          runningStreak = 0;
+        });
 
         return {
           id,
@@ -299,6 +337,9 @@ export default function SettingsScreen({
           totalCount: sortedTasks.length,
           healthScore,
           healthLabel,
+          currentStreak,
+          bestStreak,
+          recentCompletionRate,
           tasks: sortedTasks,
         };
       })
@@ -465,6 +506,7 @@ export default function SettingsScreen({
         });
       }
       if (publicProfileSynced) {
+        await playSaveFeedback(profile);
         setStatusTone("success");
         setStatusMessage(
           "Profile updated. Your app voice and companion name are saved."
@@ -523,11 +565,13 @@ export default function SettingsScreen({
     try {
       const notificationId = await scheduleQuickTestNotification();
       if (notificationId) {
+        await playSelectionFeedback(profile);
         setStatusTone("success");
         setStatusMessage(
           "Test reminder scheduled for about 5 seconds from now."
         );
       } else {
+        await playWarningFeedback(profile);
         setStatusTone("warning");
         setStatusMessage(
           "Notification permission is still off, so the test could not be sent."
@@ -562,6 +606,7 @@ export default function SettingsScreen({
       });
 
       setFeedbackText("");
+      await playSaveFeedback(profile);
       setStatusTone("success");
       setStatusMessage("Feedback sent. This will help polish the tester build.");
     } finally {
@@ -614,6 +659,7 @@ export default function SettingsScreen({
     await syncMorningSummaryNotification(uid);
     await refreshAudit();
 
+    await playWarningFeedback(profile);
     setStatusTone("success");
     setStatusMessage(
       `${routine.title} routine canceled. Future generated tasks were removed, and completed history stayed intact.`
@@ -675,6 +721,7 @@ export default function SettingsScreen({
     await syncMorningSummaryNotification(uid);
     await refreshAudit();
 
+    await playRoutineFeedback(profile);
     setStatusTone("success");
     setStatusMessage(`${routine.title} skipped once. The routine will keep going.`);
   };
@@ -727,6 +774,7 @@ export default function SettingsScreen({
     await syncMorningSummaryNotification(uid);
     await refreshAudit();
 
+    await playRoutineFeedback(profile);
     setStatusTone("success");
     setStatusMessage(`${routine.title} paused for one week.`);
   };
@@ -785,6 +833,7 @@ export default function SettingsScreen({
     await refreshAudit();
 
     setEditingRoutine(null);
+    await playSaveFeedback(profile);
     setStatusTone("success");
     setStatusMessage(`${nextTitle} routine updated.`);
   };
@@ -818,6 +867,7 @@ export default function SettingsScreen({
         ...current,
         [routine.id]: result,
       }));
+      await playSelectionFeedback(profile);
     } finally {
       setRoutineCoachBusyId(null);
     }
@@ -1039,7 +1089,10 @@ export default function SettingsScreen({
                     borderColor: item.value ? colors.tint : colors.border,
                   },
                 ]}
-                onPress={() => saveProfile(item.updates)}
+                onPress={async () => {
+                  await saveProfile(item.updates);
+                  await playSelectionFeedback(profile);
+                }}
               >
                 <Text
                   style={[
@@ -1257,11 +1310,16 @@ export default function SettingsScreen({
                       at {routine.time} · next{" "}
                       {getRelativeDateLabel(routine.nextDate)}
                     </Text>
-                    <Text style={[styles.routineMeta, { color: colors.subtle }]}>
-                      {routine.activeCount} open · {routine.completedCount} done ·{" "}
-                      {routine.skippedCount} skipped · refills ahead
-                    </Text>
-                  </View>
+                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                  {routine.activeCount} open · {routine.completedCount} done ·{" "}
+                  {routine.skippedCount} skipped · refills ahead
+                </Text>
+                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                  Current streak {routine.currentStreak} · best streak{" "}
+                  {routine.bestStreak} · last 7 rate{" "}
+                  {routine.recentCompletionRate}%
+                </Text>
+              </View>
 
                   <View
                     style={[

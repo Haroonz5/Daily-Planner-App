@@ -1077,6 +1077,7 @@ export default function HomeScreen() {
   const confirmProofCompletion = async () => {
     if (!proofCandidate) return;
     if (!proofNote.trim()) {
+      await playWarningFeedback(profile);
       setProofError("Add one honest proof note before completing a high-priority task.");
       return;
     }

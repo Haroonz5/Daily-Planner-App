@@ -6,7 +6,9 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { openTaskInGoogleCalendar } from "@/utils/calendar";
+import { playSelectionFeedback, playWarningFeedback } from "@/utils/feedback";
 import { formatDateKey, getRelativeDateLabel, parseTimeToMinutes } from "@/utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -52,6 +54,7 @@ const getCalendarDays = () => {
 export default function WeekScreen() {
   const router = useRouter();
   const { themeName } = useAppTheme();
+  const { profile } = useUserProfile();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
   const [calendarMessage, setCalendarMessage] = useState("");
@@ -129,6 +132,9 @@ export default function WeekScreen() {
 
   const handleAddToCalendar = async (task: Task) => {
     const opened = await openTaskInGoogleCalendar(task);
+    await (opened
+      ? playSelectionFeedback(profile)
+      : playWarningFeedback(profile));
     setCalendarMessage(
       opened
         ? `${task.title} opened in Google Calendar.`

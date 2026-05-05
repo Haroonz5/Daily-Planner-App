@@ -38,6 +38,9 @@ npm run qa:device
 npm run deploy:rules
 ```
 
+Also walk through `docs/PRODUCTION_CHECKLIST.md` before widening the tester
+group.
+
 Then confirm:
 
 - A task reminder appears once and shows the Complete action.

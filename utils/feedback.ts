@@ -77,6 +77,39 @@ export const playWarningFeedback = async (
   ).catch(() => {});
 };
 
+export const playSaveFeedback = async (preferences?: FeedbackPreferences) => {
+  // I added this lighter save feedback for settings/templates so small wins feel
+  // responsive without sounding as big as completing a task.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  }
+};
+
+export const playShareFeedback = async (preferences?: FeedbackPreferences) => {
+  // This connects the Summary share card to the same sound/haptic preferences
+  // the user controls in Settings.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    await Haptics.selectionAsync().catch(() => {});
+  }
+
+  await playAppSound("petUnlock", preferences, 0.28);
+};
+
+export const playRoutineFeedback = async (
+  preferences?: FeedbackPreferences
+) => {
+  // Routine actions are important but not task completions, so this uses a
+  // quieter version of the completion sound and a medium tap.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+      () => {}
+    );
+  }
+
+  await playAppSound("taskComplete", preferences, 0.34);
+};
+
 export const playTaskCompleteFeedback = async (
   preferences?: FeedbackPreferences
 ) => {

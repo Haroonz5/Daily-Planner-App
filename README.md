@@ -331,7 +331,10 @@ npm run web
 npm run lint
 npm run typecheck
 npm run qa
+npm run qa:device
+npm run release:check
 npm run ai:dev
+npm run deploy:rules
 npm run eas:preview
 npm run eas:simulator
 npm run eas:production
@@ -342,8 +345,8 @@ npm run eas:production
 Before sending the app to testers:
 
 ```bash
-npm run qa
-npx firebase-tools@latest deploy --only firestore:rules
+npm run release:check
+npm run deploy:rules
 ```
 
 Create an internal EAS build:
@@ -363,6 +366,7 @@ Tester instructions are in:
 
 ```txt
 docs/TESTER_HANDOFF.md
+docs/PRODUCTION_CHECKLIST.md
 ```
 
 ## Current Limitations

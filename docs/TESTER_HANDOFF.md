@@ -36,7 +36,7 @@ npm run qa
 Run the stronger device-readiness check:
 
 ```bash
-npm run qa:device
+npm run release:check
 ```
 
 Deploy Firestore rules after logging into Firebase:
