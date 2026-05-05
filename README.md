@@ -12,6 +12,7 @@ The goal is not just to be another to-do list. Daily Discipline combines task pl
 - AI daily feedback, pattern feedback, weekly review, and task breakdowns
 - Today dashboard with readiness score, energy mode, recovery missions, and adaptive rescheduling
 - Task scheduling for today, tomorrow, custom future dates, and recurring routines
+- Ongoing routine loops such as "gym every day except Sunday" without creating huge batches of future tasks
 - XP system with unlockable companion pets and custom pet sprites
 - Pet Home with habitat selection and companion progress
 - Focus Mode with Strict Focus app-switch strike tracking
@@ -59,7 +60,11 @@ Users unlock pets through XP and can choose an active companion. The Pet Home in
 
 ## AI Features
 
-The app includes a FastAPI backend with OpenAI support and local fallback logic.
+The app includes a FastAPI backend with Gemini/OpenAI support and local fallback logic.
+
+The mobile app never stores a Gemini or OpenAI key. Expo only points to the
+backend with `EXPO_PUBLIC_AI_API_URL`; the backend reads private keys from
+`ai/.env` locally or from secret environment variables when deployed.
 
 ### Natural-Language Task Input
 
@@ -72,6 +77,11 @@ Turns messy text into scheduled tasks with:
 - duration estimate
 - recurrence rule
 - notes
+
+Recurring tasks are stored as routine rules. For example, "go to the gym every
+day except Sunday at 6 PM" becomes one ongoing routine that creates the next
+needed task as the current one is completed or skipped, instead of dumping weeks
+of duplicate tasks into the app.
 
 ### Reality Check
 
@@ -116,7 +126,7 @@ into smaller scheduled steps with time estimates.
 - AsyncStorage
 - FastAPI
 - Python
-- OpenAI API
+- Gemini or OpenAI API
 - EAS Build
 - Render-ready Docker backend
 
@@ -242,12 +252,27 @@ pip install -r requirements.txt
 Create `ai/.env`:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+AI_PROVIDER=auto
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3-flash-preview
+OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
 ```
 
-If no OpenAI key is provided, the backend still uses local fallback logic.
+Keep Gemini/OpenAI keys only in the backend. The Expo app should only receive
+`EXPO_PUBLIC_AI_API_URL`, never a provider key. If no model key is provided, the
+backend still uses local fallback logic.
+
+Provider behavior:
+
+- `AI_PROVIDER=auto` uses Gemini first when `GEMINI_API_KEY` exists.
+- If Gemini is not configured, the backend tries OpenAI when `OPENAI_API_KEY` exists.
+- If neither key exists, the backend uses the built-in planner so the app still works.
+
+When publishing or sharing the app, do not commit `ai/.env` and do not place
+Gemini/OpenAI keys inside Expo `.env.local`, app code, GitHub, screenshots, or
+EAS public variables.
 
 ### 3. Run The Backend
 

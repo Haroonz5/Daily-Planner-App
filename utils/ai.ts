@@ -1,6 +1,9 @@
 import { formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
+// I added "gemini" here so the app can label real Gemini responses as AI
+// instead of accidentally showing them as the backend's local planner.
+export type AiSource = "openai" | "gemini" | "local" | "offline";
 
 export type AiExistingTask = {
   title: string;
@@ -26,7 +29,7 @@ export type ParsedAiTask = {
 export type ParseNaturalTasksResult = {
   tasks: ParsedAiTask[];
   warnings: string[];
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type RealityCheckSeverity = "clear" | "watch" | "overloaded";
@@ -39,7 +42,7 @@ export type RealityCheckResult = {
   warnings: string[];
   suggestions: string[];
   suggestedTrimTitles: string[];
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type AiRescheduleTask = AiExistingTask & {
@@ -57,7 +60,7 @@ export type AiRescheduleSuggestion = {
 export type AiRescheduleResult = {
   suggestions: AiRescheduleSuggestion[];
   summary: string;
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type AiHistoryTask = AiExistingTask & {
@@ -72,7 +75,7 @@ export type DailyFeedbackResult = {
   message: string;
   wins: string[];
   adjustments: string[];
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type PatternInsight = {
@@ -85,7 +88,7 @@ export type PatternInsight = {
 export type PatternFeedbackResult = {
   insights: PatternInsight[];
   summary: string;
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type WeeklyReviewResult = {
@@ -94,7 +97,7 @@ export type WeeklyReviewResult = {
   wins: string[];
   risks: string[];
   nextWeekFocus: string[];
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 export type TaskBreakdownStep = {
@@ -107,13 +110,18 @@ export type TaskBreakdownStep = {
 export type TaskBreakdownResult = {
   steps: TaskBreakdownStep[];
   summary: string;
-  source: "openai" | "local" | "offline";
+  source: AiSource;
 };
 
 const getAiApiUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_AI_API_URL;
   return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 };
+
+const normalizeAiSource = (source: unknown): Exclude<AiSource, "offline"> =>
+  // This connects the backend's source field to the UI. Unknown sources stay safe
+  // by falling back to "local" instead of crashing the task planner.
+  source === "openai" || source === "gemini" ? source : "local";
 
 const parseTimeToDate = (time: string) => {
   const match = time.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
@@ -461,7 +469,7 @@ export const parseNaturalTasks = async ({
         notes: String(task.notes ?? ""),
       })),
       warnings: (data.warnings ?? []).map(String),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -658,7 +666,7 @@ export const runRealityCheck = async ({
         data.suggestedTrimTitles ??
         []
       ).map(String),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -826,7 +834,7 @@ export const runAiReschedule = async ({
         reason: String(suggestion.reason ?? "Moved to a better open slot."),
       })),
       summary: String(data.summary ?? "I found cleaner reschedule slots."),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -978,7 +986,7 @@ export const getDailyFeedback = async ({
       message: String(data.message ?? "Review your day and adjust tomorrow."),
       wins: (data.wins ?? []).map(String),
       adjustments: (data.adjustments ?? []).map(String),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -1138,7 +1146,7 @@ export const getPatternFeedback = async ({
           : "medium") as PatternInsight["confidence"],
       })),
       summary: String(data.summary ?? "Pattern feedback ready."),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -1271,7 +1279,7 @@ export const getWeeklyReview = async ({
       nextWeekFocus: (data.next_week_focus ?? data.nextWeekFocus ?? []).map(
         String
       ),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();
@@ -1439,7 +1447,7 @@ export const breakDownTask = async ({
         notes: String(step.notes ?? ""),
       })),
       summary: String(data.summary ?? "Task breakdown ready."),
-      source: data.source === "openai" ? "openai" : "local",
+      source: normalizeAiSource(data.source),
     };
   } catch {
     return fallback();

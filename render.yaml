@@ -7,9 +7,15 @@ services:
     dockerfilePath: Dockerfile
     healthCheckPath: /health
     envVars:
+      - key: AI_PROVIDER
+        value: auto
+      - key: GEMINI_MODEL
+        value: gemini-3-flash-preview
       - key: OPENAI_MODEL
         value: gpt-4o-mini
       - key: AI_ALLOWED_ORIGINS
         value: "*"
+      - key: GEMINI_API_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false

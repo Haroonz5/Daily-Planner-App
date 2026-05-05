@@ -249,7 +249,7 @@ export default function SummaryScreen() {
           <Text style={[styles.feedbackSource, { color: colors.subtle }]}>
             {feedbackBusy
               ? "Checking"
-              : dailyFeedback?.source === "openai"
+              : dailyFeedback?.source === "openai" || dailyFeedback?.source === "gemini"
                 ? "AI"
                 : "Local"}
           </Text>

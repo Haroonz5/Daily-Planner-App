@@ -2273,7 +2273,7 @@ export default function HomeScreen() {
                   >
                     {patternBusy
                       ? "Live"
-                      : patternFeedback?.source === "openai"
+                      : patternFeedback?.source === "openai" || patternFeedback?.source === "gemini"
                         ? "AI"
                         : patternFeedback?.source === "offline"
                           ? "Offline"

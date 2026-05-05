@@ -27,6 +27,7 @@ import {
   breakDownTask,
   parseNaturalTasks,
   runRealityCheck,
+  type AiSource,
   type ParsedAiTask,
   type RealityCheckResult,
   type TaskBreakdownResult,
@@ -225,7 +226,7 @@ export default function AddTask() {
   const [parsedTasks, setParsedTasks] = useState<ParsedAiTask[]>([]);
   const [customTemplates, setCustomTemplates] = useState<TaskTemplate[]>([]);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
-  const [aiSource, setAiSource] = useState<"openai" | "local" | "offline" | null>(null);
+  const [aiSource, setAiSource] = useState<AiSource | null>(null);
   const [realityCheck, setRealityCheck] = useState<RealityCheckResult | null>(null);
   const [breakdown, setBreakdown] = useState<TaskBreakdownResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -1227,6 +1228,8 @@ export default function AddTask() {
             </TouchableOpacity>
           </View>
 
+          {/* I added this status card so we can tell whether the task plan came
+              from Gemini/OpenAI, the backend fallback, or the phone's offline planner. */}
           {(aiBusy || aiSource) && (
             <View
               style={[
@@ -1241,7 +1244,7 @@ export default function AddTask() {
               <Text style={[styles.aiStatusTitle, { color: colors.text }]}>
                 {aiBusy
                   ? "Building your task plan..."
-                  : aiSource === "openai"
+                  : aiSource === "openai" || aiSource === "gemini"
                     ? "AI plan ready"
                     : aiSource === "local"
                       ? "Backend planner used"
@@ -1250,10 +1253,10 @@ export default function AddTask() {
               <Text style={[styles.aiStatusBody, { color: colors.subtle }]}>
                 {aiBusy
                   ? "Checking the text, dates, times, and whether the day is realistic."
-                  : aiSource === "openai"
-                    ? "The backend AI understood your tasks and checked the schedule."
+                  : aiSource === "openai" || aiSource === "gemini"
+                    ? `The backend used ${aiSource === "gemini" ? "Gemini" : "OpenAI"} to understand your tasks and check the schedule.`
                     : aiSource === "local"
-                      ? "The AI backend is online. Add an OPENAI_API_KEY in ai/.env when you want OpenAI responses instead of the backend's built-in planner."
+                      ? "The backend is online but no model key is configured. Add GEMINI_API_KEY or OPENAI_API_KEY in ai/.env when you want model-powered responses."
                       : "Your tasks still work. To use the real backend on your phone, run the Python AI server and restart Expo with npm run start:ai."}
               </Text>
             </View>
@@ -1267,8 +1270,10 @@ export default function AddTask() {
                 </Text>
                 {aiSource ? (
                   <Text style={[styles.aiSourceText, { color: colors.subtle }]}>
-                    {aiSource === "openai"
-                      ? "AI"
+                    {aiSource === "openai" || aiSource === "gemini"
+                      ? aiSource === "gemini"
+                        ? "Gemini"
+                        : "AI"
                       : aiSource === "offline"
                         ? "Offline"
                         : "Backend"} planner
@@ -1566,7 +1571,9 @@ export default function AddTask() {
 
             {breakdown ? (
               <Text style={[styles.breakdownSource, { color: colors.subtle }]}>
-                {breakdown.source === "openai" ? "AI" : "Local"}
+                {breakdown.source === "openai" || breakdown.source === "gemini"
+                  ? "AI"
+                  : "Local"}
               </Text>
             ) : null}
           </View>

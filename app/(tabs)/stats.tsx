@@ -671,7 +671,7 @@ export default function StatsScreen() {
             <Text style={[styles.weeklyReviewPillText, { color: colors.subtle }]}>
               {weeklyReviewBusy
                 ? "Live"
-                : weeklyReview?.source === "openai"
+                : weeklyReview?.source === "openai" || weeklyReview?.source === "gemini"
                   ? "AI"
                   : weeklyReview?.source === "offline"
                     ? "Offline"

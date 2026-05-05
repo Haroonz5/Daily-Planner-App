@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -14,6 +16,10 @@ load_dotenv()
 
 Priority = Literal["Low", "Medium", "High"]
 Recurrence = Literal["none", "daily", "weekdays", "weekly", "custom"]
+# I added Gemini as a real AI source so the app can show where the response
+# came from instead of treating every non-OpenAI response like a local fallback.
+AiSource = Literal["openai", "gemini", "local"]
+RemoteAiSource = Literal["openai", "gemini"]
 
 
 class ExistingTask(BaseModel):
@@ -45,7 +51,7 @@ class ParsedTask(BaseModel):
 class ParseTasksResponse(BaseModel):
     tasks: list[ParsedTask]
     warnings: list[str] = Field(default_factory=list)
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class RealityTask(BaseModel):
@@ -73,7 +79,7 @@ class RealityCheckResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
     suggested_trim_titles: list[str] = Field(default_factory=list)
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class RescheduleTask(BaseModel):
@@ -105,7 +111,7 @@ class RescheduleSuggestion(BaseModel):
 class RescheduleResponse(BaseModel):
     suggestions: list[RescheduleSuggestion]
     summary: str
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class FeedbackTask(BaseModel):
@@ -133,7 +139,7 @@ class DailyFeedbackResponse(BaseModel):
     message: str
     wins: list[str] = Field(default_factory=list)
     adjustments: list[str] = Field(default_factory=list)
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class PatternInsight(BaseModel):
@@ -152,7 +158,7 @@ class PatternFeedbackRequest(BaseModel):
 class PatternFeedbackResponse(BaseModel):
     insights: list[PatternInsight]
     summary: str
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class WeeklyReviewRequest(BaseModel):
@@ -169,7 +175,7 @@ class WeeklyReviewResponse(BaseModel):
     wins: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     next_week_focus: list[str] = Field(default_factory=list)
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 class BreakdownRequest(BaseModel):
@@ -193,7 +199,7 @@ class BreakdownStep(BaseModel):
 class BreakdownResponse(BaseModel):
     steps: list[BreakdownStep]
     summary: str
-    source: Literal["openai", "local"]
+    source: AiSource
 
 
 TASK_SCHEMA = {
@@ -261,6 +267,153 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _configured_remote_sources() -> list[RemoteAiSource]:
+    # This keeps the secret model keys on the backend. The phone app only calls
+    # this API, and this backend decides whether to use Gemini, OpenAI, or local logic.
+    provider = os.getenv("AI_PROVIDER", "auto").strip().lower()
+
+    if provider in ("local", "offline", "none"):
+        return []
+    if provider in ("gemini", "google"):
+        return ["gemini"] if _gemini_api_key() else []
+    if provider == "openai":
+        return ["openai"] if os.getenv("OPENAI_API_KEY") else []
+
+    sources: list[RemoteAiSource] = []
+    if _gemini_api_key():
+        sources.append("gemini")
+    if os.getenv("OPENAI_API_KEY"):
+        sources.append("openai")
+    return sources
+
+
+def _gemini_api_key() -> str | None:
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+
+def _json_from_model_text(text: str) -> dict | None:
+    # AI models sometimes wrap JSON in Markdown, so I clean that up here before
+    # the response connects back into the same Pydantic models the app already uses.
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if fenced:
+        try:
+            data = json.loads(fenced.group(1))
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            data = json.loads(cleaned[start : end + 1])
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+    return None
+
+
+def _openai_json(system_prompt: str, prompt: dict) -> dict | None:
+    # This is the OpenAI path. It returns plain JSON so every AI feature can share
+    # the same parsing/validation flow no matter which provider is active.
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        response = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(prompt)},
+            ],
+        )
+        return _json_from_model_text(response.choices[0].message.content or "{}")
+    except Exception:
+        return None
+
+
+def _gemini_json(system_prompt: str, prompt: dict) -> dict | None:
+    # I added this Gemini path so the backend can use the key from ai/.env without
+    # ever exposing it inside Expo, GitHub, or the mobile app bundle.
+    api_key = _gemini_api_key()
+    if not api_key:
+        return None
+
+    model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview").removeprefix("models/")
+    timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "18"))
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            f"{system_prompt}\n\n"
+                            "Return only valid JSON. Do not wrap it in Markdown.\n\n"
+                            f"Input:\n{json.dumps(prompt)}"
+                        )
+                    }
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": float(os.getenv("AI_TEMPERATURE", "0.2")),
+            "responseMimeType": "application/json",
+        },
+    }
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "".join(str(part.get("text", "")) for part in parts)
+        return _json_from_model_text(text)
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError, IndexError):
+        return None
+
+
+def _remote_ai_json(system_prompt: str, prompt: dict) -> tuple[RemoteAiSource, dict] | None:
+    # This is the shared AI gateway. Every endpoint below can ask for model output,
+    # and if Gemini/OpenAI is unavailable the endpoint safely falls back to local logic.
+    for source in _configured_remote_sources():
+        data = (
+            _gemini_json(system_prompt, prompt)
+            if source == "gemini"
+            else _openai_json(system_prompt, prompt)
+        )
+        if data is not None:
+            return source, data
+    return None
 
 
 def _safe_zoneinfo(timezone: str) -> ZoneInfo:
@@ -644,17 +797,12 @@ def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
     return ParseTasksResponse(tasks=parsed_tasks, warnings=warnings, source="local")
 
 
-def _openai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
+def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        now = request.now or datetime.now(ZoneInfo(request.timezone)).isoformat()
+        # I route natural-language planning through the shared AI gateway here.
+        # If the model understands "gym every day except Sunday", this returns one
+        # recurring rule that connects to the app's routine system instead of bulk tasks.
+        now = request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat()
         prompt = {
             "user_text": request.text,
             "default_date": request.default_date,
@@ -662,45 +810,34 @@ def _openai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             "now": now,
             "existing_tasks": [task.model_dump() for task in request.existing_tasks],
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You parse natural language into Daily Discipline tasks. "
-                        "Return only JSON matching this shape: "
-                        '{"tasks":[{"title":"Gym","date":"YYYY-MM-DD","time":"6:00 PM",'
-                        '"priority":"Low|Medium|High","duration_minutes":60,'
-                        '"recurrence":"none|daily|weekdays|weekly|custom",'
-                        '"recurrence_days":[1,2,3,4],"notes":""}],"warnings":[]}. '
-                        "Use the provided default_date when no date is stated. "
-                        "If the user says every day, everyday, or daily, set recurrence to daily. "
-                        "If the user says weekdays or Monday to Friday, set recurrence to weekdays. "
-                        "If the user says weekly or every week, set recurrence to weekly. "
-                        "If the user gives specific days like Mon-Thu, Monday through Thursday, "
-                        "or only Monday and Wednesday, set recurrence to custom and use recurrence_days "
-                        "with 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. "
-                        "Use [] for recurrence_days unless recurrence is custom. "
-                        "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
-                        "Keep titles short and action-oriented. Do not invent tasks."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(prompt),
-                },
-            ],
+        system_prompt = (
+            "You parse natural language into Daily Discipline tasks. "
+            "Return only JSON matching this shape: "
+            '{"tasks":[{"title":"Gym","date":"YYYY-MM-DD","time":"6:00 PM",'
+            '"priority":"Low|Medium|High","duration_minutes":60,'
+            '"recurrence":"none|daily|weekdays|weekly|custom",'
+            '"recurrence_days":[1,2,3,4],"notes":""}],"warnings":[]}. '
+            "Use the provided default_date when no date is stated. "
+            "If the user says every day, everyday, or daily, set recurrence to daily. "
+            "If the user says weekdays or Monday to Friday, set recurrence to weekdays. "
+            "If the user says weekly or every week, set recurrence to weekly. "
+            "If the user gives specific days like Mon-Thu, Monday through Thursday, "
+            "or only Monday and Wednesday, set recurrence to custom and use recurrence_days "
+            "with 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. "
+            "If the user says every day except Sunday, use custom with [1,2,3,4,5,6]. "
+            "Use [] for recurrence_days unless recurrence is custom. "
+            "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
+            "Keep titles short and action-oriented. Do not invent tasks."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        content = response.choices[0].message.content or "{}"
-        data = json.loads(content)
+        source, data = result
         tasks = [ParsedTask(**task) for task in data.get("tasks", [])]
         warnings = [str(warning) for warning in data.get("warnings", [])]
 
-        return ParseTasksResponse(tasks=tasks, warnings=warnings, source="openai")
+        return ParseTasksResponse(tasks=tasks, warnings=warnings, source=source)
     except Exception:
         return None
 
@@ -826,20 +963,12 @@ def _local_reality_check(request: RealityCheckRequest) -> RealityCheckResponse:
     )
 
 
-def _openai_reality_check(
+def _ai_reality_check(
     request: RealityCheckRequest,
     baseline: RealityCheckResponse,
 ) -> RealityCheckResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        now = request.now or datetime.now(ZoneInfo(request.timezone)).isoformat()
+        now = request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat()
         prompt = {
             "now": now,
             "timezone": request.timezone,
@@ -847,27 +976,19 @@ def _openai_reality_check(
             "existing_tasks": [task.model_dump() for task in request.existing_tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the reality-check coach for Daily Discipline. "
-                        "Use the baseline numbers as truth. Return only JSON with: "
-                        '{"severity":"clear|watch|overloaded","summary":"short direct sentence",'
-                        '"warnings":["specific issue"],"suggestions":["specific action"],'
-                        '"suggested_trim_titles":["task title"]}. '
-                        "Be honest, practical, and concise. Do not be motivational fluff."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You are the reality-check coach for Daily Discipline. "
+            "Use the baseline numbers as truth. Return only JSON with: "
+            '{"severity":"clear|watch|overloaded","summary":"short direct sentence",'
+            '"warnings":["specific issue"],"suggestions":["specific action"],'
+            '"suggested_trim_titles":["task title"]}. '
+            "Be honest, practical, and concise. Do not be motivational fluff."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         severity = data.get("severity", baseline.severity)
         if severity not in ("clear", "watch", "overloaded"):
             severity = baseline.severity
@@ -888,7 +1009,7 @@ def _openai_reality_check(
                     baseline.suggested_trim_titles,
                 )
             ][:3],
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1003,19 +1124,14 @@ def _local_reschedule(request: RescheduleRequest) -> RescheduleResponse:
     return RescheduleResponse(suggestions=suggestions, summary=summary, source="local")
 
 
-def _openai_reschedule(
+def _ai_reschedule(
     request: RescheduleRequest,
     baseline: RescheduleResponse,
 ) -> RescheduleResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or not baseline.suggestions:
+    if not baseline.suggestions:
         return None
 
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         now = request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat()
         prompt = {
             "now": now,
@@ -1024,27 +1140,19 @@ def _openai_reschedule(
             "existing_tasks": [task.model_dump() for task in request.existing_tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the AI rescheduler for Daily Discipline. "
-                        "Use the baseline suggested_time values as the safe schedule unless "
-                        "there is a clear conflict. Return only JSON with: "
-                        '{"summary":"one direct sentence","suggestions":[{"task_id":"id",'
-                        '"title":"task title","suggested_time":"7:30 PM","reason":"short reason"}]}. '
-                        "Keep every missed task id exactly once. Be practical, not fluffy."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You are the AI rescheduler for Daily Discipline. "
+            "Use the baseline suggested_time values as the safe schedule unless "
+            "there is a clear conflict. Return only JSON with: "
+            '{"summary":"one direct sentence","suggestions":[{"task_id":"id",'
+            '"title":"task title","suggested_time":"7:30 PM","reason":"short reason"}]}. '
+            "Keep every missed task id exactly once. Be practical, not fluffy."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         baseline_by_id = {
             suggestion.task_id: suggestion for suggestion in baseline.suggestions
         }
@@ -1075,7 +1183,7 @@ def _openai_reschedule(
         return RescheduleResponse(
             suggestions=suggestions,
             summary=str(data.get("summary") or baseline.summary),
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1160,19 +1268,11 @@ def _local_daily_feedback(request: DailyFeedbackRequest) -> DailyFeedbackRespons
     )
 
 
-def _openai_daily_feedback(
+def _ai_daily_feedback(
     request: DailyFeedbackRequest,
     baseline: DailyFeedbackResponse,
 ) -> DailyFeedbackResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         prompt = {
             "date": request.date,
             "timezone": request.timezone,
@@ -1180,26 +1280,18 @@ def _openai_daily_feedback(
             "tasks": [task.model_dump() for task in request.tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You write Daily Discipline end-of-day feedback. "
-                        "Use the task data and baseline as truth. Return only JSON with: "
-                        '{"headline":"short title","message":"2 concise sentences max",'
-                        '"wins":["specific win"],"adjustments":["specific next adjustment"]}. '
-                        "Be direct, personal, and practical. No generic motivational fluff."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You write Daily Discipline end-of-day feedback. "
+            "Use the task data and baseline as truth. Return only JSON with: "
+            '{"headline":"short title","message":"2 concise sentences max",'
+            '"wins":["specific win"],"adjustments":["specific next adjustment"]}. '
+            "Be direct, personal, and practical. No generic motivational fluff."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         return DailyFeedbackResponse(
             headline=str(data.get("headline") or baseline.headline),
             message=str(data.get("message") or baseline.message),
@@ -1207,7 +1299,7 @@ def _openai_daily_feedback(
             adjustments=[
                 str(item) for item in data.get("adjustments", baseline.adjustments)
             ][:3],
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1332,46 +1424,30 @@ def _local_pattern_feedback(request: PatternFeedbackRequest) -> PatternFeedbackR
     )
 
 
-def _openai_pattern_feedback(
+def _ai_pattern_feedback(
     request: PatternFeedbackRequest,
     baseline: PatternFeedbackResponse,
 ) -> PatternFeedbackResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         prompt = {
             "timezone": request.timezone,
             "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
             "tasks": [task.model_dump() for task in request.tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You generate behavior pattern feedback for Daily Discipline. "
-                        "Use task history and the baseline as truth. Return only JSON with: "
-                        '{"summary":"short sentence","insights":[{"title":"short title",'
-                        '"body":"specific observation","action":"specific next action",'
-                        '"confidence":"low|medium|high"}]}. '
-                        "No generic motivation. Point to patterns in timing, skips, reschedules, or task types."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You generate behavior pattern feedback for Daily Discipline. "
+            "Use task history and the baseline as truth. Return only JSON with: "
+            '{"summary":"short sentence","insights":[{"title":"short title",'
+            '"body":"specific observation","action":"specific next action",'
+            '"confidence":"low|medium|high"}]}. '
+            "No generic motivation. Point to patterns in timing, skips, reschedules, or task types."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         insights = []
         for item in data.get("insights", [])[:3]:
             confidence = item.get("confidence", "medium")
@@ -1392,7 +1468,7 @@ def _openai_pattern_feedback(
         return PatternFeedbackResponse(
             insights=insights,
             summary=str(data.get("summary") or baseline.summary),
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1476,19 +1552,11 @@ def _local_weekly_review(request: WeeklyReviewRequest) -> WeeklyReviewResponse:
     )
 
 
-def _openai_weekly_review(
+def _ai_weekly_review(
     request: WeeklyReviewRequest,
     baseline: WeeklyReviewResponse,
 ) -> WeeklyReviewResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         prompt = {
             "week_start": request.week_start,
             "week_end": request.week_end,
@@ -1497,27 +1565,19 @@ def _openai_weekly_review(
             "tasks": [task.model_dump() for task in request.tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You write a weekly review for Daily Discipline. "
-                        "Use the task data and baseline as truth. Return only JSON with: "
-                        '{"headline":"short title","summary":"2 concise sentences max",'
-                        '"wins":["specific win"],"risks":["specific risk"],'
-                        '"next_week_focus":["specific action"]}. '
-                        "Be direct, useful, and non-generic."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You write a weekly review for Daily Discipline. "
+            "Use the task data and baseline as truth. Return only JSON with: "
+            '{"headline":"short title","summary":"2 concise sentences max",'
+            '"wins":["specific win"],"risks":["specific risk"],'
+            '"next_week_focus":["specific action"]}. '
+            "Be direct, useful, and non-generic."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         return WeeklyReviewResponse(
             headline=str(data.get("headline") or baseline.headline),
             summary=str(data.get("summary") or baseline.summary),
@@ -1530,7 +1590,7 @@ def _openai_weekly_review(
                     baseline.next_week_focus,
                 )
             ][:3],
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1631,19 +1691,11 @@ def _local_breakdown(request: BreakdownRequest) -> BreakdownResponse:
     )
 
 
-def _openai_breakdown(
+def _ai_breakdown(
     request: BreakdownRequest,
     baseline: BreakdownResponse,
 ) -> BreakdownResponse | None:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-
     try:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         prompt = {
             "title": request.title,
             "notes": request.notes,
@@ -1655,26 +1707,18 @@ def _openai_breakdown(
             "existing_tasks": [task.model_dump() for task in request.existing_tasks],
             "baseline": baseline.model_dump(),
         }
-
-        response = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You break one vague productivity task into 2-5 concrete subtasks. "
-                        "Return only JSON with: "
-                        '{"summary":"short sentence","steps":[{"title":"specific action",'
-                        '"duration_minutes":25,"priority":"Low|Medium|High","notes":"short note"}]}. '
-                        "Each title must be action-oriented and short. Do not create filler."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(prompt)},
-            ],
+        system_prompt = (
+            "You break one vague productivity task into 2-5 concrete subtasks. "
+            "Return only JSON with: "
+            '{"summary":"short sentence","steps":[{"title":"specific action",'
+            '"duration_minutes":25,"priority":"Low|Medium|High","notes":"short note"}]}. '
+            "Each title must be action-oriented and short. Do not create filler."
         )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
 
-        data = json.loads(response.choices[0].message.content or "{}")
+        source, data = result
         raw_steps = data.get("steps", [])
         steps = []
 
@@ -1700,7 +1744,7 @@ def _openai_breakdown(
         return BreakdownResponse(
             steps=steps,
             summary=str(data.get("summary") or baseline.summary),
-            source="openai",
+            source=source,
         )
     except Exception:
         return None
@@ -1713,7 +1757,7 @@ def health():
 
 @app.post("/v1/parse-tasks", response_model=ParseTasksResponse)
 def parse_tasks(request: ParseTasksRequest):
-    parsed = _openai_parse(request)
+    parsed = _ai_parse(request)
     if parsed:
         return parsed
     return _local_parse(request)
@@ -1722,40 +1766,40 @@ def parse_tasks(request: ParseTasksRequest):
 @app.post("/v1/reality-check", response_model=RealityCheckResponse)
 def reality_check(request: RealityCheckRequest):
     baseline = _local_reality_check(request)
-    checked = _openai_reality_check(request, baseline)
+    checked = _ai_reality_check(request, baseline)
     return checked or baseline
 
 
 @app.post("/v1/reschedule", response_model=RescheduleResponse)
 def reschedule(request: RescheduleRequest):
     baseline = _local_reschedule(request)
-    ai_suggestion = _openai_reschedule(request, baseline)
+    ai_suggestion = _ai_reschedule(request, baseline)
     return ai_suggestion or baseline
 
 
 @app.post("/v1/daily-feedback", response_model=DailyFeedbackResponse)
 def daily_feedback(request: DailyFeedbackRequest):
     baseline = _local_daily_feedback(request)
-    ai_feedback = _openai_daily_feedback(request, baseline)
+    ai_feedback = _ai_daily_feedback(request, baseline)
     return ai_feedback or baseline
 
 
 @app.post("/v1/pattern-feedback", response_model=PatternFeedbackResponse)
 def pattern_feedback(request: PatternFeedbackRequest):
     baseline = _local_pattern_feedback(request)
-    ai_feedback = _openai_pattern_feedback(request, baseline)
+    ai_feedback = _ai_pattern_feedback(request, baseline)
     return ai_feedback or baseline
 
 
 @app.post("/v1/weekly-review", response_model=WeeklyReviewResponse)
 def weekly_review(request: WeeklyReviewRequest):
     baseline = _local_weekly_review(request)
-    ai_review = _openai_weekly_review(request, baseline)
+    ai_review = _ai_weekly_review(request, baseline)
     return ai_review or baseline
 
 
 @app.post("/v1/breakdown-task", response_model=BreakdownResponse)
 def breakdown_task(request: BreakdownRequest):
     baseline = _local_breakdown(request)
-    ai_breakdown = _openai_breakdown(request, baseline)
+    ai_breakdown = _ai_breakdown(request, baseline)
     return ai_breakdown or baseline

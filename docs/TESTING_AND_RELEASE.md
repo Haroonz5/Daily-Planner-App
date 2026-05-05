@@ -56,15 +56,18 @@ Render path:
 render.yaml
 ```
 
-Required environment variable:
+Required environment variable for model-powered AI:
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 Optional:
 
 ```env
+AI_PROVIDER=auto
+GEMINI_MODEL=gemini-3-flash-preview
+OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
 ```
