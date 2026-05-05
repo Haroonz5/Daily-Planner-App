@@ -21,9 +21,9 @@ import {
 } from "@/constants/appTheme";
 import { AppThemeName, Colors } from "@/constants/theme";
 import {
-  completeTaskFromNotificationResponse,
   configureTaskNotificationActions,
   ensureBaseReminders,
+  handleTaskNotificationResponse,
 } from "../utils/notifications";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -112,7 +112,7 @@ export default function RootLayout() {
 
     const responseSubscription =
       Notifications.addNotificationResponseReceivedListener((response) => {
-        completeTaskFromNotificationResponse(response).catch(() => {});
+        handleTaskNotificationResponse(response).catch(() => {});
       });
 
     return () => {
@@ -126,7 +126,7 @@ export default function RootLayout() {
     const response = Notifications.getLastNotificationResponse();
     if (!response) return;
 
-    completeTaskFromNotificationResponse(response)
+    handleTaskNotificationResponse(response)
       .then((handled) => {
         if (handled) Notifications.clearLastNotificationResponse();
       })

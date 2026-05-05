@@ -238,6 +238,25 @@ const getLocalRecurrenceDetails = (
     }
   }
 
+  const exceptMatch = lower.match(
+    new RegExp(
+      `\\b(?:every\\s+day|everyday|daily|each\\s+day)\\s+(?:except|not|excluding|besides)\\s+${weekdayPattern}\\b`,
+      "i"
+    )
+  );
+
+  if (exceptMatch) {
+    const excludedDay = parseWeekdayToken(exceptMatch[1]);
+    if (excludedDay !== null) {
+      return {
+        recurrence: "custom",
+        recurrenceDays: [0, 1, 2, 3, 4, 5, 6].filter(
+          (day) => day !== excludedDay
+        ),
+      };
+    }
+  }
+
   if (/\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b/.test(lower)) {
     return { recurrence: "weekdays", recurrenceDays: null };
   }

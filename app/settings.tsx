@@ -544,8 +544,25 @@ export default function SettingsScreen({
 
     const batch = writeBatch(db);
 
-    targets.forEach((task) => {
-      batch.delete(doc(db, "users", uid, "tasks", task.id));
+    routine.tasks.forEach((task) => {
+      const taskRef = doc(db, "users", uid, "tasks", task.id);
+
+      if (
+        task.date >= today &&
+        !task.completed &&
+        (task.status ?? "pending") !== "skipped"
+      ) {
+        batch.delete(taskRef);
+        return;
+      }
+
+      batch.update(taskRef, {
+        recurrence: "none",
+        recurrenceGroupId: null,
+        recurrenceDays: null,
+        rollingRoutine: false,
+        routineCanceledAt: new Date(),
+      });
     });
 
     await cancelManyTaskNotifications(targets.map((task) => task.id));
@@ -555,20 +572,25 @@ export default function SettingsScreen({
 
     setStatusTone("success");
     setStatusMessage(
-      `${routine.title} routine ended. Completed history stayed intact.`
+      `${routine.title} routine canceled. Future generated tasks were removed, and completed history stayed intact.`
     );
   };
 
   const confirmEndRoutine = (routine: RoutineGroup) => {
+    const routineLabel = `${routine.title} ${formatRecurrenceLabel(
+      routine.recurrence,
+      routine.recurrenceDays
+    ).toLowerCase()}`;
+
     Alert.alert(
-      "End this routine?",
-      `This removes ${routine.activeCount} open or future task${
+      `Cancel ${routine.title}?`,
+      `This deletes the ongoing "${routineLabel}" routine by removing ${routine.activeCount} open or future task${
         routine.activeCount === 1 ? "" : "s"
-      } for ${routine.title}. Completed history stays in your stats.`,
+      }. Completed history stays in your stats.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "End Routine",
+          text: `Delete ${routine.title} Routine`,
           style: "destructive",
           onPress: () => {
             void endRoutine(routine);
@@ -615,6 +637,44 @@ export default function SettingsScreen({
               Routines
             </Text>
           </View>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Calendar, Widgets & Lock Screen
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          The app now writes richer widget summary data, supports Complete and
+          Snooze actions from task notifications, and can export individual
+          tasks to Google Calendar from the Week Planner.
+        </Text>
+
+        <View
+          style={[
+            styles.emptySettingsCard,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+            Native feature readiness
+          </Text>
+          <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+            Full iPhone home-screen widgets and direct Apple Calendar writes
+            need a development or production build. Expo Go can still test the
+            app-side data, week view, and reminder actions.
+          </Text>
+          <TouchableOpacity
+            style={[styles.inlineActionButton, { backgroundColor: colors.tint }]}
+            onPress={() => router.push("/week" as never)}
+          >
+            <Text style={styles.inlineActionText}>Open Week Planner</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -944,8 +1004,8 @@ export default function SettingsScreen({
           Routine Manager
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
-          See repeating plans in one place. End a routine when it no longer fits
-          without deleting completed history.
+          See ongoing plans in one place. Cancel a routine like &quot;gym
+          every day except Sunday&quot; without deleting completed history.
         </Text>
 
         {routineGroups.length > 0 ? (
@@ -972,7 +1032,7 @@ export default function SettingsScreen({
                 <Text style={[styles.routineMeta, { color: colors.subtle }]}>
                   {routine.activeCount} open repeat
                   {routine.activeCount === 1 ? "" : "s"} ·{" "}
-                  {routine.completedCount} completed
+                  {routine.completedCount} completed · refills ahead
                 </Text>
               </View>
 
@@ -984,7 +1044,7 @@ export default function SettingsScreen({
                 onPress={() => confirmEndRoutine(routine)}
               >
                 <Text style={[styles.routineEndText, { color: colors.warning }]}>
-                  End
+                  Cancel All
                 </Text>
               </TouchableOpacity>
             </View>

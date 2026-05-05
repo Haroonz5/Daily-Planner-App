@@ -25,6 +25,46 @@ type TutorialSlide = {
   steps: string[];
 };
 
+type PlanningGoal = "school" | "fitness" | "work" | "discipline" | "wellness";
+
+const planningGoals: {
+  key: PlanningGoal;
+  label: string;
+  body: string;
+  energyMode: "light" | "steady" | "lockedIn";
+}[] = [
+  {
+    key: "school",
+    label: "School",
+    body: "Study blocks, exams, assignments, and clean routines.",
+    energyMode: "steady",
+  },
+  {
+    key: "fitness",
+    label: "Fitness",
+    body: "Gym consistency, recovery, meals, and daily movement.",
+    energyMode: "lockedIn",
+  },
+  {
+    key: "work",
+    label: "Work",
+    body: "Deep work, deadlines, admin, and focused execution.",
+    energyMode: "steady",
+  },
+  {
+    key: "discipline",
+    label: "Discipline",
+    body: "Harder standards, fewer excuses, and honest follow-through.",
+    energyMode: "lockedIn",
+  },
+  {
+    key: "wellness",
+    label: "Wellness",
+    body: "Lighter planning, steady habits, and less overload.",
+    energyMode: "light",
+  },
+];
+
 const tutorialSlides: TutorialSlide[] = [
   {
     label: "Home",
@@ -77,6 +117,7 @@ export default function TutorialScreen() {
   const { saveProfile } = useUserProfile();
   const colors = Colors[themeName];
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [selectedGoal, setSelectedGoal] = useState<PlanningGoal>("discipline");
   const [isSaving, setIsSaving] = useState(false);
 
   const slide = tutorialSlides[currentSlide];
@@ -89,7 +130,12 @@ export default function TutorialScreen() {
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
       () => {}
     );
-    await saveProfile({ tutorialCompleted: true });
+    const goal = planningGoals.find((item) => item.key === selectedGoal);
+    await saveProfile({
+      tutorialCompleted: true,
+      planningGoal: selectedGoal,
+      energyMode: goal?.energyMode ?? "steady",
+    });
     router.replace("/(tabs)");
   };
 
@@ -180,6 +226,55 @@ export default function TutorialScreen() {
           <Text style={[styles.description, { color: colors.subtle }]}>
             {slide.description}
           </Text>
+
+          {currentSlide === 0 && (
+            <View style={styles.goalWrap}>
+              <Text style={[styles.goalTitle, { color: colors.text }]}>
+                What are you building first?
+              </Text>
+              {planningGoals.map((goal) => {
+                const selected = selectedGoal === goal.key;
+
+                return (
+                  <TouchableOpacity
+                    key={goal.key}
+                    style={[
+                      styles.goalOption,
+                      {
+                        backgroundColor: selected ? colors.tint : colors.surface,
+                        borderColor: selected ? colors.tint : colors.border,
+                      },
+                    ]}
+                    onPress={async () => {
+                      setSelectedGoal(goal.key);
+                      await Haptics.selectionAsync().catch(() => {});
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.goalLabel,
+                        { color: selected ? "#fff" : colors.text },
+                      ]}
+                    >
+                      {goal.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.goalBody,
+                        {
+                          color: selected
+                            ? "rgba(255,255,255,0.82)"
+                            : colors.subtle,
+                        },
+                      ]}
+                    >
+                      {goal.body}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           <View
             style={[
@@ -351,6 +446,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 23,
     textAlign: "center",
+  },
+  goalWrap: {
+    marginTop: 20,
+  },
+  goalTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  goalOption: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 13,
+    marginBottom: 9,
+  },
+  goalLabel: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  goalBody: {
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
   },
   callout: {
     borderWidth: 1,

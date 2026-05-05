@@ -11,6 +11,7 @@ Please try:
 - Sign up and complete the tutorial.
 - Add one normal task.
 - Add one repeating task like "Gym at 6 PM every day".
+- Add one ongoing routine like "Gym at 6 PM every day except Sunday".
 - Complete, skip, and reschedule a task.
 - Add a friend by email from Settings > Accountability Friends.
 - Try Focus Mode with Strict Focus turned on, then switch apps once.
@@ -65,7 +66,13 @@ npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL -
 - The Today screen loads cleanly and has a useful empty state.
 - Repeating tasks appear in Settings > Routine Manager.
 - Ending a routine removes open/future repeats but keeps completed history.
+- Recurring tasks can skip one occurrence without ending the full routine.
+- Ongoing routines keep one active next task, create the next occurrence after completion or skip, and can be canceled from Settings > Routine Manager with Cancel All.
+- High-priority tasks ask for a quick honesty/proof note before completion.
+- Week Planner shows a calendar-style future view and can open tasks in Google Calendar.
 - Settings > Reminder Health shows scheduled reminders and duplicate status.
+- Task notifications expose Complete and Snooze 15m actions in a development or preview build.
+- New-user tutorial saves the user goal and tunes energy mode.
 - Settings > Tester Feedback saves feedback successfully.
 - Settings > Tester Data Controls can reset test data without deleting the login.
 - AI Pattern Coach gives at least one useful next action after enough task history.

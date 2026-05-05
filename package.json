@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "start:ai": "node ./scripts/start-expo-with-ai.js",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -13,7 +14,7 @@
     "qa": "npm run typecheck && npx eslint . --no-cache",
     "qa:device": "npm run qa && npx expo install --check && npx expo config --type public",
     "deploy:rules": "npx firebase-tools@latest deploy --only firestore:rules",
-    "ai:dev": "cd ai && uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "ai:dev": "cd ai && .venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000",
     "eas:preview": "eas build --profile preview --platform all",
     "eas:simulator": "eas build --profile simulator --platform ios",
     "eas:production": "eas build --profile production --platform all"

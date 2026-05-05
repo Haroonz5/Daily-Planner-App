@@ -109,6 +109,66 @@ export const sortTasksBySchedule = <T extends { time: string }>(tasks: T[]) =>
     return timeA - timeB;
   });
 
+export const matchesRecurrenceDate = (
+  date: Date,
+  recurrence: RecurrenceRule,
+  recurrenceDays?: number[] | null,
+  weeklyAnchorDay?: number
+) => {
+  const day = date.getDay();
+
+  if (recurrence === "daily") return true;
+  if (recurrence === "weekdays") return day !== 0 && day !== 6;
+  if (recurrence === "weekly") return day === weeklyAnchorDay;
+  if (recurrence === "custom") {
+    return normalizeRecurrenceDays(recurrenceDays).includes(day);
+  }
+
+  return false;
+};
+
+export const getNextRecurringDate = ({
+  fromDateKey,
+  recurrence,
+  recurrenceDays,
+  includeFromDate = false,
+  weeklyAnchorDateKey,
+}: {
+  fromDateKey: string;
+  recurrence: RecurrenceRule;
+  recurrenceDays?: number[] | null;
+  includeFromDate?: boolean;
+  weeklyAnchorDateKey?: string | null;
+}) => {
+  if (recurrence === "none") return null;
+
+  const customDays = normalizeRecurrenceDays(recurrenceDays);
+  if (recurrence === "custom" && customDays.length === 0) return null;
+
+  const weeklyAnchorDay = weeklyAnchorDateKey
+    ? parseDateKey(weeklyAnchorDateKey).getDay()
+    : parseDateKey(fromDateKey).getDay();
+  const cursor = parseDateKey(fromDateKey);
+  if (!includeFromDate) cursor.setDate(cursor.getDate() + 1);
+
+  for (let i = 0; i < 370; i++) {
+    if (
+      matchesRecurrenceDate(
+        cursor,
+        recurrence,
+        customDays,
+        weeklyAnchorDay
+      )
+    ) {
+      return formatDateKey(cursor);
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return null;
+};
+
 export const buildRecurringDates = (
   startDateKey: string,
   recurrence: RecurrenceRule,
@@ -116,32 +176,15 @@ export const buildRecurringDates = (
 ) => {
   if (recurrence === "none") return [startDateKey];
 
-  const startDate = parseDateKey(startDateKey);
-  const dates: string[] = [];
-  const customDays = normalizeRecurrenceDays(recurrenceDays);
-  if (recurrence === "custom" && customDays.length === 0) return [startDateKey];
-  const maxOccurrences = recurrence === "weekly" ? 8 : 10;
-  let cursor = new Date(startDate);
+  const firstDate = getNextRecurringDate({
+    fromDateKey: startDateKey,
+    recurrence,
+    recurrenceDays,
+    includeFromDate: true,
+    weeklyAnchorDateKey: startDateKey,
+  });
 
-  while (dates.length < maxOccurrences) {
-    const day = cursor.getDay();
-    const isWeekday = day !== 0 && day !== 6;
-
-    if (
-      recurrence === "daily" ||
-      (recurrence === "weekdays" && isWeekday) ||
-      recurrence === "weekly" ||
-      (recurrence === "custom" && customDays.includes(day))
-    ) {
-      dates.push(formatDateKey(cursor));
-    }
-
-    cursor.setDate(
-      cursor.getDate() + (recurrence === "weekly" ? 7 : 1)
-    );
-  }
-
-  return dates;
+  return firstDate ? [firstDate] : [startDateKey];
 };
 
 export const getBehaviorCallout = (

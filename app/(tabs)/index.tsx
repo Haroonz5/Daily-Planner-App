@@ -47,6 +47,7 @@ import {
   sortTasksBySchedule,
   type RecurrenceRule,
 } from "../../utils/task-helpers";
+import { ensureRollingRoutineTasks } from "../../utils/routines";
 import {
   getPatternFeedback,
   runAiReschedule,
@@ -92,6 +93,7 @@ type Task = {
   recurrenceDays?: number[] | null;
   skippedOccurrence?: boolean;
   seriesContinues?: boolean;
+  completionProof?: string | null;
 };
 
 type EditScope = "single" | "future";
@@ -246,6 +248,8 @@ export default function HomeScreen() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Task | null>(null);
   const [skipCandidate, setSkipCandidate] = useState<Task | null>(null);
+  const [proofCandidate, setProofCandidate] = useState<Task | null>(null);
+  const [proofNote, setProofNote] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -271,6 +275,7 @@ export default function HomeScreen() {
   const hasCelebratedRef = useRef(false);
   const petHydratedRef = useRef(false);
   const previousPetKeyRef = useRef<string | null>(null);
+  const rollingRoutineBusyRef = useRef(false);
 
   const getTodayDate = () => formatDateKey(new Date());
 
@@ -319,6 +324,15 @@ export default function HomeScreen() {
           } catch {
             // Ignore permission/network hiccups so the task list can still render.
           }
+        }
+
+        if (!rollingRoutineBusyRef.current) {
+          rollingRoutineBusyRef.current = true;
+          ensureRollingRoutineTasks({ uid, tasks: fetched })
+            .catch(() => {})
+            .finally(() => {
+              rollingRoutineBusyRef.current = false;
+            });
         }
 
         setTasks(sortTasksBySchedule(fetched));
@@ -684,12 +698,17 @@ export default function HomeScreen() {
         date: today,
         nextTaskTitle: nextOpenTask?.title ?? "All clear",
         nextTaskTime: nextOpenTask?.time ?? null,
+        nextTaskDate: nextOpenTask?.date ?? today,
         completed,
         total: todayTasks.length,
+        open: openTodayTasks,
         progressPercent: Math.round(progressPercent),
+        readinessLabel: todayReadiness.label,
+        readinessScore: todayReadiness.score,
         petName: activePetDisplayName,
         petKey: activePet.key,
         energyMode,
+        themeName,
         updatedAt: new Date(),
       },
       { merge: true }
@@ -701,9 +720,14 @@ export default function HomeScreen() {
     energyMode,
     nextOpenTask?.time,
     nextOpenTask?.title,
+    nextOpenTask?.date,
+    openTodayTasks,
     progressPercent,
     tasksLoaded,
+    themeName,
     today,
+    todayReadiness.label,
+    todayReadiness.score,
     todayTasks.length,
   ]);
 
@@ -996,17 +1020,22 @@ export default function HomeScreen() {
     });
   };
 
-  const toggleComplete = async (task: Task) => {
+  const toggleComplete = async (task: Task, proof?: string) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
     const nextCompleted = !task.completed;
+    const cleanedProof = proof?.trim() || null;
 
     await updateDoc(doc(db, "users", uid, "tasks", task.id), {
       completed: nextCompleted,
       status: nextCompleted ? "completed" : "pending",
       completedAt: nextCompleted ? new Date() : null,
       skippedAt: nextCompleted ? null : task.skippedAt ?? null,
+      completionProofRequired:
+        nextCompleted && (task.priority ?? "Medium") === "High",
+      completionProof: nextCompleted ? cleanedProof : null,
+      completionProofAt: nextCompleted && cleanedProof ? new Date() : null,
       lastActionAt: new Date(),
     });
 
@@ -1026,6 +1055,30 @@ export default function HomeScreen() {
         status: "pending",
       });
     }
+  };
+
+  const requestCompleteTask = (task: Task) => {
+    const needsProof =
+      !task.completed &&
+      (task.priority ?? "Medium") === "High" &&
+      (task.status ?? "pending") !== "skipped";
+
+    if (needsProof) {
+      setProofCandidate(task);
+      setProofNote("");
+      return;
+    }
+
+    void toggleComplete(task);
+  };
+
+  const confirmProofCompletion = async () => {
+    if (!proofCandidate) return;
+
+    const task = proofCandidate;
+    setProofCandidate(null);
+    setProofNote("");
+    await toggleComplete(task, proofNote);
   };
 
   const handleSkipTask = async () => {
@@ -1322,7 +1375,7 @@ export default function HomeScreen() {
         />
 
         <TouchableOpacity
-          onPress={() => toggleComplete(item)}
+          onPress={() => requestCompleteTask(item)}
           style={styles.checkboxWrap}
         >
           <View
@@ -3240,6 +3293,70 @@ export default function HomeScreen() {
                     ? "Skip Occurrence"
                     : "Skip"}
                 </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!proofCandidate}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setProofCandidate(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.themeCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Be Honest Check
+            </Text>
+
+            <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
+              {proofCandidate?.title ?? "This task"} is high priority. Before
+              you mark it complete, add one quick note about what you actually
+              finished.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                styles.notesInput,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="Example: Finished chest workout and 15 min cardio."
+              placeholderTextColor={colors.subtle}
+              value={proofNote}
+              onChangeText={setProofNote}
+              multiline
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: colors.surface },
+                ]}
+                onPress={() => setProofCandidate(null)}
+              >
+                <Text
+                  style={[
+                    styles.secondaryButtonText,
+                    { color: colors.subtle },
+                  ]}
+                >
+                  Not Yet
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+                onPress={confirmProofCompletion}
+              >
+                <Text style={styles.primaryButtonText}>I Did It</Text>
               </TouchableOpacity>
             </View>
           </View>

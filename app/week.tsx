@@ -6,6 +6,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import { openTaskInGoogleCalendar } from "@/utils/calendar";
 import { formatDateKey, getRelativeDateLabel, parseTimeToMinutes } from "@/utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -16,6 +17,7 @@ type Task = {
   time: string;
   completed: boolean;
   priority?: "Low" | "Medium" | "High";
+  notes?: string | null;
   status?: "pending" | "completed" | "skipped";
 };
 
@@ -52,6 +54,7 @@ export default function WeekScreen() {
   const { themeName } = useAppTheme();
   const colors = Colors[themeName];
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [calendarMessage, setCalendarMessage] = useState("");
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -124,6 +127,16 @@ export default function WeekScreen() {
     return { monthLabel, days };
   }, [tasks]);
 
+  const handleAddToCalendar = async (task: Task) => {
+    const opened = await openTaskInGoogleCalendar(task);
+    setCalendarMessage(
+      opened
+        ? `${task.title} opened in Google Calendar.`
+        : "Calendar export could not open on this device."
+    );
+    setTimeout(() => setCalendarMessage(""), 2600);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackground colors={colors} variant="calm" />
@@ -138,6 +151,12 @@ export default function WeekScreen() {
         <Text style={[styles.subtitle, { color: colors.subtle }]}>
           See the month, then scan the next seven days before the schedule gets noisy.
         </Text>
+
+        {calendarMessage ? (
+          <Text style={[styles.statusMessage, { color: colors.subtle }]}>
+            {calendarMessage}
+          </Text>
+        ) : null}
 
         <View
           style={[
@@ -309,6 +328,27 @@ export default function WeekScreen() {
                         {task.completed ? " · Done" : isSkipped ? " · Skipped" : ""}
                       </Text>
                     </View>
+                    {!task.completed && !isSkipped && (
+                      <TouchableOpacity
+                        style={[
+                          styles.calendarButton,
+                          {
+                            backgroundColor: colors.surface,
+                            borderColor: colors.border,
+                          },
+                        ]}
+                        onPress={() => handleAddToCalendar(task)}
+                      >
+                        <Text
+                          style={[
+                            styles.calendarButtonText,
+                            { color: colors.tint },
+                          ]}
+                        >
+                          Calendar
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 );
               })
@@ -349,6 +389,12 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 8,
     marginBottom: 18,
+  },
+  statusMessage: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    marginBottom: 14,
   },
   calendarCard: {
     borderRadius: 26,
@@ -492,5 +538,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 3,
+  },
+  calendarButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginLeft: 10,
+  },
+  calendarButtonText: {
+    fontSize: 11,
+    fontWeight: "900",
   },
 });

@@ -50,6 +50,7 @@ import {
   syncMorningSummaryNotification,
   syncTaskNotifications,
 } from "../../utils/notifications";
+import { ensureRollingRoutineTasks } from "../../utils/routines";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Task = {
@@ -163,6 +164,30 @@ const defaultTaskTemplates: TaskTemplate[] = [
     priority: "Low",
     recurrence: "none",
     time: "7:00 PM",
+  },
+  {
+    id: "morning-routine",
+    title: "Morning routine",
+    notes: "Water, hygiene, quick reset, and one clear intention.",
+    priority: "Medium",
+    recurrence: "daily",
+    time: "8:00 AM",
+  },
+  {
+    id: "deep-work",
+    title: "Deep work block",
+    notes: "One outcome, phone away, no switching tabs.",
+    priority: "High",
+    recurrence: "weekdays",
+    time: "10:00 AM",
+  },
+  {
+    id: "night-reset",
+    title: "Night reset",
+    notes: "Review tomorrow, clean one area, set the first task.",
+    priority: "Medium",
+    recurrence: "daily",
+    time: "9:00 PM",
   },
 ];
 
@@ -731,6 +756,12 @@ export default function AddTask() {
         time: string;
         date: string;
         priority: TaskPriority;
+        notes?: string;
+        completed: boolean;
+        status: TaskStatus;
+        recurrence: RecurrenceRule;
+        recurrenceGroupId: string | null;
+        recurrenceDays?: number[] | null;
       }[] = [];
 
       parsedTasks.forEach((parsedTask, index) => {
@@ -765,6 +796,7 @@ export default function AddTask() {
             recurrenceGroupId,
             recurrenceDays:
               taskRecurrence === "custom" ? parsedTask.recurrenceDays ?? [] : null,
+            rollingRoutine: taskRecurrence !== "none",
             aiCreated: true,
           });
 
@@ -774,11 +806,22 @@ export default function AddTask() {
             time: parsedTask.time,
             date: dateKey,
             priority: safePriority,
+            notes: composeParsedNotes(parsedTask),
+            completed: false,
+            status: "pending",
+            recurrence: taskRecurrence,
+            recurrenceGroupId,
+            recurrenceDays:
+              taskRecurrence === "custom" ? parsedTask.recurrenceDays ?? [] : null,
           });
         });
       });
 
       await batch.commit();
+      await ensureRollingRoutineTasks({
+        uid,
+        tasks: [...tasks, ...createdTasks],
+      }).catch(() => {});
 
       await Promise.all(
         createdTasks.map((task) =>
@@ -827,6 +870,12 @@ export default function AddTask() {
         time: string;
         date: string;
         priority: TaskPriority;
+        notes?: string;
+        completed: boolean;
+        status: TaskStatus;
+        recurrence: RecurrenceRule;
+        recurrenceGroupId: string | null;
+        recurrenceDays?: number[] | null;
       }[] = [];
 
       recurringDates.forEach((dateKey) => {
@@ -848,6 +897,7 @@ export default function AddTask() {
           recurrence,
           recurrenceGroupId,
           recurrenceDays: null,
+          rollingRoutine: recurrence !== "none",
         });
 
         createdTasks.push({
@@ -856,10 +906,20 @@ export default function AddTask() {
           time: formattedTime,
           date: dateKey,
           priority,
+          notes: notes.trim(),
+          completed: false,
+          status: "pending",
+          recurrence,
+          recurrenceGroupId,
+          recurrenceDays: null,
         });
       });
 
       await batch.commit();
+      await ensureRollingRoutineTasks({
+        uid,
+        tasks: [...tasks, ...createdTasks],
+      }).catch(() => {});
 
       await Promise.all(
         createdTasks.map((task) =>
@@ -1184,8 +1244,8 @@ export default function AddTask() {
                   : aiSource === "openai"
                     ? "AI plan ready"
                     : aiSource === "local"
-                      ? "Smart fallback used"
-                      : "Offline planner used"}
+                      ? "Backend planner used"
+                      : "Backend offline - using built-in planner"}
               </Text>
               <Text style={[styles.aiStatusBody, { color: colors.subtle }]}>
                 {aiBusy
@@ -1193,8 +1253,8 @@ export default function AddTask() {
                   : aiSource === "openai"
                     ? "The backend AI understood your tasks and checked the schedule."
                     : aiSource === "local"
-                      ? "The AI service is online, but it used the app's local planner instead of OpenAI."
-                      : "The AI backend could not be reached, so the app used its built-in planner. You can still add tasks."}
+                      ? "The AI backend is online. Add an OPENAI_API_KEY in ai/.env when you want OpenAI responses instead of the backend's built-in planner."
+                      : "Your tasks still work. To use the real backend on your phone, run the Python AI server and restart Expo with npm run start:ai."}
               </Text>
             </View>
           )}
@@ -1211,7 +1271,7 @@ export default function AddTask() {
                       ? "AI"
                       : aiSource === "offline"
                         ? "Offline"
-                        : "Local"} planner
+                        : "Backend"} planner
                   </Text>
                 ) : null}
               </View>

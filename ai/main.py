@@ -323,6 +323,10 @@ def _weekday_date(base: date, weekday_name: str) -> date:
 
 def _resolve_segment_date(segment: str, default_date: date) -> date:
     lower = segment.lower()
+    weekday_pattern = (
+        r"(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|"
+        r"thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)"
+    )
 
     if "tomorrow" in lower:
         return date.today() + timedelta(days=1)
@@ -332,6 +336,13 @@ def _resolve_segment_date(segment: str, default_date: date) -> date:
 
     if "next week" in lower:
         return default_date + timedelta(days=7)
+
+    if re.search(
+        rf"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
+        lower,
+        re.IGNORECASE,
+    ):
+        return default_date
 
     for weekday in (
         "monday",
@@ -454,9 +465,15 @@ def _task_time_bucket(task: FeedbackTask) -> str:
 
 def _clean_title(segment: str) -> str:
     cleaned = re.sub(
-        r"\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b",
+        r"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b",
         "",
         segment,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b",
+        "",
+        cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
@@ -546,6 +563,16 @@ def _recurrence_from_text(segment: str) -> tuple[Recurrence, list[int]]:
             if days == [1, 2, 3, 4, 5]:
                 return "weekdays", []
             return "custom", days
+
+    except_match = re.search(
+        rf"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
+        lower,
+        re.IGNORECASE,
+    )
+    if except_match:
+        excluded_day = _weekday_token_to_day(except_match.group(1))
+        if excluded_day is not None:
+            return "custom", [day for day in range(7) if day != excluded_day]
 
     if re.search(r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b", lower):
         return "weekdays", []

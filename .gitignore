@@ -40,6 +40,7 @@ yarn-error.*
 # Python
 __pycache__/
 *.py[cod]
+.venv/
 
 app-example
 

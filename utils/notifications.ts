@@ -46,6 +46,7 @@ const MORNING_SUMMARY_NOTIFICATION_ID = "daily-discipline-morning-summary";
 const EVENING_REMINDER_NOTIFICATION_ID = "daily-discipline-evening-reminder";
 const TASK_NOTIFICATION_CATEGORY_ID = "dailyDisciplineTaskActions";
 const COMPLETE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineCompleteTask";
+const SNOOZE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineSnoozeTask";
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   taskRemindersEnabled: true,
@@ -61,6 +62,7 @@ const NOTIFICATION_KINDS = {
   morningSummary: "morning-summary",
   taskDue: "task-due",
   taskMissed: "task-missed",
+  taskSnoozed: "task-snoozed",
   test: "test",
 } as const;
 
@@ -78,6 +80,14 @@ export const configureTaskNotificationActions = async () => {
           isAuthenticationRequired: false,
         },
       },
+      {
+        identifier: SNOOZE_TASK_NOTIFICATION_ACTION_ID,
+        buttonTitle: "Snooze 15m",
+        options: {
+          opensAppToForeground: false,
+          isAuthenticationRequired: false,
+        },
+      },
     ],
     {
       showTitle: true,
@@ -92,10 +102,14 @@ const getTaskDueNotificationId = (taskId: string) =>
 const getTaskMissedNotificationId = (taskId: string) =>
   `daily-discipline-task-${taskId}-missed`;
 
+const getTaskSnoozedNotificationId = (taskId: string) =>
+  `daily-discipline-task-${taskId}-snoozed`;
+
 const getNotificationData = (request: Notifications.NotificationRequest) =>
   (request.content.data ?? {}) as {
     kind?: string;
     taskId?: string;
+    taskTitle?: string;
   };
 
 export const completeTaskFromNotificationResponse = async (
@@ -126,6 +140,60 @@ export const completeTaskFromNotificationResponse = async (
 
   return true;
 };
+
+const snoozeTaskFromNotificationResponse = async (
+  response: Notifications.NotificationResponse
+) => {
+  if (response.actionIdentifier !== SNOOZE_TASK_NOTIFICATION_ACTION_ID) {
+    return false;
+  }
+
+  const data = getNotificationData(response.notification.request);
+  if (!data.taskId) return false;
+
+  const granted = await ensureNotificationPermissions();
+  if (!granted) return false;
+
+  const snoozeDate = new Date(Date.now() + 15 * 60 * 1000);
+  await cancelTaskNotifications(data.taskId).catch(() => {});
+  await Notifications.cancelScheduledNotificationAsync(
+    getTaskSnoozedNotificationId(data.taskId)
+  ).catch(() => {});
+
+  await Notifications.scheduleNotificationAsync({
+    identifier: getTaskSnoozedNotificationId(data.taskId),
+    content: {
+      title: "Snoozed task",
+      body: data.taskTitle
+        ? `${data.taskTitle} is back on your radar.`
+        : "Your snoozed task is back on your radar.",
+      data: {
+        kind: NOTIFICATION_KINDS.taskSnoozed,
+        taskId: data.taskId,
+        taskTitle: data.taskTitle,
+      },
+      categoryIdentifier: TASK_NOTIFICATION_CATEGORY_ID,
+      sound: true,
+      vibrate: [0, 140, 80, 140],
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: snoozeDate,
+    },
+  });
+
+  await Notifications.dismissNotificationAsync(
+    response.notification.request.identifier
+  ).catch(() => {});
+
+  return true;
+};
+
+export const handleTaskNotificationResponse = async (
+  response: Notifications.NotificationResponse
+) =>
+  (await completeTaskFromNotificationResponse(response)) ||
+  (await snoozeTaskFromNotificationResponse(response));
 
 const getNotificationAuditKey = (request: Notifications.NotificationRequest) => {
   const data = getNotificationData(request);
@@ -322,6 +390,7 @@ export const cancelTaskNotifications = async (taskId: string) => {
     ...ids,
     getTaskDueNotificationId(taskId),
     getTaskMissedNotificationId(taskId),
+    getTaskSnoozedNotificationId(taskId),
   ]);
 
   scheduled.forEach((request) => {
