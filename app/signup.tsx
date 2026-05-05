@@ -1,6 +1,9 @@
 import { useRouter } from "expo-router";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import {
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+} from "firebase/auth";
+import { doc, getDoc, setDoc, writeBatch } from "firebase/firestore";
 import { useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -14,6 +17,7 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import { getUsernameError, normalizeUsername } from "@/utils/usernames";
 import { auth, db } from "../constants/firebaseConfig";
 
 export default function Signup() {
@@ -22,13 +26,21 @@ export default function Signup() {
   const colors = Colors[themeName];
 
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSignup = async () => {
-    if (!email.trim() || !password.trim()) {
-      setError("Please enter your email and password");
+    if (!email.trim() || !username.trim() || !password.trim()) {
+      setError("Please enter your email, username, and password");
+      return;
+    }
+
+    const normalizedUsername = normalizeUsername(username);
+    const usernameError = getUsernameError(normalizedUsername);
+    if (usernameError) {
+      setError(usernameError);
       return;
     }
 
@@ -42,34 +54,54 @@ export default function Signup() {
       setError("");
 
       const normalizedEmail = email.trim().toLowerCase();
+      const usernameRef = doc(db, "publicUsernames", normalizedUsername);
+      const usernameSnapshot = await getDoc(usernameRef);
+      if (usernameSnapshot.exists()) {
+        setError("That username is already taken.");
+        return;
+      }
+
       const credential = await createUserWithEmailAndPassword(
         auth,
         normalizedEmail,
         password
       );
 
-      await setDoc(
+      // I create both the private profile and the public username reservation
+      // here so friends can find each other by username instead of exposing email.
+      const batch = writeBatch(db);
+      batch.set(
         doc(db, "users", credential.user.uid),
         {
           createdAt: new Date(),
           email: normalizedEmail,
+          username: normalizedUsername,
+          displayName: normalizedUsername,
           tutorialCompleted: false,
         },
         { merge: true }
       );
-
-      await setDoc(
+      batch.set(
         doc(db, "publicProfiles", credential.user.uid),
         {
           uid: credential.user.uid,
           email: normalizedEmail,
-          displayName: null,
+          username: normalizedUsername,
+          displayName: normalizedUsername,
           updatedAt: new Date(),
         },
         { merge: true }
-      ).catch(() => {});
+      );
+      batch.set(usernameRef, {
+        uid: credential.user.uid,
+        email: normalizedEmail,
+        username: normalizedUsername,
+        createdAt: new Date(),
+      });
+      await batch.commit();
+      await sendEmailVerification(credential.user).catch(() => {});
 
-      router.replace("/tutorial" as never);
+      router.replace("/verify-email" as never);
     } catch {
       setError("Could not create account. Try again.");
     } finally {
@@ -109,6 +141,24 @@ export default function Signup() {
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
+          />
+
+          <Text style={[styles.label, { color: colors.subtle }]}>Username</Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            placeholder="@haroon"
+            placeholderTextColor={colors.subtle}
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
 
           <Text style={[styles.label, { color: colors.subtle }]}>Password</Text>

@@ -6,6 +6,7 @@ import { auth, db } from "@/constants/firebaseConfig";
 import type { PetNicknameMap } from "@/constants/rewards";
 
 export type UserProfile = {
+  username?: string | null;
   activePetKey?: string | null;
   petNickname?: string | null;
   petNicknames?: PetNicknameMap | null;

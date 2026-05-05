@@ -1,6 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import {
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -50,7 +54,18 @@ export default function Login() {
       setError("");
 
       const normalizedEmail = email.trim().toLowerCase();
-      await signInWithEmailAndPassword(auth, normalizedEmail, password);
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        normalizedEmail,
+        password
+      );
+
+      if (!credential.user.emailVerified) {
+        await sendEmailVerification(credential.user).catch(() => {});
+        await signOut(auth);
+        setError("Check your email and verify your account before logging in.");
+        return;
+      }
 
       if (rememberMe) {
         await AsyncStorage.setItem("savedEmail", normalizedEmail);
