@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -43,6 +44,10 @@ import {
   type RecurrenceRule,
 } from "@/utils/task-helpers";
 import {
+  getRoutineCoach,
+  type RoutineCoachResult,
+} from "@/utils/ai";
+import {
   cancelManyTaskNotifications,
   getScheduledNotificationAudit,
   getNotificationSettings,
@@ -52,7 +57,9 @@ import {
   type NotificationSettings,
   type ScheduledNotificationAudit,
   syncMorningSummaryNotification,
+  syncTaskNotifications,
 } from "../utils/notifications";
+import { ensureRollingRoutineTasks } from "../utils/routines";
 import { auth, db } from "../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
@@ -85,14 +92,25 @@ type RoutineGroup = {
   recurrenceDays?: number[] | null;
   time: string;
   nextDate: string;
+  nextTaskId?: string;
   activeCount: number;
   completedCount: number;
+  skippedCount: number;
+  totalCount: number;
+  healthScore: number;
+  healthLabel: string;
   tasks: Task[];
 };
 
 const notificationTimeOptions = ["6:30 AM", "7:00 AM", "8:00 AM", "9:00 AM"];
 const eveningTimeOptions = ["8:00 PM", "9:00 PM", "10:00 PM"];
 const feedbackTypes = ["Bug", "Confusing", "Idea", "Praise"] as const;
+
+const addDaysToDateKey = (dateKey: string, days: number) => {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return formatDateKey(date);
+};
 
 export default function SettingsScreen({
   showBackButton = true,
@@ -125,7 +143,15 @@ export default function SettingsScreen({
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [dangerBusy, setDangerBusy] = useState(false);
+  const [routineCoachById, setRoutineCoachById] = useState<
+    Record<string, RoutineCoachResult>
+  >({});
+  const [routineCoachBusyId, setRoutineCoachBusyId] = useState<string | null>(null);
+  const [editingRoutine, setEditingRoutine] = useState<RoutineGroup | null>(null);
+  const [editRoutineTitle, setEditRoutineTitle] = useState("");
+  const [editRoutineTime, setEditRoutineTime] = useState("");
   const today = formatDateKey(new Date());
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -246,6 +272,19 @@ export default function SettingsScreen({
           sortedTasks.find((task) => task.date >= today) ??
           sortedTasks[sortedTasks.length - 1];
 
+        const completedCount = sortedTasks.filter((task) => task.completed).length;
+        const skippedCount = sortedTasks.filter(
+          (task) => (task.status ?? "pending") === "skipped"
+        ).length;
+        const attemptedCount = Math.max(completedCount + skippedCount, 1);
+        const healthScore = Math.round((completedCount / attemptedCount) * 100);
+        const healthLabel =
+          healthScore >= 80
+            ? "Strong"
+            : healthScore >= 55
+              ? "Needs tuning"
+              : "High friction";
+
         return {
           id,
           title: nextTask?.title ?? "Recurring routine",
@@ -253,8 +292,13 @@ export default function SettingsScreen({
           recurrenceDays: nextTask?.recurrenceDays ?? null,
           time: nextTask?.time ?? "Any time",
           nextDate: nextTask?.date ?? today,
+          nextTaskId: activeTasks[0]?.id,
           activeCount: activeTasks.length,
-          completedCount: sortedTasks.filter((task) => task.completed).length,
+          completedCount,
+          skippedCount,
+          totalCount: sortedTasks.length,
+          healthScore,
+          healthLabel,
           tasks: sortedTasks,
         };
       })
@@ -598,6 +642,185 @@ export default function SettingsScreen({
         },
       ]
     );
+  };
+
+  const skipNextRoutineOccurrence = async (routine: RoutineGroup) => {
+    const uid = auth.currentUser?.uid;
+    const nextTask = routine.tasks.find((task) => task.id === routine.nextTaskId);
+    if (!uid || !nextTask) return;
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, "users", uid, "tasks", nextTask.id), {
+      completed: false,
+      status: "skipped",
+      skippedAt: new Date(),
+      skippedOccurrence: true,
+      seriesContinues: true,
+      lastActionAt: new Date(),
+    });
+
+    await batch.commit();
+    await cancelManyTaskNotifications([nextTask.id]);
+
+    // I added this so skipping one routine occurrence still connects back to
+    // the rolling-routine refill system and creates the next valid occurrence.
+    await ensureRollingRoutineTasks({
+      uid,
+      tasks: tasks.map((task) =>
+        task.id === nextTask.id
+          ? { ...task, completed: false, status: "skipped" }
+          : task
+      ),
+    });
+    await syncMorningSummaryNotification(uid);
+    await refreshAudit();
+
+    setStatusTone("success");
+    setStatusMessage(`${routine.title} skipped once. The routine will keep going.`);
+  };
+
+  const pauseRoutineForWeek = async (routine: RoutineGroup) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const targets = routine.tasks.filter(
+      (task) =>
+        task.date >= today &&
+        !task.completed &&
+        (task.status ?? "pending") !== "skipped"
+    );
+
+    if (!targets.length) {
+      setStatusTone("warning");
+      setStatusMessage("That routine has no active task to pause.");
+      return;
+    }
+
+    const batch = writeBatch(db);
+    const shiftedTasks = targets.map((task) => ({
+      ...task,
+      date: addDaysToDateKey(task.date, 7),
+    }));
+
+    shiftedTasks.forEach((task) => {
+      batch.update(doc(db, "users", uid, "tasks", task.id), {
+        date: task.date,
+        routinePausedUntil: task.date,
+        lastActionAt: new Date(),
+      });
+    });
+
+    await batch.commit();
+    await Promise.all(
+      shiftedTasks.map((task) =>
+        syncTaskNotifications({
+          id: task.id,
+          title: task.title,
+          time: task.time,
+          date: task.date,
+          priority: task.priority,
+          completed: false,
+          status: "pending",
+        })
+      )
+    ).catch(() => {});
+    await syncMorningSummaryNotification(uid);
+    await refreshAudit();
+
+    setStatusTone("success");
+    setStatusMessage(`${routine.title} paused for one week.`);
+  };
+
+  const openRoutineEditor = (routine: RoutineGroup) => {
+    setEditingRoutine(routine);
+    setEditRoutineTitle(routine.title);
+    setEditRoutineTime(routine.time);
+  };
+
+  const saveRoutineEdits = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !editingRoutine) return;
+
+    const nextTitle = editRoutineTitle.trim();
+    const nextTime = editRoutineTime.trim().toUpperCase();
+
+    if (!nextTitle || parseTimeToMinutes(nextTime) === null) {
+      setStatusTone("warning");
+      setStatusMessage("Add a title and a time like 6:00 PM before saving.");
+      return;
+    }
+
+    const batch = writeBatch(db);
+    editingRoutine.tasks.forEach((task) => {
+      batch.update(doc(db, "users", uid, "tasks", task.id), {
+        title: nextTitle,
+        time: nextTime,
+        originalTime: nextTime,
+        lastActionAt: new Date(),
+      });
+    });
+
+    await batch.commit();
+    await Promise.all(
+      editingRoutine.tasks
+        .filter(
+          (task) =>
+            task.date >= today &&
+            !task.completed &&
+            (task.status ?? "pending") !== "skipped"
+        )
+        .map((task) =>
+          syncTaskNotifications({
+            id: task.id,
+            title: nextTitle,
+            time: nextTime,
+            date: task.date,
+            priority: task.priority,
+            completed: false,
+            status: "pending",
+          })
+        )
+    ).catch(() => {});
+    await syncMorningSummaryNotification(uid);
+    await refreshAudit();
+
+    setEditingRoutine(null);
+    setStatusTone("success");
+    setStatusMessage(`${nextTitle} routine updated.`);
+  };
+
+  const loadRoutineCoach = async (routine: RoutineGroup) => {
+    setRoutineCoachBusyId(routine.id);
+
+    try {
+      const recurrenceLabel = formatRecurrenceLabel(
+        routine.recurrence,
+        routine.recurrenceDays
+      );
+      const result = await getRoutineCoach({
+        routineTitle: routine.title,
+        recurrenceLabel,
+        time: routine.time,
+        timezone,
+        tasks: routine.tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority ?? "Medium",
+          completed: task.completed,
+          status: task.status ?? "pending",
+          rescheduledCount: task.rescheduledCount ?? 0,
+        })),
+      });
+
+      setRoutineCoachById((current) => ({
+        ...current,
+        [routine.id]: result,
+      }));
+    } finally {
+      setRoutineCoachBusyId(null);
+    }
   };
 
   return (
@@ -1009,46 +1232,146 @@ export default function SettingsScreen({
         </Text>
 
         {routineGroups.length > 0 ? (
-          routineGroups.map((routine) => (
-            <View
-              key={routine.id}
-              style={[
-                styles.routineRow,
-                { backgroundColor: colors.background, borderColor: colors.border },
-              ]}
-            >
-              <View style={styles.routineCopy}>
-                <Text style={[styles.routineTitle, { color: colors.text }]}>
-                  {routine.title}
-                </Text>
-                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
-                  {formatRecurrenceLabel(
-                    routine.recurrence,
-                    routine.recurrenceDays
-                  )}{" "}
-                  at {routine.time} · next{" "}
-                  {getRelativeDateLabel(routine.nextDate)}
-                </Text>
-                <Text style={[styles.routineMeta, { color: colors.subtle }]}>
-                  {routine.activeCount} open repeat
-                  {routine.activeCount === 1 ? "" : "s"} ·{" "}
-                  {routine.completedCount} completed · refills ahead
-                </Text>
-              </View>
+          routineGroups.map((routine) => {
+            const coach = routineCoachById[routine.id];
+            const coachBusy = routineCoachBusyId === routine.id;
 
-              <TouchableOpacity
+            return (
+              <View
+                key={routine.id}
                 style={[
-                  styles.routineEndButton,
-                  { backgroundColor: colors.surface, borderColor: colors.warning },
+                  styles.routineRow,
+                  { backgroundColor: colors.background, borderColor: colors.border },
                 ]}
-                onPress={() => confirmEndRoutine(routine)}
               >
-                <Text style={[styles.routineEndText, { color: colors.warning }]}>
-                  Cancel All
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))
+                <View style={styles.routineTopRow}>
+                  <View style={styles.routineCopy}>
+                    <Text style={[styles.routineTitle, { color: colors.text }]}>
+                      {routine.title}
+                    </Text>
+                    <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                      {formatRecurrenceLabel(
+                        routine.recurrence,
+                        routine.recurrenceDays
+                      )}{" "}
+                      at {routine.time} · next{" "}
+                      {getRelativeDateLabel(routine.nextDate)}
+                    </Text>
+                    <Text style={[styles.routineMeta, { color: colors.subtle }]}>
+                      {routine.activeCount} open · {routine.completedCount} done ·{" "}
+                      {routine.skippedCount} skipped · refills ahead
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.routineHealthPill,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    <Text style={[styles.routineHealthScore, { color: colors.text }]}>
+                      {routine.healthScore}%
+                    </Text>
+                    <Text style={[styles.routineHealthLabel, { color: colors.subtle }]}>
+                      {routine.healthLabel}
+                    </Text>
+                  </View>
+                </View>
+
+                {coach ? (
+                  <View
+                    style={[
+                      styles.routineCoachCard,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                  >
+                    <Text style={[styles.routineCoachTitle, { color: colors.text }]}>
+                      {coach.headline}
+                    </Text>
+                    <Text style={[styles.routineCoachBody, { color: colors.subtle }]}>
+                      {coach.message}
+                    </Text>
+                    {coach.suggestions.map((suggestion) => (
+                      <Text
+                        key={suggestion}
+                        style={[styles.routineCoachBullet, { color: colors.subtle }]}
+                      >
+                        {suggestion}
+                      </Text>
+                    ))}
+                    <Text style={[styles.routineCoachSource, { color: colors.subtle }]}>
+                      {coach.source === "openai" || coach.source === "gemini"
+                        ? "AI coach"
+                        : "Local coach"}
+                    </Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.routineActionRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.routineActionButton,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => loadRoutineCoach(routine)}
+                    disabled={coachBusy}
+                  >
+                    <Text style={[styles.routineActionText, { color: colors.tint }]}>
+                      {coachBusy ? "Coaching..." : "Coach"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.routineActionButton,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => openRoutineEditor(routine)}
+                  >
+                    <Text style={[styles.routineActionText, { color: colors.text }]}>
+                      Edit
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.routineActionButton,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => skipNextRoutineOccurrence(routine)}
+                  >
+                    <Text style={[styles.routineActionText, { color: colors.warning }]}>
+                      Skip Next
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.routineActionButton,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => pauseRoutineForWeek(routine)}
+                  >
+                    <Text style={[styles.routineActionText, { color: colors.subtle }]}>
+                      Pause 7d
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.routineActionButton,
+                      { backgroundColor: colors.surface, borderColor: colors.warning },
+                    ]}
+                    onPress={() => confirmEndRoutine(routine)}
+                  >
+                    <Text style={[styles.routineActionText, { color: colors.warning }]}>
+                      Delete
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
         ) : (
           <View
             style={[
@@ -1519,6 +1842,76 @@ export default function SettingsScreen({
         <Text style={styles.logoutText}>Log Out</Text>
       </TouchableOpacity>
 
+      <Modal
+        visible={!!editingRoutine}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setEditingRoutine(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Edit Routine
+            </Text>
+            <Text style={[styles.modalBody, { color: colors.subtle }]}>
+              Update the routine name and time. This applies to the active loop
+              and its history so the routine stays connected.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="Routine title"
+              placeholderTextColor={colors.subtle}
+              value={editRoutineTitle}
+              onChangeText={setEditRoutineTitle}
+            />
+            <TextInput
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              placeholder="6:00 PM"
+              placeholderTextColor={colors.subtle}
+              value={editRoutineTime}
+              onChangeText={setEditRoutineTime}
+            />
+
+            <View style={styles.modalActionRow}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: colors.surface },
+                ]}
+                onPress={() => setEditingRoutine(null)}
+              >
+                <Text style={[styles.secondaryButtonText, { color: colors.subtle }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryButton, { backgroundColor: colors.tint }]}
+                onPress={saveRoutineEdits}
+              >
+                <Text style={[styles.secondaryButtonText, { color: "#fff" }]}>
+                  Save Routine
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.bottomSpacer} />
     </ScrollView>
   );
@@ -1796,8 +2189,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
     marginTop: 10,
+  },
+  routineTopRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   routineCopy: {
     flex: 1,
@@ -1813,15 +2208,102 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 17,
   },
-  routineEndButton: {
+  routineHealthPill: {
+    borderWidth: 1,
+    borderRadius: 16,
+    minWidth: 78,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    alignItems: "center",
+  },
+  routineHealthScore: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  routineHealthLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
+  routineCoachCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 12,
+  },
+  routineCoachTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  routineCoachBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  routineCoachBullet: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  routineCoachSource: {
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 8,
+    textTransform: "uppercase",
+  },
+  routineActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginTop: 12,
+  },
+  routineActionButton: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 13,
+    paddingHorizontal: 11,
     paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
   },
-  routineEndText: {
+  routineActionText: {
     fontSize: 12,
     fontWeight: "900",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.46)",
+    justifyContent: "center",
+    padding: 22,
+  },
+  modalCard: {
+    borderRadius: 24,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  modalBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+    marginTop: 6,
   },
   emptySettingsCard: {
     borderWidth: 1,

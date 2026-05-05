@@ -178,6 +178,32 @@ class WeeklyReviewResponse(BaseModel):
     source: AiSource
 
 
+class RoutineCoachTask(BaseModel):
+    title: str
+    date: str
+    time: str | None = None
+    priority: Priority = "Medium"
+    completed: bool = False
+    status: Literal["pending", "completed", "skipped"] | None = "pending"
+    rescheduled_count: int = 0
+
+
+class RoutineCoachRequest(BaseModel):
+    routine_title: str
+    recurrence_label: str
+    time: str
+    tasks: list[RoutineCoachTask] = Field(default_factory=list)
+    timezone: str = "America/New_York"
+    now: str | None = None
+
+
+class RoutineCoachResponse(BaseModel):
+    headline: str
+    message: str
+    suggestions: list[str] = Field(default_factory=list)
+    source: AiSource
+
+
 class BreakdownRequest(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     notes: str = ""
@@ -1552,6 +1578,98 @@ def _local_weekly_review(request: WeeklyReviewRequest) -> WeeklyReviewResponse:
     )
 
 
+def _local_routine_coach(request: RoutineCoachRequest) -> RoutineCoachResponse:
+    total = len(request.tasks)
+    completed = sum(1 for task in request.tasks if task.completed)
+    skipped = sum(1 for task in request.tasks if (task.status or "pending") == "skipped")
+    rescheduled = sum(1 for task in request.tasks if task.rescheduled_count > 0)
+    completion_rate = round((completed / total) * 100) if total else 0
+    suggestions: list[str] = []
+
+    weekday_skips: dict[str, int] = {}
+    for task in request.tasks:
+        if (task.status or "pending") != "skipped":
+            continue
+        try:
+            weekday = datetime.strptime(task.date, "%Y-%m-%d").strftime("%A")
+            weekday_skips[weekday] = weekday_skips.get(weekday, 0) + 1
+        except ValueError:
+            continue
+
+    weakest_day = max(weekday_skips, key=weekday_skips.get) if weekday_skips else None
+
+    if total == 0:
+        return RoutineCoachResponse(
+            headline="Routine is ready",
+            message="This routine does not have enough history yet. Run it a few times before changing the plan.",
+            suggestions=["Keep the first version simple and review it after three attempts."],
+            source="local",
+        )
+
+    if completion_rate >= 80:
+        headline = "Routine is holding strong"
+        message = f"{request.routine_title} is at {completion_rate}% consistency. Keep the schedule stable."
+        suggestions.append("Do not make this harder yet. Protect the current rhythm.")
+    elif completion_rate >= 50:
+        headline = "Routine needs a small adjustment"
+        message = f"{request.routine_title} is at {completion_rate}% consistency, which is close but not automatic yet."
+        suggestions.append("Make the next version smaller or move it to a less crowded time.")
+    else:
+        headline = "Routine has too much friction"
+        message = f"{request.routine_title} is at {completion_rate}% consistency. The plan needs to get easier before it gets harder."
+        suggestions.append("Reduce the task size for one week and rebuild trust with the routine.")
+
+    if weakest_day:
+        suggestions.append(f"{weakest_day} has the most skips. Consider moving that day or making it lighter.")
+    if rescheduled:
+        suggestions.append("Repeated reschedules mean the time may be wrong, not your discipline.")
+
+    return RoutineCoachResponse(
+        headline=headline,
+        message=message,
+        suggestions=suggestions[:3],
+        source="local",
+    )
+
+
+def _ai_routine_coach(
+    request: RoutineCoachRequest,
+    baseline: RoutineCoachResponse,
+) -> RoutineCoachResponse | None:
+    try:
+        # I added routine coaching here so the Settings dashboard can ask the
+        # backend for advice using the same Gemini/OpenAI/local chain as the planner.
+        prompt = {
+            "routine_title": request.routine_title,
+            "recurrence_label": request.recurrence_label,
+            "time": request.time,
+            "timezone": request.timezone,
+            "now": request.now or datetime.now(_safe_zoneinfo(request.timezone)).isoformat(),
+            "tasks": [task.model_dump() for task in request.tasks],
+            "baseline": baseline.model_dump(),
+        }
+        system_prompt = (
+            "You are a routine coach for Daily Discipline. "
+            "Use the baseline and task history as truth. Return only JSON with: "
+            '{"headline":"short title","message":"2 concise sentences max",'
+            '"suggestions":["specific routine adjustment"]}. '
+            "Be direct and practical. Mention timing, skipped days, or task size when useful."
+        )
+        result = _remote_ai_json(system_prompt, prompt)
+        if not result:
+            return None
+
+        source, data = result
+        return RoutineCoachResponse(
+            headline=str(data.get("headline") or baseline.headline),
+            message=str(data.get("message") or baseline.message),
+            suggestions=[str(item) for item in data.get("suggestions", baseline.suggestions)][:3],
+            source=source,
+        )
+    except Exception:
+        return None
+
+
 def _ai_weekly_review(
     request: WeeklyReviewRequest,
     baseline: WeeklyReviewResponse,
@@ -1796,6 +1914,13 @@ def weekly_review(request: WeeklyReviewRequest):
     baseline = _local_weekly_review(request)
     ai_review = _ai_weekly_review(request, baseline)
     return ai_review or baseline
+
+
+@app.post("/v1/routine-coach", response_model=RoutineCoachResponse)
+def routine_coach(request: RoutineCoachRequest):
+    baseline = _local_routine_coach(request)
+    ai_feedback = _ai_routine_coach(request, baseline)
+    return ai_feedback or baseline
 
 
 @app.post("/v1/breakdown-task", response_model=BreakdownResponse)

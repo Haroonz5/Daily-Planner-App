@@ -605,6 +605,19 @@ export default function AddTask() {
     setTimeout(() => setSuccessMessage(""), 2200);
   };
 
+  const removeCustomTemplate = async (templateId: string) => {
+    // I added removal for custom templates so saved routines stay useful instead
+    // of becoming a cluttered list the user cannot clean up.
+    const nextTemplates = customTemplates.filter(
+      (template) => template.id !== templateId
+    );
+
+    setCustomTemplates(nextTemplates);
+    await AsyncStorage.setItem(TASK_TEMPLATES_KEY, JSON.stringify(nextTemplates));
+    setSuccessMessage("Custom template removed.");
+    setTimeout(() => setSuccessMessage(""), 1800);
+  };
+
   const handleBreakDownTask = async () => {
     if (!title.trim()) {
       setError("Add a task title first, like: Study for biology exam.");
@@ -1125,26 +1138,45 @@ export default function AddTask() {
           </View>
 
           <View style={styles.templateGrid}>
-            {templates.map((template) => (
-              <TouchableOpacity
-                key={template.id}
-                style={[
-                  styles.templateTile,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                  },
-                ]}
-                onPress={() => applyTemplate(template)}
-              >
-                <Text style={[styles.templateTileTitle, { color: colors.text }]}>
-                  {template.title}
-                </Text>
-                <Text style={[styles.templateTileMeta, { color: colors.subtle }]}>
-                  {template.time} • {recurrenceLabels[template.recurrence]}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {templates.map((template) => {
+              const isCustomTemplate = customTemplates.some(
+                (customTemplate) => customTemplate.id === template.id
+              );
+
+              return (
+                <TouchableOpacity
+                  key={template.id}
+                  style={[
+                    styles.templateTile,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => applyTemplate(template)}
+                >
+                  <Text style={[styles.templateTileTitle, { color: colors.text }]}>
+                    {template.title}
+                  </Text>
+                  <Text style={[styles.templateTileMeta, { color: colors.subtle }]}>
+                    {template.time} • {recurrenceLabels[template.recurrence]}
+                  </Text>
+                  {isCustomTemplate ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.templateRemoveButton,
+                        { backgroundColor: colors.surface },
+                      ]}
+                      onPress={() => removeCustomTemplate(template.id)}
+                    >
+                      <Text style={[styles.templateRemoveText, { color: colors.warning }]}>
+                        Remove
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -2251,6 +2283,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     lineHeight: 16,
+  },
+  templateRemoveButton: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    marginTop: 9,
+  },
+  templateRemoveText: {
+    fontSize: 10,
+    fontWeight: "900",
   },
   aiCard: {
     borderWidth: 1,

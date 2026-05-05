@@ -100,6 +100,15 @@ export type WeeklyReviewResult = {
   source: AiSource;
 };
 
+export type RoutineCoachTask = AiHistoryTask;
+
+export type RoutineCoachResult = {
+  headline: string;
+  message: string;
+  suggestions: string[];
+  source: AiSource;
+};
+
 export type TaskBreakdownStep = {
   title: string;
   durationMinutes: number;
@@ -1279,6 +1288,106 @@ export const getWeeklyReview = async ({
       nextWeekFocus: (data.next_week_focus ?? data.nextWeekFocus ?? []).map(
         String
       ),
+      source: normalizeAiSource(data.source),
+    };
+  } catch {
+    return fallback();
+  }
+};
+
+const localRoutineCoach = ({
+  routineTitle,
+  tasks,
+}: {
+  routineTitle: string;
+  tasks: RoutineCoachTask[];
+}): RoutineCoachResult => {
+  const total = tasks.length;
+  const completed = tasks.filter((task) => task.completed).length;
+  const skipped = tasks.filter(
+    (task) => (task.status ?? "pending") === "skipped"
+  ).length;
+  const rescheduled = tasks.filter(
+    (task) => (task.rescheduledCount ?? 0) > 0
+  ).length;
+  const completionRate = total ? Math.round((completed / total) * 100) : 0;
+  const suggestions: string[] = [];
+
+  if (!total) {
+    return {
+      headline: "Routine is ready",
+      message: "Use this routine a few times before changing the schedule.",
+      suggestions: ["Review it after three attempts so the app has a real signal."],
+      source: "offline",
+    };
+  }
+
+  if (completionRate >= 80) {
+    suggestions.push("Keep the current time stable and avoid making it harder yet.");
+  } else if (completionRate >= 50) {
+    suggestions.push("Try a smaller version or move it away from crowded hours.");
+  } else {
+    suggestions.push("Shrink the routine for one week so it becomes easier to restart.");
+  }
+
+  if (skipped > 0) {
+    suggestions.push("The skipped days are the signal. Make those days lighter.");
+  }
+  if (rescheduled > 0) {
+    suggestions.push("Repeated reschedules usually mean the time needs to move.");
+  }
+
+  return {
+    headline:
+      completionRate >= 80
+        ? "Routine is holding strong"
+        : completionRate >= 50
+          ? "Routine needs a small adjustment"
+          : "Routine has too much friction",
+    message: `${routineTitle} is at ${completionRate}% consistency across ${total} logged attempt${total === 1 ? "" : "s"}.`,
+    suggestions: suggestions.slice(0, 3),
+    source: "offline",
+  };
+};
+
+export const getRoutineCoach = async ({
+  routineTitle,
+  recurrenceLabel,
+  time,
+  tasks,
+  timezone,
+}: {
+  routineTitle: string;
+  recurrenceLabel: string;
+  time: string;
+  tasks: RoutineCoachTask[];
+  timezone: string;
+}): Promise<RoutineCoachResult> => {
+  const fallback = () => localRoutineCoach({ routineTitle, tasks });
+
+  try {
+    const response = await fetch(`${getAiApiUrl()}/v1/routine-coach`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        routine_title: routineTitle,
+        recurrence_label: recurrenceLabel,
+        time,
+        timezone,
+        now: new Date().toISOString(),
+        tasks: serializeHistoryTasks(tasks),
+      }),
+    });
+
+    if (!response.ok) return fallback();
+
+    const data = await response.json();
+    return {
+      headline: String(data.headline ?? "Routine coach"),
+      message: String(data.message ?? "Routine feedback ready."),
+      suggestions: (data.suggestions ?? []).map(String),
       source: normalizeAiSource(data.source),
     };
   } catch {

@@ -68,6 +68,7 @@ EXPO_PUBLIC_AI_API_URL=https://your-ai-backend npx expo start -c
 - `POST /v1/daily-feedback`
 - `POST /v1/pattern-feedback`
 - `POST /v1/weekly-review`
+- `POST /v1/routine-coach`
 - `POST /v1/breakdown-task`
 
 If model keys are missing, the backend uses local fallbacks so development can

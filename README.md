@@ -13,6 +13,7 @@ The goal is not just to be another to-do list. Daily Discipline combines task pl
 - Today dashboard with readiness score, energy mode, recovery missions, and adaptive rescheduling
 - Task scheduling for today, tomorrow, custom future dates, and recurring routines
 - Ongoing routine loops such as "gym every day except Sunday" without creating huge batches of future tasks
+- Routine dashboard with health score, AI coach, edit, skip-next, pause, and delete controls
 - XP system with unlockable companion pets and custom pet sprites
 - Pet Home with habitat selection and companion progress
 - Focus Mode with Strict Focus app-switch strike tracking
@@ -20,6 +21,7 @@ The goal is not just to be another to-do list. Daily Discipline combines task pl
 - Accountability friends, progress sharing, nudges, and friend challenges
 - Stats dashboard with Discipline Score, weekly review, time-window analysis, and XP progress
 - Month calendar and next-7-days planner
+- Shareable daily progress card from the Summary screen
 - Local notifications for task reminders, morning summaries, and evening planning
 - Multiple themes, including light, dark, GitHub Dark, Amazon Light, Void Black, Slate Steel, and Rose Quartz
 - Tester feedback, reminder health, data reset, and account deletion tools
@@ -94,6 +96,13 @@ When tasks are missed, the app can suggest better times based on the remaining s
 ### Pattern Feedback
 
 Looks for repeated skips, weak time windows, reschedule friction, and stronger execution windows.
+
+### Routine Coach
+
+Reviews ongoing routines such as "Gym every day except Sunday" and suggests
+whether to keep the time, make the routine smaller, skip one occurrence, or move
+the weakest day. If Gemini/OpenAI is unavailable, the app still shows a local
+coach based on completion, skipped, and rescheduled history.
 
 ### Daily Feedback
 
@@ -309,6 +318,7 @@ EXPO_PUBLIC_AI_API_URL=https://your-backend-url npx expo start -c
 - `POST /v1/daily-feedback`
 - `POST /v1/pattern-feedback`
 - `POST /v1/weekly-review`
+- `POST /v1/routine-coach`
 - `POST /v1/breakdown-task`
 
 ## Available Scripts

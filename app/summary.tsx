@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import { collection, deleteDoc, doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
@@ -125,7 +125,23 @@ export default function SummaryScreen() {
       ? "No tasks were scheduled for today. A fresh reset is waiting for you tomorrow."
       : summary.allDone
         ? "You completed all your tasks today. Amazing work!"
-        : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
+      : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
+
+  const shareProgress = async () => {
+    const shareCard = [
+      "Daily Discipline Progress",
+      `${summary.completed}/${summary.total} tasks complete`,
+      `${summary.percent}% daily score`,
+      `+${summary.todayXp} XP today`,
+      dailyFeedback?.headline ? `Coach note: ${dailyFeedback.headline}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // I added this as a lightweight share card so progress can leave the app
+    // without needing a native image-capture dependency yet.
+    await Share.share({ message: shareCard });
+  };
   const reviewTasks = useMemo(
     () =>
       summary.todayTasks.filter(
@@ -381,6 +397,13 @@ export default function SummaryScreen() {
           />
         </View>
       </View>
+
+      <TouchableOpacity
+        style={[styles.shareButton, { backgroundColor: colors.tint }]}
+        onPress={shareProgress}
+      >
+        <Text style={styles.shareButtonText}>Share Today&apos;s Progress</Text>
+      </TouchableOpacity>
 
       {reviewTasks.length > 0 && (
         <View
@@ -726,6 +749,18 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: 8,
     borderRadius: 4,
+  },
+  shareButton: {
+    width: "100%",
+    borderRadius: 18,
+    paddingVertical: 15,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  shareButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
   },
   reviewCard: {
     borderRadius: 22,

@@ -250,6 +250,7 @@ export default function HomeScreen() {
   const [skipCandidate, setSkipCandidate] = useState<Task | null>(null);
   const [proofCandidate, setProofCandidate] = useState<Task | null>(null);
   const [proofNote, setProofNote] = useState("");
+  const [proofError, setProofError] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editNotes, setEditNotes] = useState("");
@@ -1066,6 +1067,7 @@ export default function HomeScreen() {
     if (needsProof) {
       setProofCandidate(task);
       setProofNote("");
+      setProofError("");
       return;
     }
 
@@ -1074,10 +1076,15 @@ export default function HomeScreen() {
 
   const confirmProofCompletion = async () => {
     if (!proofCandidate) return;
+    if (!proofNote.trim()) {
+      setProofError("Add one honest proof note before completing a high-priority task.");
+      return;
+    }
 
     const task = proofCandidate;
     setProofCandidate(null);
     setProofNote("");
+    setProofError("");
     await toggleComplete(task, proofNote);
   };
 
@@ -3316,6 +3323,10 @@ export default function HomeScreen() {
               you mark it complete, add one quick note about what you actually
               finished.
             </Text>
+            <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
+              I added this check so high-priority XP connects to honest proof,
+              not just tapping a box.
+            </Text>
 
             <TextInput
               style={[
@@ -3330,9 +3341,17 @@ export default function HomeScreen() {
               placeholder="Example: Finished chest workout and 15 min cardio."
               placeholderTextColor={colors.subtle}
               value={proofNote}
-              onChangeText={setProofNote}
+              onChangeText={(value) => {
+                setProofNote(value);
+                if (proofError) setProofError("");
+              }}
               multiline
             />
+            {!!proofError && (
+              <Text style={[styles.missedPromptText, { color: colors.warning }]}>
+                {proofError}
+              </Text>
+            )}
 
             <View style={styles.modalActions}>
               <TouchableOpacity

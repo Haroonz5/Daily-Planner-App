@@ -295,7 +295,11 @@ export default function WeekScreen() {
                 No tasks planned.
               </Text>
             ) : (
-              day.tasks.map((task) => {
+              <>
+                <Text style={[styles.dueOrderLabel, { color: colors.subtle }]}>
+                  Due order
+                </Text>
+                {day.tasks.map((task) => {
                 const priority = task.priority ?? "Medium";
                 const isSkipped = (task.status ?? "pending") === "skipped";
 
@@ -351,7 +355,8 @@ export default function WeekScreen() {
                     )}
                   </View>
                 );
-              })
+                })}
+              </>
             )}
           </View>
         ))}
@@ -509,6 +514,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     paddingTop: 8,
+  },
+  dueOrderLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginTop: 10,
+    textTransform: "uppercase",
   },
   taskRow: {
     flexDirection: "row",
