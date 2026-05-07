@@ -85,7 +85,11 @@ type Nudge = {
   createdAt?: any;
 };
 
-type ChallengeType = "combinedFive" | "cleanDay" | "highPriorityRescue";
+type ChallengeType =
+  | "combinedFive"
+  | "cleanDay"
+  | "highPriorityRescue"
+  | "accountabilityContract";
 
 type FriendChallenge = {
   id: string;
@@ -127,6 +131,11 @@ const challengeTemplates: Record<
     title: "High Priority Rescue",
     body: "Both people clear or move every high-priority task.",
     targetLabel: "high-priority pressure",
+  },
+  accountabilityContract: {
+    title: "Accountability Contract",
+    body: "A stronger pact: no skips, visible progress, and daily pressure to finish the plan honestly.",
+    targetLabel: "contract integrity",
   },
 };
 
@@ -508,6 +517,28 @@ export default function FriendsScreen() {
       };
     }
 
+    if (challenge.type === "accountabilityContract") {
+      const totalTasks = participants.reduce((sum, progress) => sum + progress.total, 0);
+      const completed = participants.reduce((sum, progress) => sum + progress.completed, 0);
+      const cleanCount = participants.filter(
+        (progress) => progress.total > 0 && progress.skipped === 0
+      ).length;
+      const completionScore = totalTasks ? (completed / totalTasks) * 70 : 0;
+      const cleanScore = participants.length
+        ? (cleanCount / participants.length) * 30
+        : 0;
+
+      return {
+        value: Math.min(100, Math.round(completionScore + cleanScore)),
+        label: `${completed}/${totalTasks || 1} done • ${cleanCount}/${participants.length || 2} no-skip`,
+        complete:
+          participants.length >= 2 &&
+          totalTasks > 0 &&
+          completed === totalTasks &&
+          cleanCount === participants.length,
+      };
+    }
+
     const rescuedCount = participants.filter(
       (progress) => progress.total > 0 && progress.highOpen === 0
     ).length;
@@ -777,7 +808,7 @@ export default function FriendsScreen() {
         <Text style={styles.heroTitle}>{friends.length} friend{friends.length === 1 ? "" : "s"} watching the plan</Text>
         <Text style={styles.heroBody}>
           This keeps pressure social but lightweight: progress cards, friend
-          requests, and quick nudges.
+          requests, quick nudges, and accountability contracts.
         </Text>
       </View>
 
@@ -792,9 +823,9 @@ export default function FriendsScreen() {
             <Text style={[styles.challengeEmptyTitle, { color: colors.text }]}>
               No active challenge today
             </Text>
-            <Text style={[styles.challengeEmptyText, { color: colors.subtle }]}>
-              Pick a friend below and start a 5-win push, no-skip pact, or high-priority rescue.
-            </Text>
+              <Text style={[styles.challengeEmptyText, { color: colors.subtle }]}>
+              Pick a friend below and start a 5-win push, no-skip pact, high-priority rescue, or accountability contract.
+              </Text>
           </View>
         ) : (
           activeChallenges.slice(0, 4).map((challenge) => {
@@ -1040,7 +1071,12 @@ export default function FriendsScreen() {
                 </View>
 
                 <View style={styles.challengeQuickRow}>
-                  {(["combinedFive", "cleanDay", "highPriorityRescue"] as ChallengeType[]).map((type) => (
+                  {([
+                    "combinedFive",
+                    "cleanDay",
+                    "highPriorityRescue",
+                    "accountabilityContract",
+                  ] as ChallengeType[]).map((type) => (
                     <TouchableOpacity
                       key={type}
                       style={[

@@ -29,6 +29,7 @@ import {
   PET_TIERS,
   getActivePet,
   getPetDisplayName,
+  getPetPersonality,
   getPetProgress,
   getTaskXp,
   getUnlockedPets,
@@ -408,6 +409,7 @@ export default function HomeScreen() {
     profile.petNicknames,
     profile.petNickname
   );
+  const petPersonality = getPetPersonality(activePet.key);
   const unlockedPets = getUnlockedPets(totalXp);
   const behaviorCallout = getBehaviorCallout(tasks, today);
   const energyMode = (profile.energyMode ?? "steady") as EnergyMode;
@@ -2527,6 +2529,20 @@ export default function HomeScreen() {
 
             <View
               style={[
+                styles.petPersonalityCard,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.petPersonalityTitle, { color: colors.text }]}>
+                Personality Mode: {petPersonality.label}
+              </Text>
+              <Text style={[styles.petPersonalityBody, { color: colors.subtle }]}>
+                {petPersonality.style} {petPersonality.coachLine}
+              </Text>
+            </View>
+
+            <View
+              style={[
                 styles.petMoodCard,
                 {
                   backgroundColor: colors.surface,
@@ -4425,6 +4441,22 @@ const styles = StyleSheet.create({
   },
   petMoodBody: {
     fontSize: 13,
+    lineHeight: 18,
+  },
+  petPersonalityCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 14,
+  },
+  petPersonalityTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  petPersonalityBody: {
+    fontSize: 12,
+    fontWeight: "700",
     lineHeight: 18,
   },
   petCardFooter: {

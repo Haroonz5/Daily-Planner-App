@@ -643,6 +643,33 @@ export default function FocusScreen() {
         </View>
       </View>
 
+      {timerState === "done" && (
+        <View
+          style={[
+            styles.lockInRecapCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.success,
+              shadowColor: colors.success,
+            },
+          ]}
+        >
+          <Text style={[styles.cardLabel, { color: colors.success }]}>
+            Lock-In Recap
+          </Text>
+          <Text style={[styles.lockInRecapTitle, { color: colors.text }]}>
+            {sessionMinutes} focused minutes banked
+          </Text>
+          <Text style={[styles.lockInRecapBody, { color: colors.subtle }]}>
+            {strictFocusEnabled && distractionStrikes === 0
+              ? "Clean strict block. This task earns a focus bonus because you stayed inside the app."
+              : strictFocusEnabled
+                ? `${distractionStrikes}/3 app switches. Still finished, but the next block should be cleaner.`
+                : "Timer complete. If the task is truly done, mark it complete and collect the win."}
+          </Text>
+        </View>
+      )}
+
       {focusData.currentTask ? (
         <View style={[styles.currentCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
           <Text style={[styles.cardLabel, { color: colors.subtle }]}>Current Focus</Text>
@@ -857,6 +884,27 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 3,
+  },
+  lockInRecapCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 18,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  lockInRecapTitle: {
+    fontSize: 21,
+    fontWeight: "900",
+    marginBottom: 7,
+  },
+  lockInRecapBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "700",
   },
   cardLabel: {
     fontSize: 13,

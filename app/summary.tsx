@@ -1,7 +1,15 @@
 import { useRouter } from "expo-router";
 import { collection, deleteDoc, doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
@@ -67,6 +75,8 @@ export default function SummaryScreen() {
   const [dailyFeedback, setDailyFeedback] =
     useState<DailyFeedbackResult | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [debriefText, setDebriefText] = useState("");
+  const [debriefReply, setDebriefReply] = useState<string | null>(null);
 
   const todayDate = formatDateKey(new Date());
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -160,6 +170,42 @@ export default function SummaryScreen() {
       ),
     [summary.todayTasks]
   );
+
+  const runDebriefCoach = () => {
+    const lower = debriefText.toLowerCase();
+    const signals: string[] = [];
+
+    if (!debriefText.trim()) {
+      setDebriefReply("Write one sentence about what happened, then I can turn it into a cleaner next move.");
+      return;
+    }
+
+    if (lower.includes("tired") || lower.includes("exhausted") || lower.includes("sleep")) {
+      signals.push("make tomorrow lighter and protect sleep first");
+    }
+    if (lower.includes("late") || lower.includes("busy") || lower.includes("time")) {
+      signals.push("add more buffer between tasks");
+    }
+    if (lower.includes("phone") || lower.includes("scroll") || lower.includes("distract")) {
+      signals.push("start the first block in Focus Mode");
+    }
+    if (lower.includes("good") || lower.includes("easy") || lower.includes("proud")) {
+      signals.push("repeat the schedule window that worked");
+    }
+
+    const defaultSignal =
+      summary.percent >= 80
+        ? "repeat the strongest part of today"
+        : summary.skipped > 0
+          ? "turn one skipped task into a smaller recovery task"
+          : "choose one priority and leave the rest flexible";
+
+    // I added this local debrief coach so the screen still feels useful even
+    // when the AI backend is offline or the model is taking a while.
+    setDebriefReply(
+      `Tomorrow: ${(signals[0] ?? defaultSignal)}. Keep it simple: one hard thing, one easy win, and one honest cutoff.`
+    );
+  };
 
   const rescheduleTaskTomorrow = async (task: Task) => {
     const uid = auth.currentUser?.uid;
@@ -344,6 +390,53 @@ export default function SummaryScreen() {
               </Text>
             ))}
           </View>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.debriefCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <Text style={[styles.feedbackEyebrow, { color: colors.tint }]}>
+          AI Debrief Chat
+        </Text>
+        <Text style={[styles.debriefTitle, { color: colors.text }]}>
+          Tell the app what actually happened
+        </Text>
+        <Text style={[styles.debriefBody, { color: colors.subtle }]}>
+          A quick honest sentence turns your day into a better plan, not just a score.
+        </Text>
+        <TextInput
+          style={[
+            styles.debriefInput,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          placeholder="Example: I was tired after school and gym felt too late."
+          placeholderTextColor={colors.subtle}
+          value={debriefText}
+          onChangeText={setDebriefText}
+          multiline
+        />
+        <TouchableOpacity
+          style={[styles.debriefButton, { backgroundColor: colors.tint }]}
+          onPress={runDebriefCoach}
+        >
+          <Text style={styles.debriefButtonText}>Reflect</Text>
+        </TouchableOpacity>
+        {!!debriefReply && (
+          <Text style={[styles.debriefReply, { color: colors.subtle }]}>
+            {debriefReply}
+          </Text>
         )}
       </View>
 
@@ -715,6 +808,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 5,
+  },
+  debriefCard: {
+    borderRadius: 22,
+    padding: 18,
+    width: "100%",
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  debriefTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 7,
+    marginBottom: 6,
+  },
+  debriefBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  debriefInput: {
+    minHeight: 92,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 13,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlignVertical: "top",
+  },
+  debriefButton: {
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  debriefButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  debriefReply: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 12,
+    fontWeight: "700",
   },
   petCard: {
     borderRadius: 22,

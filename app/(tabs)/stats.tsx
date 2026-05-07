@@ -26,6 +26,13 @@ import { auth, db } from "../../constants/firebaseConfig";
 
 type TaskStatus = "pending" | "completed" | "skipped";
 type TimeBucket = "early" | "morning" | "afternoon" | "evening";
+type DisciplineCategory =
+  | "Fitness"
+  | "School"
+  | "Work"
+  | "Health"
+  | "Home"
+  | "Personal";
 
 type Task = {
   id: string;
@@ -54,6 +61,37 @@ const bucketLabels: Record<TimeBucket, string> = {
   morning: "Morning",
   afternoon: "Afternoon",
   evening: "Evening",
+};
+
+const categoryLabels: DisciplineCategory[] = [
+  "Fitness",
+  "School",
+  "Work",
+  "Health",
+  "Home",
+  "Personal",
+];
+
+const getTaskCategory = (title: string): DisciplineCategory => {
+  const normalized = title.toLowerCase();
+
+  if (/(gym|workout|run|walk|lift|cardio|sport|basketball|soccer)/.test(normalized)) {
+    return "Fitness";
+  }
+  if (/(study|homework|exam|class|school|lecture|essay|quiz|project)/.test(normalized)) {
+    return "School";
+  }
+  if (/(work|meeting|email|client|shift|call|report|deadline)/.test(normalized)) {
+    return "Work";
+  }
+  if (/(doctor|medicine|meditate|water|sleep|meal|therapy|health)/.test(normalized)) {
+    return "Health";
+  }
+  if (/(clean|laundry|dishes|trash|room|chores|grocery|cook)/.test(normalized)) {
+    return "Home";
+  }
+
+  return "Personal";
 };
 
 const getBucketFromMinutes = (minutes: number | null): TimeBucket => {
@@ -131,9 +169,9 @@ export default function StatsScreen() {
   const stats = useMemo(() => {
     const todayDate = new Date().toISOString().split("T")[0];
 
-    const getLast7Days = () => {
+    const getLastDays = (count: number) => {
       const days: string[] = [];
-      for (let i = 6; i >= 0; i--) {
+      for (let i = count - 1; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         days.push(d.toISOString().split("T")[0]);
@@ -141,7 +179,8 @@ export default function StatsScreen() {
       return days;
     };
 
-    const last7Days = getLast7Days();
+    const last7Days = getLastDays(7);
+    const last28Days = getLastDays(28);
 
     const todayTasks = tasks.filter((task) => task.date === todayDate);
     const todayCompleted = todayTasks.filter((task) => task.completed).length;
@@ -182,6 +221,55 @@ export default function StatsScreen() {
       if (day.completed === day.total) streak += 1;
       else break;
     }
+
+    const categoryStats = categoryLabels.map((category) => {
+      const categoryTasks = tasks.filter(
+        (task) => getTaskCategory(task.title) === category
+      );
+      const completedCategoryTasks = categoryTasks.filter((task) => task.completed);
+      let currentStreak = 0;
+
+      for (let i = last28Days.length - 1; i >= 0; i--) {
+        const dayTasks = categoryTasks.filter((task) => task.date === last28Days[i]);
+        if (dayTasks.length === 0) continue;
+
+        const cleanDay = dayTasks.every(
+          (task) => task.completed && (task.status ?? "pending") !== "skipped"
+        );
+        if (cleanDay) currentStreak += 1;
+        else break;
+      }
+
+      return {
+        category,
+        total: categoryTasks.length,
+        completed: completedCategoryTasks.length,
+        percent: categoryTasks.length
+          ? Math.round((completedCategoryTasks.length / categoryTasks.length) * 100)
+          : 0,
+        currentStreak,
+      };
+    });
+
+    const disciplineMap = last28Days.map((date) => {
+      const dayTasks = tasks.filter((task) => task.date === date);
+      const completed = dayTasks.filter((task) => task.completed).length;
+      const skipped = dayTasks.filter(
+        (task) => (task.status ?? "pending") === "skipped"
+      ).length;
+      const percent = dayTasks.length ? Math.round((completed / dayTasks.length) * 100) : 0;
+
+      return {
+        date,
+        label: new Date(`${date}T12:00:00`).toLocaleDateString("en-US", {
+          day: "numeric",
+        }),
+        total: dayTasks.length,
+        completed,
+        skipped,
+        percent,
+      };
+    });
 
     const priorityCounts: Record<Priority, number> = {
       Low: tasks.filter((task) => (task.priority ?? "Medium") === "Low").length,
@@ -411,6 +499,8 @@ export default function StatsScreen() {
       weekEnd: last7Days[last7Days.length - 1],
       streak,
       weeklyStats,
+      categoryStats,
+      disciplineMap,
       priorityCounts,
       mostSkippedTask,
       mostProductiveWindow,
@@ -639,6 +729,97 @@ export default function StatsScreen() {
               </Text>
             </View>
           ))}
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+            Discipline Map
+          </Text>
+          <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
+            Last 28 days. Brighter blocks mean a cleaner day.
+          </Text>
+          <View style={styles.disciplineMapGrid}>
+            {stats.disciplineMap.map((day) => {
+              const blockColor =
+                day.total === 0
+                  ? colors.surface
+                  : day.skipped > 0 && day.percent < 60
+                    ? colors.danger
+                    : day.percent >= 90
+                      ? colors.success
+                      : day.percent >= 60
+                        ? colors.tint
+                        : colors.warning;
+
+              return (
+                <View
+                  key={day.date}
+                  style={[
+                    styles.disciplineMapBlock,
+                    {
+                      backgroundColor: blockColor,
+                      borderColor: colors.border,
+                      opacity: day.total === 0 ? 0.45 : Math.max(0.45, day.percent / 100),
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.disciplineMapLabel,
+                      { color: day.total === 0 ? colors.subtle : "#fff" },
+                    ]}
+                  >
+                    {day.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              shadowColor: colors.tint,
+            },
+          ]}
+        >
+          <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+            Category Streaks
+          </Text>
+          <Text style={[styles.cardSubtitle, { color: colors.subtle }]}>
+            This shows where your identity is getting stronger.
+          </Text>
+          <View style={styles.categoryGrid}>
+            {stats.categoryStats.map((category) => (
+              <View
+                key={category.category}
+                style={[styles.categoryCard, { backgroundColor: colors.surface }]}
+              >
+                <Text style={[styles.categoryTitle, { color: colors.text }]}>
+                  {category.category}
+                </Text>
+                <Text style={[styles.categoryStreak, { color: colors.tint }]}>
+                  {category.currentStreak}
+                </Text>
+                <Text style={[styles.categoryMeta, { color: colors.subtle }]}>
+                  streak • {category.percent}% complete
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
 
       <View
@@ -1628,6 +1809,51 @@ const styles = StyleSheet.create({
   },
   bigNumber: { fontSize: 52, fontWeight: "700" },
   cardSubtitle: { fontSize: 14, marginTop: 4, marginBottom: 12 },
+  disciplineMapGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -3,
+    marginTop: 4,
+  },
+  disciplineMapBlock: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    margin: 3,
+  },
+  disciplineMapLabel: {
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  categoryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+  },
+  categoryCard: {
+    width: "47%",
+    borderRadius: 16,
+    padding: 14,
+    margin: 4,
+  },
+  categoryTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  categoryStreak: {
+    fontSize: 34,
+    fontWeight: "900",
+    lineHeight: 38,
+  },
+  categoryMeta: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
   progressBarContainer: {
     height: 8,
     borderRadius: 4,

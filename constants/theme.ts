@@ -25,7 +25,12 @@ export type AppThemeName =
   | "glacierBlue"
   | "desertDawn"
   | "cyberMint"
-  | "plumVelvet";
+  | "plumVelvet"
+  | "terminalGreen"
+  | "cherryInk"
+  | "paperTrail"
+  | "solarFlare"
+  | "cobaltCircuit";
 
 type ThemePalette = {
   text: string;
@@ -71,6 +76,11 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   desertDawn: "Desert Dawn",
   cyberMint: "Cyber Mint",
   plumVelvet: "Plum Velvet",
+  terminalGreen: "Terminal Green",
+  cherryInk: "Cherry Ink",
+  paperTrail: "Paper Trail",
+  solarFlare: "Solar Flare",
+  cobaltCircuit: "Cobalt Circuit",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -496,6 +506,91 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff7a9e",
     success: "#75d6a4",
     warning: "#f6c86c",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  terminalGreen: {
+    text: "#d7ffd9",
+    background: "#020703",
+    card: "#071109",
+    surface: "#0d1d10",
+    tint: "#39ff74",
+    icon: "#8fd49c",
+    tabIconDefault: "#557a5b",
+    tabIconSelected: "#39ff74",
+    subtle: "#a1cfa7",
+    border: "#17351d",
+    danger: "#ff6767",
+    success: "#39ff74",
+    warning: "#d5ff66",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  cherryInk: {
+    text: "#fff2f5",
+    background: "#19050b",
+    card: "#260812",
+    surface: "#38101d",
+    tint: "#ff477e",
+    icon: "#c992a2",
+    tabIconDefault: "#85505f",
+    tabIconSelected: "#ff477e",
+    subtle: "#e0b6c0",
+    border: "#4a1b2a",
+    danger: "#ff6b6b",
+    success: "#7ddc9f",
+    warning: "#f7c66a",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  paperTrail: {
+    text: "#1f2937",
+    background: "#fbf7ed",
+    card: "#fffdf6",
+    surface: "#ece5d4",
+    tint: "#315f9c",
+    icon: "#53606d",
+    tabIconDefault: "#7b8793",
+    tabIconSelected: "#315f9c",
+    subtle: "#516070",
+    border: "#ddd3bd",
+    danger: "#be4b5f",
+    success: "#407f5a",
+    warning: "#b7791f",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  solarFlare: {
+    text: "#261a05",
+    background: "#fff7d1",
+    card: "#fffdf0",
+    surface: "#ffe8a3",
+    tint: "#f97316",
+    icon: "#765327",
+    tabIconDefault: "#96713d",
+    tabIconSelected: "#f97316",
+    subtle: "#624a24",
+    border: "#f3d27c",
+    danger: "#d94848",
+    success: "#2f9f62",
+    warning: "#d97706",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  cobaltCircuit: {
+    text: "#eef6ff",
+    background: "#06122f",
+    card: "#0b1c44",
+    surface: "#10295f",
+    tint: "#ffd23f",
+    icon: "#9fb6df",
+    tabIconDefault: "#647aab",
+    tabIconSelected: "#ffd23f",
+    subtle: "#b8c9ea",
+    border: "#1d3975",
+    danger: "#ff7a90",
+    success: "#5ee0a8",
+    warning: "#ffd23f",
     statusBar: "light",
     navigationTone: "dark",
   },

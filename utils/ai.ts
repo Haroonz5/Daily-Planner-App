@@ -1,3 +1,5 @@
+import Constants from "expo-constants";
+
 import { formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
@@ -133,9 +135,58 @@ export type AiBackendHealth = {
   responseMs: number;
 };
 
+const normalizeAiApiUrl = (value?: string | null) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  // I added this repair because one tiny typo like 192.168.1.5.8000 should not
+  // make the AI screen look broken when the intended URL is clearly port 8000.
+  const fixedPortTypo = trimmed.replace(
+    /^(https?:\/\/\d{1,3}(?:\.\d{1,3}){3})\.(\d{2,5})(\/.*)?$/i,
+    "$1:$2$3"
+  );
+
+  return fixedPortTypo.replace(/\/$/, "");
+};
+
+const getExpoHostAiApiUrl = () => {
+  const hostUri =
+    (Constants.expoConfig as any)?.hostUri ??
+    (Constants.manifest as any)?.debuggerHost ??
+    (Constants.manifest2 as any)?.extra?.expoClient?.hostUri ??
+    null;
+
+  if (typeof hostUri !== "string") return null;
+
+  const host = hostUri.replace(/^https?:\/\//, "").split(":")[0];
+  if (!host || host === "localhost" || host === "127.0.0.1") return null;
+
+  return `http://${host}:8000`;
+};
+
+const isDevMachineUrl = (url: string) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(
+    url
+  );
+
+const getAiApiUrls = () => {
+  const configuredUrl = normalizeAiApiUrl(process.env.EXPO_PUBLIC_AI_API_URL);
+  const expoHostUrl = normalizeAiApiUrl(getExpoHostAiApiUrl());
+  const urls: string[] = [];
+
+  // I prefer the live Expo LAN host for local private IPs because the phone and
+  // Metro are usually on the same Mac, while .env.local can go stale when Wi-Fi changes.
+  if (expoHostUrl && (!configuredUrl || isDevMachineUrl(configuredUrl))) {
+    urls.push(expoHostUrl);
+  }
+  if (configuredUrl) urls.push(configuredUrl);
+  urls.push("http://127.0.0.1:8000");
+
+  return Array.from(new Set(urls));
+};
+
 const getAiApiUrl = () => {
-  const configuredUrl = process.env.EXPO_PUBLIC_AI_API_URL;
-  return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+  return getAiApiUrls()[0] ?? "http://127.0.0.1:8000";
 };
 
 const fetchWithTimeout = (
@@ -153,21 +204,41 @@ const fetchWithTimeout = (
   });
 };
 
+const fetchAiEndpoint = async (
+  path: string,
+  init: RequestInit,
+  timeoutMs: number
+) => {
+  let lastError: unknown = null;
+
+  for (const url of getAiApiUrls()) {
+    try {
+      return await fetchWithTimeout(`${url}${path}`, init, timeoutMs);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error("AI backend is not reachable.");
+};
+
 const normalizeAiSource = (source: unknown): Exclude<AiSource, "offline"> =>
   // This connects the backend's source field to the UI. Unknown sources stay safe
   // by falling back to "local" instead of crashing the task planner.
   source === "openai" || source === "gemini" ? source : "local";
 
 export const checkAiBackendHealth = async (): Promise<AiBackendHealth> => {
-  const url = getAiApiUrl();
+  const urls = getAiApiUrls();
+  const firstUrl = urls[0] ?? getAiApiUrl();
   const startedAt = Date.now();
 
-  try {
-    const response = await fetchWithTimeout(
-      `${url}/health`,
-      { method: "GET" },
-      3200
-    );
+  for (const url of urls) {
+    try {
+      const response = await fetchWithTimeout(
+        `${url}/health`,
+        { method: "GET" },
+        1800
+      );
     const responseMs = Date.now() - startedAt;
 
     if (!response.ok) {
@@ -202,18 +273,22 @@ export const checkAiBackendHealth = async (): Promise<AiBackendHealth> => {
             : null,
       responseMs,
     };
-  } catch {
-    return {
-      ok: false,
-      url,
-      provider: "offline",
-      remoteSources: [],
-      modelConfigured: false,
-      activeModel: null,
-      timeoutSeconds: null,
-      responseMs: Date.now() - startedAt,
-    };
+    } catch {
+      // Try the next candidate URL before giving up. This handles stale Wi-Fi IPs
+      // without making the user manually edit .env.local every time.
+    }
   }
+
+  return {
+    ok: false,
+    url: firstUrl,
+    provider: "offline",
+    remoteSources: [],
+    modelConfigured: false,
+    activeModel: null,
+    timeoutSeconds: null,
+    responseMs: Date.now() - startedAt,
+  };
 };
 
 const parseTimeToDate = (time: string) => {
@@ -588,8 +663,8 @@ export const parseNaturalTasks = async ({
   const fallback = () => localParseNaturalTasks(text, defaultDate);
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/parse-tasks`,
+    const response = await fetchAiEndpoint(
+      "/v1/parse-tasks",
       {
         method: "POST",
         headers: {
@@ -785,8 +860,8 @@ export const runRealityCheck = async ({
   const fallback = () => localRealityCheck({ proposedTasks, existingTasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/reality-check`,
+    const response = await fetchAiEndpoint(
+      "/v1/reality-check",
       {
         method: "POST",
         headers: {
@@ -957,8 +1032,8 @@ export const runAiReschedule = async ({
   const fallback = () => localAiReschedule({ missedTasks, existingTasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/reschedule`,
+    const response = await fetchAiEndpoint(
+      "/v1/reschedule",
       {
         method: "POST",
         headers: {
@@ -1127,8 +1202,8 @@ export const getDailyFeedback = async ({
   const fallback = () => localDailyFeedback({ date, tasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/daily-feedback`,
+    const response = await fetchAiEndpoint(
+      "/v1/daily-feedback",
       {
         method: "POST",
         headers: {
@@ -1298,8 +1373,8 @@ export const getPatternFeedback = async ({
   const fallback = () => localPatternFeedback({ tasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/pattern-feedback`,
+    const response = await fetchAiEndpoint(
+      "/v1/pattern-feedback",
       {
         method: "POST",
         headers: {
@@ -1435,8 +1510,8 @@ export const getWeeklyReview = async ({
   const fallback = () => localWeeklyReview({ weekStart, weekEnd, tasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/weekly-review`,
+    const response = await fetchAiEndpoint(
+      "/v1/weekly-review",
       {
         method: "POST",
         headers: {
@@ -1542,8 +1617,8 @@ export const getRoutineCoach = async ({
   const fallback = () => localRoutineCoach({ routineTitle, tasks });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/routine-coach`,
+    const response = await fetchAiEndpoint(
+      "/v1/routine-coach",
       {
         method: "POST",
         headers: {
@@ -1704,8 +1779,8 @@ export const breakDownTask = async ({
   const fallback = () => localTaskBreakdown({ title, notes, priority });
 
   try {
-    const response = await fetchWithTimeout(
-      `${getAiApiUrl()}/v1/breakdown-task`,
+    const response = await fetchAiEndpoint(
+      "/v1/breakdown-task",
       {
         method: "POST",
         headers: {

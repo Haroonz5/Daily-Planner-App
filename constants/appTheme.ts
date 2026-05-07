@@ -31,6 +31,11 @@ export const themeOptions: AppThemeName[] = [
   "desertDawn",
   "cyberMint",
   "plumVelvet",
+  "terminalGreen",
+  "cherryInk",
+  "paperTrail",
+  "solarFlare",
+  "cobaltCircuit",
 ];
 
 export const getStoredTheme = async (): Promise<AppThemeName> => {

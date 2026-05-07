@@ -32,6 +32,12 @@ export type PetTier = {
   description: string;
 };
 
+export type PetPersonality = {
+  label: string;
+  style: string;
+  coachLine: string;
+};
+
 export const getPetNickname = (
   petKey: PetKey,
   petNicknames?: PetNicknameMap | null,
@@ -102,6 +108,47 @@ export const PET_TIERS: PetTier[] = [
     description: "Elite discipline. Hard to shake.",
   },
 ];
+
+export const petPersonalities: Record<PetKey, PetPersonality> = {
+  rabbit: {
+    label: "Gentle Starter",
+    style: "Soft nudges, tiny wins, low pressure.",
+    coachLine: "One honest start is enough to move the day.",
+  },
+  cat: {
+    label: "Independent Coach",
+    style: "Calm reminders with a little attitude.",
+    coachLine: "Do the task before your mood votes on it.",
+  },
+  fox: {
+    label: "Tactical Planner",
+    style: "Smart pivots, better timing, fewer wasted moves.",
+    coachLine: "Make the next move smaller and sharper.",
+  },
+  wolf: {
+    label: "Pack Standard",
+    style: "Protects streaks and calls out drift early.",
+    coachLine: "Stay with the pack. Finish the next thing.",
+  },
+  tiger: {
+    label: "High-Standard Mentor",
+    style: "Direct, intense, built for high-priority execution.",
+    coachLine: "No drama. Clear the hard task first.",
+  },
+  eagle: {
+    label: "Wide-Angle Strategist",
+    style: "Looks at the whole week before judging today.",
+    coachLine: "Zoom out, then make one clean decision.",
+  },
+  dragon: {
+    label: "Elite Discipline",
+    style: "Strict, rare, and built for long-term mastery.",
+    coachLine: "You do not need motivation when the standard is clear.",
+  },
+};
+
+export const getPetPersonality = (petKey?: string | null) =>
+  petPersonalities[(petKey as PetKey) ?? "rabbit"] ?? petPersonalities.rabbit;
 
 export const priorityXp: Record<Priority, number> = {
   Low: 10,
