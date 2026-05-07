@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import {
   sendEmailVerification,
   signInWithEmailAndPassword,
-  signOut,
 } from "firebase/auth";
 import { useEffect, useState } from "react";
 import {
@@ -61,9 +60,14 @@ export default function Login() {
       );
 
       if (!credential.user.emailVerified) {
+        // Keep the user signed in so Verify Email can resend, check, or skip.
+        // Signing out here caused a flash to Verify Email and then a bounce
+        // straight back to Login.
         await sendEmailVerification(credential.user).catch(() => {});
-        await signOut(auth);
-        setError("Check your email and verify your account before logging in.");
+        if (rememberMe) {
+          await AsyncStorage.setItem("savedEmail", normalizedEmail);
+        }
+        router.replace("/verify-email" as never);
         return;
       }
 

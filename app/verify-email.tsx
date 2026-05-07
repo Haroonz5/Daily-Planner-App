@@ -1,10 +1,11 @@
 import { useRouter } from "expo-router";
 import { sendEmailVerification, signOut } from "firebase/auth";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import { setEmailVerificationSkipped } from "@/utils/email-verification";
 import { auth } from "@/constants/firebaseConfig";
 
 export default function VerifyEmailScreen() {
@@ -12,9 +13,29 @@ export default function VerifyEmailScreen() {
   const { themeName } = useAppTheme();
   const colors = Colors[themeName];
   const [message, setMessage] = useState(
-    "We sent a verification link to your email."
+    "Sending a verification link to your email..."
   );
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) {
+      setMessage("Sign in again so we can send the verification email.");
+      return;
+    }
+
+    // I send this from the Verify screen too, so login/signup can hand off here
+    // cleanly and testers always have a visible place to resend or skip.
+    sendEmailVerification(user)
+      .then(() => {
+        setMessage("Verification email sent. Check your inbox and spam folder.");
+      })
+      .catch(() => {
+        setMessage(
+          "If an email was sent recently, Firebase may rate-limit another one. Check your inbox or try resend in a minute."
+        );
+      });
+  }, []);
 
   const resendVerification = async () => {
     const user = auth.currentUser;
@@ -51,6 +72,19 @@ export default function VerifyEmailScreen() {
     router.replace("/login" as never);
   };
 
+  const skipVerificationForNow = async () => {
+    const user = auth.currentUser;
+    if (!user || busy) return;
+
+    setBusy(true);
+    try {
+      await setEmailVerificationSkipped(user.uid);
+      router.replace("/tutorial" as never);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.card, { backgroundColor: colors.card }]}>
@@ -60,8 +94,8 @@ export default function VerifyEmailScreen() {
         </Text>
         <Text style={[styles.body, { color: colors.subtle }]}>{message}</Text>
         <Text style={[styles.body, { color: colors.subtle }]}>
-          This is the second account check before the app opens. It protects
-          usernames, friends, and progress from fake signups.
+          For testing right now, you can skip this step and come back later.
+          Production builds should keep verification on.
         </Text>
 
         <TouchableOpacity
@@ -81,6 +115,19 @@ export default function VerifyEmailScreen() {
         >
           <Text style={[styles.secondaryText, { color: colors.text }]}>
             Resend Email
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.skipButton,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+          onPress={skipVerificationForNow}
+          disabled={busy}
+        >
+          <Text style={[styles.skipText, { color: colors.warning }]}>
+            Skip Verification For Now
           </Text>
         </TouchableOpacity>
 
@@ -140,6 +187,18 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   secondaryText: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  skipButton: {
+    width: "100%",
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 10,
+    borderWidth: 1,
+  },
+  skipText: {
     fontSize: 14,
     fontWeight: "900",
   },

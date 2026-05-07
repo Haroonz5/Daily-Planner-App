@@ -26,6 +26,7 @@ import {
   ensureBaseReminders,
   handleTaskNotificationResponse,
 } from "../utils/notifications";
+import { getEmailVerificationSkipped } from "../utils/email-verification";
 import { auth, db } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
@@ -38,6 +39,9 @@ export default function RootLayout() {
   const [themeLoaded, setThemeLoaded] = useState(false);
   const [onboardingSeen, setOnboardingSeen] = useState<boolean | null>(null);
   const [tutorialCompleted, setTutorialCompleted] = useState<
+    boolean | undefined
+  >(undefined);
+  const [emailVerificationSkipped, setEmailVerificationSkippedState] = useState<
     boolean | undefined
   >(undefined);
 
@@ -68,6 +72,24 @@ export default function RootLayout() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!user) {
+      setEmailVerificationSkippedState(false);
+      return;
+    }
+
+    setEmailVerificationSkippedState(undefined);
+    void getEmailVerificationSkipped(user.uid).then((skipped) => {
+      if (active) setEmailVerificationSkippedState(skipped);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [segments, user]);
 
   useEffect(() => {
     if (!user) {
@@ -135,7 +157,14 @@ export default function RootLayout() {
   }, [user]);
 
   useEffect(() => {
-    if (loading || !themeLoaded || onboardingSeen === null) return;
+    if (
+      loading ||
+      !themeLoaded ||
+      onboardingSeen === null ||
+      (user && emailVerificationSkipped === undefined)
+    ) {
+      return;
+    }
 
     const firstSegment = String(segments[0] ?? "");
     const inProtectedTabs = firstSegment === "(tabs)";
@@ -183,7 +212,7 @@ export default function RootLayout() {
       return;
     }
 
-    if (user && !user.emailVerified) {
+    if (user && !user.emailVerified && !emailVerificationSkipped) {
       // I added this email gate so signup is protected twice: Firebase account
       // auth first, then verified email before tasks, friends, and progress open.
       if (!inVerifyEmail) {
@@ -192,7 +221,7 @@ export default function RootLayout() {
       return;
     }
 
-    if (user && user.emailVerified && inVerifyEmail) {
+    if (user && (user.emailVerified || emailVerificationSkipped) && inVerifyEmail) {
       if (tutorialCompleted === undefined) return;
       router.replace(
         (tutorialCompleted === false ? "/tutorial" : "/(tabs)") as never
@@ -218,6 +247,7 @@ export default function RootLayout() {
     }
   }, [
     loading,
+    emailVerificationSkipped,
     onboardingSeen,
     router,
     segments,
