@@ -21,7 +21,11 @@ export type AppThemeName =
   | "citrusPop"
   | "neonNoir"
   | "royalIndigo"
-  | "monochromePro";
+  | "monochromePro"
+  | "glacierBlue"
+  | "desertDawn"
+  | "cyberMint"
+  | "plumVelvet";
 
 type ThemePalette = {
   text: string;
@@ -63,6 +67,10 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   neonNoir: "Neon Noir",
   royalIndigo: "Royal Indigo",
   monochromePro: "Monochrome Pro",
+  glacierBlue: "Glacier Blue",
+  desertDawn: "Desert Dawn",
+  cyberMint: "Cyber Mint",
+  plumVelvet: "Plum Velvet",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -420,6 +428,74 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff6b6b",
     success: "#89d185",
     warning: "#d9b36a",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  glacierBlue: {
+    text: "#13202f",
+    background: "#f1f8ff",
+    card: "#ffffff",
+    surface: "#e0eefc",
+    tint: "#2f80ed",
+    icon: "#526b85",
+    tabIconDefault: "#7890a8",
+    tabIconSelected: "#2f80ed",
+    subtle: "#47596f",
+    border: "#cfe0f2",
+    danger: "#d45f7a",
+    success: "#2f9f7c",
+    warning: "#c98d2f",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  desertDawn: {
+    text: "#332319",
+    background: "#fff8ed",
+    card: "#fffdf8",
+    surface: "#f5e3c8",
+    tint: "#d9822b",
+    icon: "#735b44",
+    tabIconDefault: "#92765a",
+    tabIconSelected: "#d9822b",
+    subtle: "#66513c",
+    border: "#e9d3b4",
+    danger: "#c85d50",
+    success: "#699f61",
+    warning: "#c58b2c",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  cyberMint: {
+    text: "#effff8",
+    background: "#03110d",
+    card: "#071b15",
+    surface: "#0d2b22",
+    tint: "#33f5a5",
+    icon: "#86baa8",
+    tabIconDefault: "#547769",
+    tabIconSelected: "#33f5a5",
+    subtle: "#a8d8c8",
+    border: "#174133",
+    danger: "#ff6b91",
+    success: "#45e6a8",
+    warning: "#f4c95d",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  plumVelvet: {
+    text: "#fff4ff",
+    background: "#17091c",
+    card: "#24102c",
+    surface: "#351a40",
+    tint: "#e879f9",
+    icon: "#c4a3cb",
+    tabIconDefault: "#84618d",
+    tabIconSelected: "#e879f9",
+    subtle: "#d7b8df",
+    border: "#472154",
+    danger: "#ff7a9e",
+    success: "#75d6a4",
+    warning: "#f6c86c",
     statusBar: "light",
     navigationTone: "dark",
   },

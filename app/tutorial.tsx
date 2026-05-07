@@ -15,6 +15,7 @@ import { useAppTheme } from "@/constants/appTheme";
 import type { PetKey } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import { getDisciplineQuote } from "@/utils/discipline-quotes";
 
 type TutorialSlide = {
   label: string;
@@ -122,6 +123,10 @@ export default function TutorialScreen() {
 
   const slide = tutorialSlides[currentSlide];
   const isLastSlide = currentSlide === tutorialSlides.length - 1;
+  const tutorialQuote = getDisciplineQuote(
+    currentSlide === 2 ? "focus" : "startup",
+    `tutorial-${currentSlide}-${selectedGoal}`
+  );
 
   const finishTutorial = async () => {
     if (isSaving) return;
@@ -284,6 +289,20 @@ export default function TutorialScreen() {
           >
             <Text style={[styles.calloutText, { color: colors.text }]}>
               {slide.callout}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.quoteCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.quoteText, { color: colors.text }]}>
+              {tutorialQuote.text}
+            </Text>
+            <Text style={[styles.quoteAuthor, { color: colors.subtle }]}>
+              {tutorialQuote.author}
             </Text>
           </View>
 
@@ -482,6 +501,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     lineHeight: 20,
+    textAlign: "center",
+  },
+  quoteCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 12,
+  },
+  quoteText: {
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  quoteAuthor: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 7,
     textAlign: "center",
   },
   steps: {

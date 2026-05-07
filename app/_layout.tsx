@@ -26,6 +26,7 @@ import {
   ensureBaseReminders,
   handleTaskNotificationResponse,
 } from "../utils/notifications";
+import { getStartupQuote } from "../utils/discipline-quotes";
 import { getEmailVerificationSkipped } from "../utils/email-verification";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -261,6 +262,8 @@ export default function RootLayout() {
     await setStoredTheme(theme);
   };
 
+  const startupQuote = getStartupQuote();
+
   if (loading || !themeLoaded || onboardingSeen === null) {
     return (
       <GestureHandlerRootView style={{ flex: 1 }}>
@@ -294,6 +297,38 @@ export default function RootLayout() {
           >
             Checking your account, theme, and reminders.
           </Text>
+          <View
+            style={{
+              marginTop: 22,
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: "rgba(255,255,255,0.08)",
+              borderWidth: 1,
+              borderColor: "rgba(255,255,255,0.14)",
+            }}
+          >
+            <Text
+              style={{
+                color: "#fff",
+                fontSize: 15,
+                lineHeight: 22,
+                textAlign: "center",
+                fontWeight: "700",
+              }}
+            >
+              {startupQuote.text}
+            </Text>
+            <Text
+              style={{
+                marginTop: 8,
+                color: "rgba(255,255,255,0.68)",
+                fontSize: 12,
+                textAlign: "center",
+              }}
+            >
+              {startupQuote.author}
+            </Text>
+          </View>
         </View>
       </GestureHandlerRootView>
     );

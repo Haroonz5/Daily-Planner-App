@@ -1222,7 +1222,7 @@ export default function AddTask() {
             Quick Add with AI
           </Text>
           <Text style={[styles.aiSubtitle, { color: colors.subtle }]}>
-            Type multiple tasks in one sentence and review the schedule before adding.
+            Type messy tasks, preview the draft, then tap Add to Tasks to save it.
           </Text>
 
           <View style={styles.exampleRow}>
@@ -1295,7 +1295,7 @@ export default function AddTask() {
               disabled={aiBusy}
             >
               <Text style={styles.aiPrimaryText}>
-                {aiBusy ? "Planning..." : "Plan with AI"}
+                {aiBusy ? "Planning..." : "Preview with AI"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1317,19 +1317,19 @@ export default function AddTask() {
                 {aiBusy
                   ? "Building your task plan..."
                   : aiSource === "openai" || aiSource === "gemini"
-                    ? "AI plan ready"
+                    ? "Draft ready - not saved yet"
                     : aiSource === "local"
-                      ? "Fast planner used"
-                      : "Offline planner used"}
+                      ? "Fast draft ready - not saved yet"
+                      : "Offline draft ready - not saved yet"}
               </Text>
               <Text style={[styles.aiStatusBody, { color: colors.subtle }]}>
                 {aiBusy
                   ? "Checking the text, dates, times, and whether the day is realistic."
                   : aiSource === "openai" || aiSource === "gemini"
-                    ? `The backend used ${aiSource === "gemini" ? "Gemini" : "OpenAI"} to understand your tasks and check the schedule.`
+                    ? `The backend used ${aiSource === "gemini" ? "Gemini" : "OpenAI"} to understand your tasks. Tap Add to Tasks below to put the draft on Today.`
                     : aiSource === "local"
-                      ? "The backend is online, but the model was unavailable or too slow, so the app used the built-in planner and kept your flow moving."
-                      : "Your tasks still work. To use the real backend on your phone, run the Python AI server and restart Expo with npm run start:ai."}
+                      ? "The backend fallback made a draft. Tap Add to Tasks below to actually save it."
+                      : "The offline planner made a draft. Tap Add to Tasks below to actually save it."}
               </Text>
             </View>
           )}
@@ -1383,15 +1383,7 @@ export default function AddTask() {
                         task.recurrence,
                         task.recurrenceDays
                       ).toLowerCase()}{" "}
-                      · creates{" "}
-                      {
-                        buildRecurringDates(
-                          task.date,
-                          task.recurrence,
-                          task.recurrenceDays
-                        ).length
-                      }{" "}
-                      tasks
+                      · saves as an ongoing routine
                     </Text>
                   )}
                 </View>
@@ -1525,8 +1517,8 @@ export default function AddTask() {
               >
                 <Text style={styles.aiPrimaryText}>
                   {realityCheck?.severity === "overloaded"
-                    ? "Add Anyway"
-                    : `Add ${aiDraftOccurrenceCount} Scheduled Task${aiDraftOccurrenceCount === 1 ? "" : "s"}`}
+                    ? "Add Draft Anyway"
+                    : `Add ${aiDraftOccurrenceCount} Draft${aiDraftOccurrenceCount === 1 ? "" : "s"} to Tasks`}
                 </Text>
               </TouchableOpacity>
             </View>

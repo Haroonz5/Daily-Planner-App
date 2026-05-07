@@ -521,7 +521,7 @@ def _resolve_segment_date(segment: str, default_date: date) -> date:
         return default_date + timedelta(days=7)
 
     if re.search(
-        rf"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
+        rf"\b(?:every\s+day|everyday|evryday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
         lower,
         re.IGNORECASE,
     ):
@@ -660,7 +660,7 @@ def _clean_title(segment: str) -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b",
+        r"\b(?:every\s+day|everyday|evryday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -672,7 +672,7 @@ def _clean_title(segment: str) -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b",
+        r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|evryday|daily|each\s+day|every\s+week|weekly|each\s+week)\b",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -760,7 +760,7 @@ def _recurrence_from_text(segment: str) -> tuple[Recurrence, list[int]]:
             return "custom", days
 
     except_match = re.search(
-        rf"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
+        rf"\b(?:every\s+day|everyday|evryday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+{weekday_pattern}\b",
         lower,
         re.IGNORECASE,
     )
@@ -771,7 +771,7 @@ def _recurrence_from_text(segment: str) -> tuple[Recurrence, list[int]]:
 
     if re.search(r"\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri)\b", lower):
         return "weekdays", []
-    if re.search(r"\b(every\s+day|everyday|daily|each\s+day)\b", lower):
+    if re.search(r"\b(every\s+day|everyday|evryday|daily|each\s+day)\b", lower):
         return "daily", []
     if re.search(r"\b(every\s+week|weekly|each\s+week)\b", lower):
         return "weekly", []
@@ -861,7 +861,7 @@ def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             '"recurrence":"none|daily|weekdays|weekly|custom",'
             '"recurrence_days":[1,2,3,4],"notes":""}],"warnings":[]}. '
             "Use the provided default_date when no date is stated. "
-            "If the user says every day, everyday, or daily, set recurrence to daily. "
+            "If the user says every day, everyday, evryday, or daily, set recurrence to daily. "
             "If the user says weekdays or Monday to Friday, set recurrence to weekdays. "
             "If the user says weekly or every week, set recurrence to weekly. "
             "If the user gives specific days like Mon-Thu, Monday through Thursday, "

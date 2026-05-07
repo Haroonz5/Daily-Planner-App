@@ -18,6 +18,7 @@ import {
   getDailyFeedback,
   type DailyFeedbackResult,
 } from "@/utils/ai";
+import { getDisciplineQuote } from "@/utils/discipline-quotes";
 import { playShareFeedback } from "@/utils/feedback";
 import {
   cancelTaskNotifications,
@@ -127,6 +128,14 @@ export default function SummaryScreen() {
       : summary.allDone
         ? "You completed all your tasks today. Amazing work!"
       : `You completed ${summary.completed} out of ${summary.total} tasks (${summary.percent}%). Tomorrow is a new chance!`;
+  const reviewQuote = useMemo(
+    () =>
+      getDisciplineQuote(
+        summary.skipped > 0 ? "skip" : "review",
+        `${todayDate}-${summary.percent}-${summary.skipped}`
+      ),
+    [summary.percent, summary.skipped, todayDate]
+  );
 
   const shareProgress = async () => {
     const shareCard = [
@@ -249,6 +258,27 @@ export default function SummaryScreen() {
       </Text>
 
       <Text style={[styles.subtitle, { color: colors.subtle }]}>{message}</Text>
+
+      <View
+        style={[
+          styles.quoteCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <Text style={[styles.quoteEyebrow, { color: colors.tint }]}>
+          Midnight Standard
+        </Text>
+        <Text style={[styles.quoteText, { color: colors.text }]}>
+          {reviewQuote.text}
+        </Text>
+        <Text style={[styles.quoteAuthor, { color: colors.subtle }]}>
+          {reviewQuote.author}
+        </Text>
+      </View>
 
       <View
         style={[
@@ -608,6 +638,34 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 24,
     paddingHorizontal: 16,
+  },
+  quoteCard: {
+    borderRadius: 22,
+    padding: 18,
+    width: "100%",
+    marginBottom: 16,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  quoteEyebrow: {
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  quoteText: {
+    fontSize: 17,
+    fontWeight: "800",
+    lineHeight: 24,
+  },
+  quoteAuthor: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
   },
   feedbackCard: {
     borderRadius: 22,

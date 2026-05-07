@@ -67,6 +67,10 @@ import {
   playTaskCompleteFeedback,
   playWarningFeedback,
 } from "../../utils/feedback";
+import {
+  getDisciplineQuote,
+  getSkipQuote,
+} from "../../utils/discipline-quotes";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -91,6 +95,7 @@ type Task = {
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
   recurrenceDays?: number[] | null;
+  rollingRoutine?: boolean;
   skippedOccurrence?: boolean;
   seriesContinues?: boolean;
   completionProof?: string | null;
@@ -158,6 +163,9 @@ const bucketTemplates: Record<TimeBucket, number[]> = {
   afternoon: [13 * 60, 14 * 60 + 30, 16 * 60],
   evening: [18 * 60, 19 * 60 + 30, 21 * 60],
 };
+
+const normalizeTaskSignalTitle = (title: string) =>
+  title.trim().toLowerCase().replace(/\s+/g, " ");
 
 const confettiPalette = [
   "#c4a8d4",
@@ -247,6 +255,7 @@ export default function HomeScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Task | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [skipCandidate, setSkipCandidate] = useState<Task | null>(null);
   const [proofCandidate, setProofCandidate] = useState<Task | null>(null);
   const [proofNote, setProofNote] = useState("");
@@ -750,6 +759,78 @@ export default function HomeScreen() {
                 body: `${activePetDisplayName} is warmed up. Start with the smallest task on the list.`,
                 tone: colors.tint,
               };
+  const disciplineQuote = useMemo(() => {
+    const mood =
+      missedTasksToday.length > 0
+        ? "skip"
+        : progressPercent === 100
+          ? "review"
+          : completed > 0
+            ? "momentum"
+            : "startup";
+
+    return getDisciplineQuote(
+      mood,
+      `${today}-${completed}-${openTodayTasks}-${Math.round(progressPercent)}`
+    );
+  }, [completed, missedTasksToday.length, openTodayTasks, progressPercent, today]);
+  const skipQuote = skipCandidate ? getSkipQuote(skipCandidate.title) : null;
+  const taskFrictionMap = useMemo(() => {
+    const stats = new Map<
+      string,
+      { attempts: number; friction: number; title: string }
+    >();
+
+    tasks
+      .filter((task) => task.date < today)
+      .forEach((task) => {
+        const key = normalizeTaskSignalTitle(task.title);
+        const current = stats.get(key) ?? {
+          attempts: 0,
+          friction: 0,
+          title: task.title,
+        };
+        const hadFriction =
+          (task.status ?? "pending") === "skipped" ||
+          (task.rescheduledCount ?? 0) > 0;
+
+        stats.set(key, {
+          attempts: current.attempts + 1,
+          friction: current.friction + (hadFriction ? 1 : 0),
+          title: current.title,
+        });
+      });
+
+    const signals = new Map<
+      string,
+      { label: string; body: string; severity: "low" | "medium" | "high" }
+    >();
+
+    stats.forEach((stat, key) => {
+      if (stat.attempts < 3) return;
+
+      const frictionRate = stat.friction / stat.attempts;
+      if (frictionRate < 0.34) return;
+
+      signals.set(key, {
+        label:
+          frictionRate >= 0.67
+            ? "High friction"
+            : frictionRate >= 0.5
+              ? "Watch this"
+              : "Slight friction",
+        body: `${Math.round(frictionRate * 100)}% of past attempts were skipped or moved.`,
+        severity:
+          frictionRate >= 0.67
+            ? "high"
+            : frictionRate >= 0.5
+              ? "medium"
+              : "low",
+      });
+    });
+
+    return signals;
+  }, [tasks, today]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -973,9 +1054,9 @@ export default function HomeScreen() {
   ]);
 
   const isRecurringSeriesTask = (task?: Task | null) =>
-    !!task?.recurrenceGroupId &&
     !!task?.recurrence &&
-    task.recurrence !== "none";
+    task.recurrence !== "none" &&
+    (!!task.recurrenceGroupId || !!task.rollingRoutine);
 
   const isOpenTask = (task?: Task | null) =>
     !!task && !task.completed && (task.status ?? "pending") !== "skipped";
@@ -1000,57 +1081,98 @@ export default function HomeScreen() {
       });
   };
 
+  const getAllSeriesTasksFromTask = (task: Task) => {
+    if (!task.recurrenceGroupId) return [task];
+
+    return tasks.filter(
+      (candidate) => candidate.recurrenceGroupId === task.recurrenceGroupId
+    );
+  };
+
+  const cleanupDeletedTasksInBackground = (uid: string, taskIds: string[]) => {
+    // I keep notification cleanup out of the tap path so deleting a routine
+    // updates the UI first, then quietly rebuilds reminders in the background.
+    void Promise.all(
+      taskIds.map((taskId) => cancelTaskNotifications(taskId).catch(() => {}))
+    )
+      .then(() => syncMorningSummaryNotification(uid).catch(() => {}))
+      .catch(() => {});
+  };
+
   const deleteSingleTask = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    await cancelTaskNotifications(task.id);
     await deleteDoc(doc(db, "users", uid, "tasks", task.id));
-    await syncMorningSummaryNotification(uid).catch(() => {});
+    cleanupDeletedTasksInBackground(uid, [task.id]);
   };
 
   const deleteTaskAndFutureRepeats = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    const allSeriesTasks = getAllSeriesTasksFromTask(task);
     const targets = getSeriesTasksFromTask(task);
+    const targetIds = new Set(targets.map((candidate) => candidate.id));
     const batch = writeBatch(db);
-
-    await Promise.all(targets.map((candidate) => cancelTaskNotifications(candidate.id)));
 
     targets.forEach((candidate) => {
       batch.delete(doc(db, "users", uid, "tasks", candidate.id));
     });
 
+    allSeriesTasks.forEach((candidate) => {
+      if (targetIds.has(candidate.id)) return;
+
+      batch.update(doc(db, "users", uid, "tasks", candidate.id), {
+        recurrence: "none",
+        recurrenceGroupId: null,
+        recurrenceDays: null,
+        rollingRoutine: false,
+        routineCanceledAt: new Date(),
+        lastActionAt: new Date(),
+      });
+    });
+
     await batch.commit();
-    await syncMorningSummaryNotification(uid).catch(() => {});
-    setDeleteCandidate(null);
+    cleanupDeletedTasksInBackground(
+      uid,
+      targets.map((candidate) => candidate.id)
+    );
   };
 
   const endRecurringSeries = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid || !editingTask || !isRecurringSeriesTask(editingTask)) return;
 
+    const allSeriesTasks = getAllSeriesTasksFromTask(editingTask);
     const futureRepeats = getSeriesTasksFromTask(editingTask, {
       includeCurrent: false,
     });
+    const futureRepeatIds = new Set(futureRepeats.map((task) => task.id));
     const batch = writeBatch(db);
-
-    batch.update(doc(db, "users", uid, "tasks", editingTask.id), {
-      recurrence: "none",
-      recurrenceGroupId: null,
-      lastActionAt: new Date(),
-    });
-
-    await Promise.all(
-      futureRepeats.map((candidate) => cancelTaskNotifications(candidate.id))
-    );
 
     futureRepeats.forEach((candidate) => {
       batch.delete(doc(db, "users", uid, "tasks", candidate.id));
     });
 
+    allSeriesTasks.forEach((candidate) => {
+      if (futureRepeatIds.has(candidate.id)) return;
+
+      batch.update(doc(db, "users", uid, "tasks", candidate.id), {
+        recurrence: "none",
+        recurrenceGroupId: null,
+        recurrenceDays: null,
+        rollingRoutine: false,
+        routineCanceledAt: new Date(),
+        lastActionAt: new Date(),
+      });
+    });
+
     await batch.commit();
+    cleanupDeletedTasksInBackground(
+      uid,
+      futureRepeats.map((candidate) => candidate.id)
+    );
 
     if ((editingTask.status ?? "pending") !== "skipped" && !editingTask.completed) {
       await syncTaskNotifications({
@@ -1420,6 +1542,9 @@ export default function HomeScreen() {
       isCurrentTask(item) && !showDate && !isSkipped ? "Now" : "",
       isSkipped ? "Skipped" : "",
     ].filter(Boolean);
+    const frictionSignal = taskFrictionMap.get(
+      normalizeTaskSignalTitle(item.title)
+    );
 
     return (
       <View
@@ -1505,6 +1630,42 @@ export default function HomeScreen() {
                     item.recurrenceDays
                   ).toLowerCase()}`}
             </Text>
+          )}
+
+          {frictionSignal && isOpenTask(item) && (
+            <View
+              style={[
+                styles.frictionSignal,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor:
+                    frictionSignal.severity === "high"
+                      ? colors.danger
+                      : frictionSignal.severity === "medium"
+                        ? colors.warning
+                        : colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.frictionSignalLabel,
+                  {
+                    color:
+                      frictionSignal.severity === "high"
+                        ? colors.danger
+                        : frictionSignal.severity === "medium"
+                          ? colors.warning
+                          : colors.subtle,
+                  },
+                ]}
+              >
+                {frictionSignal.label}
+              </Text>
+              <Text style={[styles.frictionSignalBody, { color: colors.subtle }]}>
+                {frictionSignal.body}
+              </Text>
+            </View>
           )}
 
           {renderPriority(item.priority)}
@@ -1913,6 +2074,27 @@ export default function HomeScreen() {
                 ]}
               />
             </View>
+          </View>
+
+          <View
+            style={[
+              styles.disciplineQuoteCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <Text style={[styles.disciplineQuoteEyebrow, { color: colors.tint }]}>
+              Start Signal
+            </Text>
+            <Text style={[styles.disciplineQuoteText, { color: colors.text }]}>
+              {disciplineQuote.text}
+            </Text>
+            <Text style={[styles.disciplineQuoteAuthor, { color: colors.subtle }]}>
+              {disciplineQuote.author}
+            </Text>
           </View>
 
           {showOnboardingChecklist && (
@@ -3182,7 +3364,7 @@ export default function HomeScreen() {
                 ]}
               >
                 {isRecurringSeriesTask(editingTask)
-                  ? "Delete Options"
+                  ? "Delete / Stop Routine"
                   : "Delete Task"}
               </Text>
             </TouchableOpacity>
@@ -3194,16 +3376,18 @@ export default function HomeScreen() {
         visible={!!deleteCandidate}
         animationType="fade"
         transparent
-        onRequestClose={() => setDeleteCandidate(null)}
+        onRequestClose={() => {
+          if (!deleteBusy) setDeleteCandidate(null);
+        }}
       >
         <View style={styles.centerModalBackdrop}>
           <View style={[styles.collectionCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Delete Recurring Task
+              Delete Ongoing Task
             </Text>
             <Text style={[styles.collectionSubtitle, { color: colors.subtle }]}>
-              This task belongs to a recurring series. Keep your history safe by
-              deleting just this one, or remove this task and all future repeats.
+              Choose whether to remove only this occurrence, or stop this routine
+              from this task forward. Completed history stays safe.
             </Text>
 
             <TouchableOpacity
@@ -3216,9 +3400,16 @@ export default function HomeScreen() {
               ]}
               onPress={async () => {
                 if (!deleteCandidate) return;
-                await deleteSingleTask(deleteCandidate);
-                setDeleteCandidate(null);
+                const targetTask = deleteCandidate;
+                setDeleteBusy(true);
+                try {
+                  await deleteSingleTask(targetTask);
+                  setDeleteCandidate(null);
+                } finally {
+                  setDeleteBusy(false);
+                }
               }}
+              disabled={deleteBusy}
             >
               <Text
                 style={[
@@ -3226,7 +3417,7 @@ export default function HomeScreen() {
                   { color: colors.text },
                 ]}
               >
-                Delete Only This Task
+                {deleteBusy ? "Deleting..." : "Delete Only This One"}
               </Text>
             </TouchableOpacity>
 
@@ -3237,10 +3428,22 @@ export default function HomeScreen() {
               ]}
               onPress={async () => {
                 if (!deleteCandidate) return;
-                await deleteTaskAndFutureRepeats(deleteCandidate);
+                const targetTask = deleteCandidate;
+                setDeleteBusy(true);
+                try {
+                  await deleteTaskAndFutureRepeats(targetTask);
+                  setDeleteCandidate(null);
+                } finally {
+                  setDeleteBusy(false);
+                }
               }}
+              disabled={deleteBusy}
             >
-              <Text style={styles.primaryButtonText}>Delete This And Future</Text>
+              {deleteBusy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Delete This + All Future</Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -3249,6 +3452,7 @@ export default function HomeScreen() {
                 { backgroundColor: colors.surface, marginTop: 12, marginRight: 0 },
               ]}
               onPress={() => setDeleteCandidate(null)}
+              disabled={deleteBusy}
             >
               <Text style={[styles.secondaryButtonText, { color: colors.subtle }]}>
                 Cancel
@@ -3490,6 +3694,22 @@ export default function HomeScreen() {
                   } as skipped. The rest of the recurring series stays scheduled.`
                 : "Are you sure? This sounds like an excuse. You can still reschedule it instead if the timing is the problem."}
             </Text>
+
+            {skipQuote && (
+              <View
+                style={[
+                  styles.skipQuoteCard,
+                  { backgroundColor: colors.surface, borderColor: colors.warning },
+                ]}
+              >
+                <Text style={[styles.skipQuoteText, { color: colors.text }]}>
+                  {skipQuote.text}
+                </Text>
+                <Text style={[styles.skipQuoteAuthor, { color: colors.subtle }]}>
+                  {skipQuote.author}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.modalActions}>
               <TouchableOpacity
@@ -3745,6 +3965,34 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 999,
     backgroundColor: "#fff",
+  },
+  disciplineQuoteCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  disciplineQuoteEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.9,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  disciplineQuoteText: {
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 23,
+  },
+  disciplineQuoteAuthor: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
   },
   onboardingCard: {
     marginHorizontal: 16,
@@ -4447,6 +4695,26 @@ const styles = StyleSheet.create({
   strikethrough: { textDecorationLine: "line-through" },
   taskTime: { fontSize: 13, marginTop: 2 },
   taskRecurrence: { fontSize: 12, marginTop: 4 },
+  frictionSignal: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  frictionSignalLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  frictionSignalBody: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    marginTop: 2,
+  },
   priorityRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -4757,6 +5025,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 10,
+  },
+  skipQuoteCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 16,
+  },
+  skipQuoteText: {
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 20,
+  },
+  skipQuoteAuthor: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 7,
   },
   missedPromptSubtext: {
     fontSize: 13,

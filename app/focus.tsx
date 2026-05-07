@@ -27,6 +27,7 @@ import {
 } from "@/constants/rewards";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import { getDisciplineQuote } from "@/utils/discipline-quotes";
 import {
   playSelectionFeedback,
   playTaskCompleteFeedback,
@@ -318,6 +319,14 @@ export default function FocusScreen() {
         : timerState === "done"
           ? "Session complete. Finish the task or reset for another round."
           : "Pick a block length and start a clean focus session.";
+  const focusQuote = useMemo(
+    () =>
+      getDisciplineQuote(
+        "focus",
+        `${today}-${focusData.currentTask?.title ?? "focus"}-${timerState}`
+      ),
+    [focusData.currentTask?.title, timerState, today]
+  );
 
   const handleComplete = async (task: Task) => {
     const uid = auth.currentUser?.uid;
@@ -409,6 +418,27 @@ export default function FocusScreen() {
         <Text style={[styles.title, { color: colors.text }]}>Focus Mode</Text>
         <Text style={[styles.subtitle, { color: colors.subtle }]}>
           One task at a time. Keep the noise low and the next move obvious.
+        </Text>
+      </View>
+
+      <View
+        style={[
+          styles.quoteCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            shadowColor: colors.tint,
+          },
+        ]}
+      >
+        <Text style={[styles.quoteEyebrow, { color: colors.tint }]}>
+          Lock-In Line
+        </Text>
+        <Text style={[styles.quoteText, { color: colors.text }]}>
+          {focusQuote.text}
+        </Text>
+        <Text style={[styles.quoteAuthor, { color: colors.subtle }]}>
+          {focusQuote.author}
         </Text>
       </View>
 
@@ -764,6 +794,34 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     lineHeight: 21,
+  },
+  quoteCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  quoteEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 7,
+  },
+  quoteText: {
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 23,
+  },
+  quoteAuthor: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
   },
   petCard: {
     borderRadius: 20,

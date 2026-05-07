@@ -341,7 +341,7 @@ const getLocalRecurrenceDetails = (
 
   const exceptMatch = lower.match(
     new RegExp(
-      `\\b(?:every\\s+day|everyday|daily|each\\s+day)\\s+(?:except|not|excluding|besides)\\s+${weekdayPattern}\\b`,
+      `\\b(?:every\\s+day|everyday|evryday|daily|each\\s+day)\\s+(?:except|not|excluding|besides)\\s+${weekdayPattern}\\b`,
       "i"
     )
   );
@@ -362,7 +362,7 @@ const getLocalRecurrenceDetails = (
     return { recurrence: "weekdays", recurrenceDays: null };
   }
 
-  if (/\b(every\s+day|everyday|daily|each\s+day)\b/.test(lower)) {
+  if (/\b(every\s+day|everyday|evryday|daily|each\s+day)\b/.test(lower)) {
     return { recurrence: "daily", recurrenceDays: null };
   }
 
@@ -429,7 +429,7 @@ const cleanLocalTitle = (segment: string) => {
       ""
     )
     .replace(
-      /\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|daily|each\s+day|every\s+week|weekly|each\s+week)\b/gi,
+      /\b(every\s+weekday|weekdays|monday\s+to\s+friday|mon\s*-\s*fri|every\s+day|everyday|evryday|daily|each\s+day|every\s+week|weekly|each\s+week)\b/gi,
       ""
     )
     .replace(
