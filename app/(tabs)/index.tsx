@@ -462,6 +462,68 @@ export default function HomeScreen() {
       : progressPercent === 100
         ? "Your companion felt that. Stack another clean day tomorrow."
         : "Small wins count. Clear the next task, then let momentum do the rest.";
+  const onboardingChecklist = useMemo(() => {
+    const hasRoutine = tasks.some(
+      (task) => !!task.recurrenceGroupId || (!!task.recurrence && task.recurrence !== "none")
+    );
+    const hasCompletedTask = tasks.some((task) => task.completed);
+
+    return [
+      {
+        label: "Add your first real task",
+        done: tasks.length > 0,
+        action: "Add",
+        route: "/(tabs)/explore",
+      },
+      {
+        label: "Create one repeating routine",
+        done: hasRoutine,
+        action: "Plan",
+        route: "/(tabs)/explore",
+      },
+      {
+        label: "Complete one task honestly",
+        done: hasCompletedTask,
+        action: "Focus",
+        route: "/focus",
+      },
+      {
+        label: "Set a username for friends",
+        done: !!profile.username,
+        action: "Settings",
+        route: "/settings",
+      },
+      {
+        label: "Choose a weekly focus goal",
+        done: !!profile.weeklyFocusGoal,
+        action: "Set Goal",
+        route: "/settings",
+      },
+    ];
+  }, [profile.username, profile.weeklyFocusGoal, tasks]);
+  const onboardingCompleteCount = onboardingChecklist.filter((item) => item.done).length;
+  const showOnboardingChecklist =
+    tasksLoaded && onboardingCompleteCount < onboardingChecklist.length;
+  const weeklyFocusGoal = profile.weeklyFocusGoal?.trim();
+  const eveningReview = useMemo(() => {
+    const hour = new Date().getHours();
+    if (!tasksLoaded || todayTasks.length === 0 || hour < 20) return null;
+
+    const skippedCount = todayTasks.filter(
+      (task) => (task.status ?? "pending") === "skipped"
+    ).length;
+
+    return {
+      title:
+        progressPercent === 100
+          ? "Close the loop while the win is fresh"
+          : "Do a 60-second honest review",
+      body:
+        progressPercent === 100
+          ? "Everything scheduled today is complete. Lock in the lesson before tomorrow gets noisy."
+          : `${completed} done, ${openTodayTasks} open, ${skippedCount} skipped. Decide what moves forward before the day ends.`,
+    };
+  }, [completed, openTodayTasks, progressPercent, tasksLoaded, todayTasks]);
 
   const adaptiveReschedule = useMemo(() => {
     const historyTasks = tasks.filter((task) => task.date < today);
@@ -1852,6 +1914,161 @@ export default function HomeScreen() {
               />
             </View>
           </View>
+
+          {showOnboardingChecklist && (
+            <View
+              style={[
+                styles.onboardingCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <View style={styles.onboardingHeader}>
+                <View style={styles.onboardingHeaderCopy}>
+                  <Text style={[styles.onboardingEyebrow, { color: colors.tint }]}>
+                    Setup Quest
+                  </Text>
+                  <Text style={[styles.onboardingTitle, { color: colors.text }]}>
+                    Make the app yours
+                  </Text>
+                  <Text style={[styles.onboardingBody, { color: colors.subtle }]}>
+                    Finish these once and Daily Discipline becomes easier to test
+                    and actually use.
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.onboardingCountPill,
+                    { backgroundColor: colors.surface },
+                  ]}
+                >
+                  <Text style={[styles.onboardingCountText, { color: colors.text }]}>
+                    {onboardingCompleteCount}/{onboardingChecklist.length}
+                  </Text>
+                </View>
+              </View>
+
+              {onboardingChecklist.map((item) => (
+                <View key={item.label} style={styles.onboardingRow}>
+                  <View
+                    style={[
+                      styles.onboardingCheck,
+                      {
+                        backgroundColor: item.done ? colors.success : colors.surface,
+                        borderColor: item.done ? colors.success : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.onboardingCheckText,
+                        { color: item.done ? "#fff" : colors.subtle },
+                      ]}
+                    >
+                      {item.done ? "✓" : "•"}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.onboardingItemText,
+                      {
+                        color: item.done ? colors.subtle : colors.text,
+                        textDecorationLine: item.done ? "line-through" : "none",
+                      },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  {!item.done && (
+                    <TouchableOpacity
+                      style={[
+                        styles.onboardingAction,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                      ]}
+                      onPress={() => router.push(item.route as never)}
+                      accessibilityLabel={`Open ${item.action} to finish setup item`}
+                    >
+                      <Text style={[styles.onboardingActionText, { color: colors.tint }]}>
+                        {item.action}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View
+            style={[
+              styles.weeklyGoalCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                shadowColor: colors.tint,
+              },
+            ]}
+          >
+            <View style={styles.weeklyGoalCopy}>
+              <Text style={[styles.weeklyGoalEyebrow, { color: colors.tint }]}>
+                Weekly Focus
+              </Text>
+              <Text style={[styles.weeklyGoalTitle, { color: colors.text }]}>
+                {weeklyFocusGoal || "Pick one target for the week"}
+              </Text>
+              <Text style={[styles.weeklyGoalBody, { color: colors.subtle }]}>
+                {weeklyFocusGoal
+                  ? "Keep this visible so the day connects to the bigger goal."
+                  : "A weekly target keeps the app from becoming random task storage."}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.weeklyGoalButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={() => router.push("/settings" as never)}
+              accessibilityLabel="Edit weekly focus goal"
+            >
+              <Text style={[styles.weeklyGoalButtonText, { color: colors.tint }]}>
+                {weeklyFocusGoal ? "Edit" : "Set"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {eveningReview && (
+            <View
+              style={[
+                styles.reviewCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                  shadowColor: colors.tint,
+                },
+              ]}
+            >
+              <View style={styles.reviewCopy}>
+                <Text style={[styles.reviewEyebrow, { color: colors.tint }]}>
+                  End-of-Day Review
+                </Text>
+                <Text style={[styles.reviewTitle, { color: colors.text }]}>
+                  {eveningReview.title}
+                </Text>
+                <Text style={[styles.reviewBody, { color: colors.subtle }]}>
+                  {eveningReview.body}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.reviewButton, { backgroundColor: colors.tint }]}
+                onPress={() => router.push("/summary" as never)}
+                accessibilityLabel="Open today's summary review"
+              >
+                <Text style={styles.reviewButtonText}>Review</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View
             style={[
@@ -3528,6 +3745,172 @@ const styles = StyleSheet.create({
     height: 9,
     borderRadius: 999,
     backgroundColor: "#fff",
+  },
+  onboardingCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  onboardingHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 12,
+  },
+  onboardingHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  onboardingEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  onboardingTitle: {
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  onboardingBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  onboardingCountPill: {
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  onboardingCountText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  onboardingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 9,
+  },
+  onboardingCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  onboardingCheckText: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  onboardingItemText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 18,
+  },
+  onboardingAction: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginLeft: 10,
+  },
+  onboardingActionText: {
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  weeklyGoalCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  weeklyGoalCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  weeklyGoalEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  weeklyGoalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  weeklyGoalBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  weeklyGoalButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  weeklyGoalButtonText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  reviewCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  reviewCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  reviewEyebrow: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  reviewTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  reviewBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  reviewButton: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  reviewButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
   readinessCard: {
     marginHorizontal: 16,

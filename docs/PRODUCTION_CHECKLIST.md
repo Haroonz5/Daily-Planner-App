@@ -42,6 +42,7 @@ Then test:
 
 - Natural-language planning returns `source: "gemini"`.
 - Routine coach returns `source: "gemini"`.
+- Settings > AI Backend Status reports the deployed backend and model state.
 - If Gemini is unavailable, the app still falls back to local planning.
 - If Gemini is slow, the app falls back quickly instead of blocking task creation.
 
@@ -90,6 +91,7 @@ npm run eas:preview
 Test on a real phone:
 
 - Plan with AI uses Gemini.
+- A fresh account sees the Setup Quest and can set a Weekly Focus Goal.
 - Complete, skip, edit, and pause a routine.
 - Routine Manager shows health, streak, and AI coach.
 - Task completion haptics and sounds play when enabled.

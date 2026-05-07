@@ -19,8 +19,11 @@ EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_LAN_IP:8000 npx expo start -c
 Test on a real phone:
 
 - Sign up and log in.
+- Confirm Today shows the Setup Quest for a fresh account.
 - Add a task manually.
+- Save and reuse one task template.
 - Use "Plan with AI" for multiple tasks.
+- Check Settings > AI Backend Status.
 - Complete, skip, and reschedule a task.
 - Confirm task reminders are not duplicated.
 - Open Today, Add Task, Stats, Summary, Focus, and Settings.
@@ -47,6 +50,7 @@ Then confirm:
 - Tapping Complete from the notification marks the task complete in the app.
 - Focus Mode music starts, loops quietly, and stops when the session ends.
 - Pet names stay saved after changing tabs and reopening the app.
+- Weekly Focus Goal saves in Settings and appears on Today.
 - Friends, accountability nudges, challenges, feedback, and progress sharing do not show permission errors.
 
 ## 3. Deploy The AI Backend

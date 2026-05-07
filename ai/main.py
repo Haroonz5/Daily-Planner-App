@@ -1891,7 +1891,26 @@ def _ai_breakdown(
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    # I return safe backend details here so the app can show a useful AI status
+    # card without exposing Gemini/OpenAI secrets to the mobile bundle.
+    sources = _configured_remote_sources()
+    provider = os.getenv("AI_PROVIDER", "auto").lower()
+    active_source = sources[0] if sources else "local"
+    active_model = None
+
+    if active_source == "gemini":
+        active_model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+    elif active_source == "openai":
+        active_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    return {
+        "ok": True,
+        "provider": provider,
+        "remote_sources": sources,
+        "model_configured": bool(sources),
+        "active_model": active_model,
+        "timeout_seconds": float(os.getenv("AI_TIMEOUT_SECONDS", "5")),
+    }
 
 
 @app.post("/v1/parse-tasks", response_model=ParseTasksResponse)

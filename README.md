@@ -14,10 +14,14 @@ feedback, rewards, and accountability all live in the same loop.
 - Voice-assisted planning through phone keyboard dictation
 - Reality checks for overloaded schedules
 - AI rescheduling for missed tasks
+- AI backend health card with response time, model/fallback status, and timeout visibility
+- Setup Quest checklist for new users
+- Weekly Focus goal shown on the Today screen
 - Daily feedback, pattern feedback, weekly review, routine coaching, and task breakdowns
 - Today dashboard with readiness score, energy mode, recovery missions, and future planning
 - One-time, future, and recurring tasks
 - Ongoing routines like `gym every day except Sunday` without dumping weeks of duplicate tasks
+- Task templates for common routines and custom saved tasks
 - Routine Manager with health score, streaks, pause, skip-next, edit, and cancel-all controls
 - XP rewards with unlockable companion pets and custom pet sprites
 - Focus Mode with Strict Focus app-switch strike tracking, haptics, sounds, and focus music
@@ -35,7 +39,8 @@ feedback, rewards, and accountability all live in the same loop.
 
 The command center for the day. It shows daily progress, XP, companion status,
 readiness, recovery prompts, missed-task support, upcoming plans, and quick links
-to Focus, Week, Summary, and Friends.
+to Focus, Week, Summary, and Friends. It also includes a first-run setup quest,
+weekly focus goal, and an evening review prompt when the day is ready to close.
 
 ### Add Task
 
@@ -49,6 +54,9 @@ The planner extracts structured tasks with dates, times, duration estimates,
 priority, notes, and recurrence rules. Settings also includes **AI Planning
 Rules**, so users can save preferences like `no workouts on Sunday` or `keep
 school tasks before 9 PM`.
+
+Users can also load built-in task templates or save their own custom templates
+for recurring personal routines.
 
 The **Speak Task** button focuses the planner input so users can use the phone
 keyboard microphone and say something like:
@@ -99,7 +107,8 @@ Supported AI features:
 The app has local fallback logic for every AI feature. If the backend is offline,
 Gemini is slow, or no model key is configured, the app still works and uses the
 built-in planner. AI calls are intentionally timed out quickly so adding a task
-does not feel frozen.
+does not feel frozen. Settings includes an AI Backend Status card for checking
+whether the backend is reachable and model-powered.
 
 ## Tech Stack
 

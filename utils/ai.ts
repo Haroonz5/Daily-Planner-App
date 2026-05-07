@@ -122,6 +122,17 @@ export type TaskBreakdownResult = {
   source: AiSource;
 };
 
+export type AiBackendHealth = {
+  ok: boolean;
+  url: string;
+  provider: string;
+  remoteSources: string[];
+  modelConfigured: boolean;
+  activeModel: string | null;
+  timeoutSeconds: number | null;
+  responseMs: number;
+};
+
 const getAiApiUrl = () => {
   const configuredUrl = process.env.EXPO_PUBLIC_AI_API_URL;
   return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
@@ -146,6 +157,64 @@ const normalizeAiSource = (source: unknown): Exclude<AiSource, "offline"> =>
   // This connects the backend's source field to the UI. Unknown sources stay safe
   // by falling back to "local" instead of crashing the task planner.
   source === "openai" || source === "gemini" ? source : "local";
+
+export const checkAiBackendHealth = async (): Promise<AiBackendHealth> => {
+  const url = getAiApiUrl();
+  const startedAt = Date.now();
+
+  try {
+    const response = await fetchWithTimeout(
+      `${url}/health`,
+      { method: "GET" },
+      3200
+    );
+    const responseMs = Date.now() - startedAt;
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        url,
+        provider: "offline",
+        remoteSources: [],
+        modelConfigured: false,
+        activeModel: null,
+        timeoutSeconds: null,
+        responseMs,
+      };
+    }
+
+    const data = await response.json();
+
+    return {
+      ok: Boolean(data.ok),
+      url,
+      provider: String(data.provider ?? "unknown"),
+      remoteSources: Array.isArray(data.remote_sources)
+        ? data.remote_sources.map(String)
+        : [],
+      modelConfigured: Boolean(data.model_configured),
+      activeModel: data.active_model ? String(data.active_model) : null,
+      timeoutSeconds:
+        typeof data.timeout_seconds === "number"
+          ? data.timeout_seconds
+          : Number.isFinite(Number(data.timeout_seconds))
+            ? Number(data.timeout_seconds)
+            : null,
+      responseMs,
+    };
+  } catch {
+    return {
+      ok: false,
+      url,
+      provider: "offline",
+      remoteSources: [],
+      modelConfigured: false,
+      activeModel: null,
+      timeoutSeconds: null,
+      responseMs: Date.now() - startedAt,
+    };
+  }
+};
 
 const parseTimeToDate = (time: string) => {
   const match = time.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);

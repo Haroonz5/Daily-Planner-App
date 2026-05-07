@@ -79,6 +79,9 @@ EXPO_PUBLIC_AI_API_URL=https://your-ai-backend npx expo start -c
 If model keys are missing, the backend uses local fallbacks so development can
 continue.
 
+`GET /health` returns safe status metadata such as provider, configured model
+source, active model name, and timeout seconds. It never returns API keys.
+
 ## API Key Safety
 
 Keep provider keys in `ai/.env` locally or in your deployed backend's secret

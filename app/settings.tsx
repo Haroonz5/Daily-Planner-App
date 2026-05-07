@@ -46,7 +46,9 @@ import {
   type RecurrenceRule,
 } from "@/utils/task-helpers";
 import {
+  checkAiBackendHealth,
   getRoutineCoach,
+  type AiBackendHealth,
   type RoutineCoachResult,
 } from "@/utils/ai";
 import {
@@ -141,8 +143,11 @@ export default function SettingsScreen({
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [planningRules, setPlanningRules] = useState("");
+  const [weeklyFocusGoal, setWeeklyFocusGoal] = useState("");
   const [petNickname, setPetNickname] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [aiHealth, setAiHealth] = useState<AiBackendHealth | null>(null);
+  const [aiHealthBusy, setAiHealthBusy] = useState(false);
   const [remindersBusy, setRemindersBusy] = useState(false);
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>({
@@ -205,6 +210,25 @@ export default function SettingsScreen({
   useEffect(() => {
     setPlanningRules(profile.planningRules ?? "");
   }, [profile.planningRules]);
+
+  useEffect(() => {
+    setWeeklyFocusGoal(profile.weeklyFocusGoal ?? "");
+  }, [profile.weeklyFocusGoal]);
+
+  const refreshAiHealth = async () => {
+    setAiHealthBusy(true);
+
+    try {
+      const health = await checkAiBackendHealth();
+      setAiHealth(health);
+    } finally {
+      setAiHealthBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshAiHealth();
+  }, []);
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -397,6 +421,7 @@ export default function SettingsScreen({
     displayName !== (profile.displayName ?? "") ||
     normalizeUsername(username) !== (profile.username ?? "") ||
     planningRules !== (profile.planningRules ?? "") ||
+    weeklyFocusGoal !== (profile.weeklyFocusGoal ?? "") ||
     petNickname !== savedActivePetNickname;
 
   const statusColor =
@@ -566,6 +591,7 @@ export default function SettingsScreen({
           displayName: displayName.trim() || null,
           username: nextUsername,
           planningRules: planningRules.trim() || null,
+          weeklyFocusGoal: weeklyFocusGoal.trim() || null,
           petNickname: nextPetNickname,
           petNicknames: nextPetNicknames,
         },
@@ -1040,6 +1066,87 @@ export default function SettingsScreen({
           { backgroundColor: colors.card, shadowColor: colors.tint },
         ]}
       >
+        <View style={styles.aiHealthHeader}>
+          <View style={styles.aiHealthCopy}>
+            <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+              AI Backend Status
+            </Text>
+            <Text style={[styles.noteText, { color: colors.text }]}>
+              Use this to confirm whether the app is talking to Gemini/OpenAI,
+              the backend fallback, or the phone&apos;s offline planner.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.inlineRefreshButton,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={refreshAiHealth}
+            disabled={aiHealthBusy}
+            accessibilityLabel="Refresh AI backend status"
+          >
+            <Text style={[styles.inlineRefreshText, { color: colors.text }]}>
+              {aiHealthBusy ? "Checking" : "Refresh"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View
+          style={[
+            styles.aiHealthPanel,
+            {
+              backgroundColor: colors.background,
+              borderColor: aiHealth?.ok ? colors.success : colors.warning,
+            },
+          ]}
+        >
+          <View style={styles.aiHealthTopRow}>
+            <Text style={[styles.aiHealthTitle, { color: colors.text }]}>
+              {aiHealth?.ok
+                ? aiHealth.modelConfigured
+                  ? "Model-powered AI ready"
+                  : "Backend fallback ready"
+                : "Backend not reachable"}
+            </Text>
+            <Text
+              style={[
+                styles.aiHealthBadge,
+                {
+                  color: aiHealth?.ok
+                    ? aiHealth.modelConfigured
+                      ? colors.success
+                      : colors.warning
+                    : colors.danger,
+                },
+              ]}
+            >
+              {aiHealth?.ok
+                ? aiHealth.modelConfigured
+                  ? "Live"
+                  : "Local"
+                : "Offline"}
+            </Text>
+          </View>
+          <Text style={[styles.aiHealthBody, { color: colors.subtle }]}>
+            {aiHealth?.ok
+              ? aiHealth.modelConfigured
+                ? `${aiHealth.remoteSources[0]?.toUpperCase() ?? "AI"} via ${aiHealth.activeModel ?? "configured model"} • ${aiHealth.responseMs}ms`
+                : `Backend is online at ${aiHealth.url}, but no model key is configured.`
+              : `Could not reach ${aiHealth?.url ?? "the backend"}. The app will still use its built-in planner.`}
+          </Text>
+          <Text style={[styles.aiHealthMeta, { color: colors.subtle }]}>
+            Timeout target: {aiHealth?.timeoutSeconds ?? 5}s. Slow model calls
+            fall back so task creation does not freeze.
+          </Text>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           Calendar, Widgets & Lock Screen
         </Text>
@@ -1082,8 +1189,8 @@ export default function SettingsScreen({
           Accountability Friends
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
-          Add friends by email so you can see each other&apos;s daily progress
-          and send quick check-ins.
+          Add friends by username or email so you can see each other&apos;s daily
+          progress and send quick check-ins.
         </Text>
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: colors.tint }]}
@@ -1169,6 +1276,27 @@ export default function SettingsScreen({
         />
         <Text style={[styles.profileHint, { color: colors.subtle }]}>
           These rules are sent with Plan with AI so the planner feels more personal.
+        </Text>
+
+        <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+          Weekly Focus Goal
+        </Text>
+        <TextInput
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          placeholder="Example: Win the week by studying 5 nights"
+          placeholderTextColor={colors.subtle}
+          value={weeklyFocusGoal}
+          onChangeText={setWeeklyFocusGoal}
+        />
+        <Text style={[styles.profileHint, { color: colors.subtle }]}>
+          This shows on Today so your week has one visible target.
         </Text>
 
         <Text style={[styles.inputLabel, { color: colors.subtle }]}>
@@ -2397,6 +2525,58 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 19,
+  },
+  aiHealthHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  aiHealthCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  inlineRefreshButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  inlineRefreshText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  aiHealthPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 8,
+  },
+  aiHealthTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 6,
+  },
+  aiHealthTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "900",
+    paddingRight: 10,
+  },
+  aiHealthBadge: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+  },
+  aiHealthBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  aiHealthMeta: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 8,
   },
   feedbackTypeRow: {
     flexDirection: "row",
