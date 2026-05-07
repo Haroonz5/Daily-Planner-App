@@ -542,12 +542,48 @@ def _resolve_segment_date(segment: str, default_date: date) -> date:
     return default_date
 
 
-def _priority_from_text(text: str) -> Priority:
+def _matches_any(text: str, patterns: list[str]) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _priority_from_text(text: str, duration_minutes: int | None = None) -> Priority:
     lower = text.lower()
-    if any(word in lower for word in ("urgent", "important", "high priority")):
+
+    if _matches_any(
+        lower,
+        [
+            r"\b(high\s+priority|urgent|important|critical|asap|must\s+do)\b",
+            r"\b(deadline|due|overdue|submit|exam|final|test|quiz|interview)\b",
+            r"\b(doctor|dentist|appointment|bill|payment|rent|tax|application)\b",
+        ],
+    ):
         return "High"
-    if any(word in lower for word in ("easy", "low priority", "small")):
+
+    if _matches_any(
+        lower,
+        [
+            r"\b(low\s+priority|optional|if\s+there'?s\s+time|when\s+i\s+can)\b",
+            r"\b(quick|easy|small|minor|light)\b",
+            r"\b(laundry|dishes|trash|tidy|water\s+plants|clean\s+room)\b",
+        ],
+    ):
         return "Low"
+
+    if (duration_minutes or 0) >= 120 and _matches_any(
+        lower,
+        [r"\b(study|homework|project|write|work|practice)\b"],
+    ):
+        return "High"
+
+    if _matches_any(
+        lower,
+        [
+            r"\b(gym|workout|run|exercise|study|homework|class|practice)\b",
+            r"\b(meal\s+prep|cook|work|meeting|review|read|journal)\b",
+        ],
+    ):
+        return "Medium"
+
     return "Medium"
 
 
@@ -655,6 +691,12 @@ def _clean_title(segment: str) -> str:
     )
     cleaned = re.sub(
         r"\b(remind\s+me\s+to|i\s+need\s+to|i\s+want\s+to)\b",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(high\s+priority|low\s+priority|urgent|important|critical|optional)\b",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -825,7 +867,7 @@ def _local_parse(request: ParseTasksRequest) -> ParseTasksResponse:
                 title=_clean_title(segment),
                 date=_resolve_segment_date(segment, default_date).isoformat(),
                 time=_format_time(hour, minute, period),
-                priority=_priority_from_text(segment),
+                priority=_priority_from_text(segment, duration),
                 duration_minutes=duration,
                 recurrence=recurrence,
                 recurrence_days=recurrence_days,
@@ -869,6 +911,13 @@ def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             "with 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. "
             "If the user says every day except Sunday, use custom with [1,2,3,4,5,6]. "
             "Use [] for recurrence_days unless recurrence is custom. "
+            "Assign priority for every task instead of defaulting everything to Medium. "
+            "Respect explicit priority words first. Use High for urgent, important, "
+            "deadline, exam, final, test, interview, doctor, appointment, bill, rent, "
+            "payment, submission, or long high-stakes work. Use Medium for normal "
+            "routines like gym, study, homework, meal prep, practice, work, or meetings. "
+            "Use Low for quick, easy, optional, small chores, laundry, dishes, trash, "
+            "tidying, or light admin. "
             "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
             "If the user says phrases like add a task to, schedule, remind me to, "
             "or I need to, remove those command words from the title. "
@@ -881,7 +930,15 @@ def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             return None
 
         source, data = result
-        tasks = [ParsedTask(**task) for task in data.get("tasks", [])]
+        tasks = []
+        for raw_task in data.get("tasks", []):
+            parsed_task = ParsedTask(**raw_task)
+            if parsed_task.priority == "Medium":
+                parsed_task.priority = _priority_from_text(
+                    f"{parsed_task.title} {parsed_task.notes}",
+                    parsed_task.duration_minutes,
+                )
+            tasks.append(parsed_task)
         warnings = [str(warning) for warning in data.get("warnings", [])]
 
         return ParseTasksResponse(tasks=tasks, warnings=warnings, source=source)

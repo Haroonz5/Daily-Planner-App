@@ -301,6 +301,9 @@ export default function HomeScreen() {
           ...d.data(),
         })) as Task[];
 
+        setTasks(sortTasksBySchedule(fetched));
+        setTasksLoaded(true);
+
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayDate = formatDateKey(yesterday);
@@ -344,9 +347,6 @@ export default function HomeScreen() {
               rollingRoutineBusyRef.current = false;
             });
         }
-
-        setTasks(sortTasksBySchedule(fetched));
-        setTasksLoaded(true);
       },
       () => {
         setTasks([]);
@@ -1009,21 +1009,25 @@ export default function HomeScreen() {
     if (!tasksLoaded) return;
 
     let active = true;
-    setPatternBusy(true);
+    const feedbackTimer = setTimeout(() => {
+      if (!active) return;
 
-    void getPatternFeedback({
-      tasks: tasks.slice(-90).map(toAiHistoryTask),
-      timezone,
-    })
-      .then((result) => {
-        if (active) setPatternFeedback(result);
+      setPatternBusy(true);
+      void getPatternFeedback({
+        tasks: tasks.slice(-90).map(toAiHistoryTask),
+        timezone,
       })
-      .finally(() => {
-        if (active) setPatternBusy(false);
-      });
+        .then((result) => {
+          if (active) setPatternFeedback(result);
+        })
+        .finally(() => {
+          if (active) setPatternBusy(false);
+        });
+    }, 700);
 
     return () => {
       active = false;
+      clearTimeout(feedbackTimer);
     };
   }, [tasks, tasksLoaded, timezone]);
 
@@ -1099,12 +1103,45 @@ export default function HomeScreen() {
       .catch(() => {});
   };
 
+  const applyDeleteOptimistically = (
+    targetIds: string[],
+    canceledSeriesId?: string | null
+  ) => {
+    const targetIdSet = new Set(targetIds);
+
+    setTasks((currentTasks) =>
+      sortTasksBySchedule(
+        currentTasks
+          .filter((task) => !targetIdSet.has(task.id))
+          .map((task) => {
+            if (!canceledSeriesId || task.recurrenceGroupId !== canceledSeriesId) {
+              return task;
+            }
+
+            return {
+              ...task,
+              recurrence: "none",
+              recurrenceGroupId: null,
+              recurrenceDays: null,
+              rollingRoutine: false,
+            };
+          })
+      )
+    );
+  };
+
   const deleteSingleTask = async (task: Task) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    await deleteDoc(doc(db, "users", uid, "tasks", task.id));
-    cleanupDeletedTasksInBackground(uid, [task.id]);
+    applyDeleteOptimistically([task.id]);
+
+    try {
+      await deleteDoc(doc(db, "users", uid, "tasks", task.id));
+      cleanupDeletedTasksInBackground(uid, [task.id]);
+    } catch {
+      // Firestore will resync the task if the delete fails. The tap path stays responsive.
+    }
   };
 
   const deleteTaskAndFutureRepeats = async (task: Task) => {
@@ -1114,7 +1151,10 @@ export default function HomeScreen() {
     const allSeriesTasks = getAllSeriesTasksFromTask(task);
     const targets = getSeriesTasksFromTask(task);
     const targetIds = new Set(targets.map((candidate) => candidate.id));
+    const targetIdList = targets.map((candidate) => candidate.id);
     const batch = writeBatch(db);
+
+    applyDeleteOptimistically(targetIdList, task.recurrenceGroupId ?? null);
 
     targets.forEach((candidate) => {
       batch.delete(doc(db, "users", uid, "tasks", candidate.id));
@@ -1133,11 +1173,12 @@ export default function HomeScreen() {
       });
     });
 
-    await batch.commit();
-    cleanupDeletedTasksInBackground(
-      uid,
-      targets.map((candidate) => candidate.id)
-    );
+    try {
+      await batch.commit();
+      cleanupDeletedTasksInBackground(uid, targetIdList);
+    } catch {
+      // Snapshot data will restore anything the server rejected.
+    }
   };
 
   const endRecurringSeries = async () => {
@@ -1295,13 +1336,13 @@ export default function HomeScreen() {
     setSkipCandidate(null);
   };
 
-  const handleDelete = async (task: Task) => {
+  const handleDelete = (task: Task) => {
     if (isRecurringSeriesTask(task)) {
       setDeleteCandidate(task);
       return;
     }
 
-    await deleteSingleTask(task);
+    void deleteSingleTask(task);
   };
 
   const handleSetActivePet = async (pet: PetTier) => {
@@ -3398,16 +3439,12 @@ export default function HomeScreen() {
                   borderColor: colors.border,
                 },
               ]}
-              onPress={async () => {
+              onPress={() => {
                 if (!deleteCandidate) return;
                 const targetTask = deleteCandidate;
-                setDeleteBusy(true);
-                try {
-                  await deleteSingleTask(targetTask);
-                  setDeleteCandidate(null);
-                } finally {
-                  setDeleteBusy(false);
-                }
+                setDeleteCandidate(null);
+                setDeleteBusy(false);
+                void deleteSingleTask(targetTask);
               }}
               disabled={deleteBusy}
             >
@@ -3426,16 +3463,12 @@ export default function HomeScreen() {
                 styles.fullWidthPrimaryButton,
                 { backgroundColor: colors.danger },
               ]}
-              onPress={async () => {
+              onPress={() => {
                 if (!deleteCandidate) return;
                 const targetTask = deleteCandidate;
-                setDeleteBusy(true);
-                try {
-                  await deleteTaskAndFutureRepeats(targetTask);
-                  setDeleteCandidate(null);
-                } finally {
-                  setDeleteBusy(false);
-                }
+                setDeleteCandidate(null);
+                setDeleteBusy(false);
+                void deleteTaskAndFutureRepeats(targetTask);
               }}
               disabled={deleteBusy}
             >

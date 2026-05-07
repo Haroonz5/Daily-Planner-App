@@ -260,6 +260,67 @@ const getLocalDuration = (text: string) => {
     : Math.round(value);
 };
 
+const hasAnyPattern = (text: string, patterns: RegExp[]) =>
+  patterns.some((pattern) => pattern.test(text));
+
+const getLocalPriority = (
+  text: string,
+  durationMinutes?: number | null
+): AiTaskPriority => {
+  const lower = text.toLowerCase();
+
+  if (
+    hasAnyPattern(lower, [
+      /\b(high\s+priority|urgent|important|critical|asap|must\s+do)\b/,
+      /\b(deadline|due|overdue|submit|exam|final|test|quiz|interview)\b/,
+      /\b(doctor|dentist|appointment|bill|payment|rent|tax|application)\b/,
+    ])
+  ) {
+    return "High";
+  }
+
+  if (
+    hasAnyPattern(lower, [
+      /\b(low\s+priority|optional|if\s+there'?s\s+time|when\s+i\s+can)\b/,
+      /\b(quick|easy|small|minor|light)\b/,
+      /\b(laundry|dishes|trash|tidy|water\s+plants|clean\s+room)\b/,
+    ])
+  ) {
+    return "Low";
+  }
+
+  if (
+    (durationMinutes ?? 0) >= 120 &&
+    hasAnyPattern(lower, [/\b(study|homework|project|write|work|practice)\b/])
+  ) {
+    return "High";
+  }
+
+  if (
+    hasAnyPattern(lower, [
+      /\b(gym|workout|run|exercise|study|homework|class|practice)\b/,
+      /\b(meal\s+prep|cook|work|meeting|review|read|journal)\b/,
+    ])
+  ) {
+    return "Medium";
+  }
+
+  return "Medium";
+};
+
+const normalizeTaskPriority = (
+  value: unknown,
+  text: string,
+  durationMinutes?: number | null
+): AiTaskPriority => {
+  if (value === "High" || value === "Low") return value;
+  if (value === "Medium") {
+    return getLocalPriority(text, durationMinutes);
+  }
+
+  return getLocalPriority(text, durationMinutes);
+};
+
 const recurrenceRules: RecurrenceRule[] = [
   "none",
   "daily",
@@ -423,6 +484,10 @@ const cleanLocalTitle = (segment: string) => {
   const cleaned = segment
     .replace(/\b(add|create|schedule|make)\s+(a\s+)?task\s+(to\s+)?/gi, "")
     .replace(/\b(remind\s+me\s+to|i\s+need\s+to|i\s+want\s+to)\b/gi, "")
+    .replace(
+      /\b(high\s+priority|low\s+priority|urgent|important|critical|optional)\b/gi,
+      ""
+    )
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(
       /\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b/gi,
@@ -489,11 +554,7 @@ const localParseNaturalTasks = (
         title: cleanLocalTitle(segment),
         date: getLocalDate(segment, defaultDate),
         time: formattedTime,
-        priority: /urgent|important|high priority/i.test(segment)
-          ? "High"
-          : /easy|low priority|small/i.test(segment)
-            ? "Low"
-            : "Medium",
+        priority: getLocalPriority(segment, durationMinutes),
         durationMinutes,
         recurrence,
         recurrenceDays,
@@ -554,9 +615,11 @@ export const parseNaturalTasks = async ({
         title: String(task.title ?? "Task"),
         date: String(task.date ?? defaultDate),
         time: String(task.time ?? "9:00 AM"),
-        priority: (["Low", "Medium", "High"].includes(task.priority)
-          ? task.priority
-          : "Medium") as AiTaskPriority,
+        priority: normalizeTaskPriority(
+          task.priority,
+          `${task.title ?? ""} ${task.notes ?? ""}`,
+          task.duration_minutes ?? task.durationMinutes ?? null
+        ),
         durationMinutes: task.duration_minutes ?? task.durationMinutes ?? null,
         recurrence: normalizeRecurrence(task.recurrence),
         recurrenceDays: Array.isArray(task.recurrence_days)
