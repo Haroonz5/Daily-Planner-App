@@ -23,11 +23,16 @@ GEMINI_MODEL=gemini-3-flash-preview
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
+AI_TIMEOUT_SECONDS=5
 ```
 
 With `AI_PROVIDER=auto`, the backend uses Gemini when `GEMINI_API_KEY` exists,
 then OpenAI when `OPENAI_API_KEY` exists, then the built-in planner as a safe
 fallback.
+
+`AI_TIMEOUT_SECONDS` keeps model calls fast. If Gemini is slow, the backend
+returns to the built-in planner quickly so the mobile app can still add tasks
+without feeling stuck.
 
 ## Run
 

@@ -13,9 +13,10 @@ Please try:
 - Add one repeating task like "Gym at 6 PM every day".
 - Add one ongoing routine like "Gym at 6 PM every day except Sunday".
 - Complete, skip, and reschedule a task.
-- Add a friend by email from Settings > Accountability Friends.
+- Add a friend by username from Settings > Accountability Friends.
 - Try Focus Mode with Strict Focus turned on, then switch apps once.
 - Check Settings > Routine Manager and Settings > Reminder Health.
+- Add one personal rule in Settings > AI Planning Rules, then plan another task.
 - Tell me if anything feels confusing, slow, cramped, or annoying.
 
 Please send:
@@ -78,7 +79,11 @@ npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL -
 - AI Pattern Coach gives at least one useful next action after enough task history.
 - Stats shows a Discipline Score Breakdown and AI Weekly Review.
 - Friends can send requests, see daily progress, and send check-ins.
+- Friends can see the accountability watchlist and nudge a specific open task.
 - Strict Focus pauses when the tester leaves the app and records a strike.
+- Focus Mode explains that true app blocking needs a custom/native build.
+- AI task planning should either return model results quickly or fall back
+  without making the Add Task screen feel frozen.
 - Bottom tabs do not cover buttons at the bottom of any screen.
 - Notification action buttons are tested from a development or preview build, not Expo Go.
 - Completing a task from the notification updates Today, Stats, XP, and scheduled reminders.

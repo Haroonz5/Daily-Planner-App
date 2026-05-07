@@ -15,6 +15,7 @@ AI_PROVIDER=gemini
 GEMINI_API_KEY=your_rotated_gemini_key
 GEMINI_MODEL=gemini-3-flash-preview
 AI_ALLOWED_ORIGINS=*
+AI_TIMEOUT_SECONDS=5
 ```
 
 The mobile app should only receive:
@@ -42,6 +43,7 @@ Then test:
 - Natural-language planning returns `source: "gemini"`.
 - Routine coach returns `source: "gemini"`.
 - If Gemini is unavailable, the app still falls back to local planning.
+- If Gemini is slow, the app falls back quickly instead of blocking task creation.
 
 ## 3. Firebase
 
@@ -58,6 +60,7 @@ Confirm these work without permission errors:
 - Friend requests
 - Accountability nudges
 - Friend challenges
+- Username lookup and `publicUsernames`
 - Public progress sharing
 - Tester feedback
 - Widget summary writes

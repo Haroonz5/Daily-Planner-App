@@ -127,6 +127,21 @@ const getAiApiUrl = () => {
   return configuredUrl?.replace(/\/$/, "") || "http://127.0.0.1:8000";
 };
 
+const fetchWithTimeout = (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  // I added this timeout so a slow Gemini/OpenAI response never makes task
+  // planning feel frozen. If the backend is slow, the local planner keeps moving.
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+    clearTimeout(timeout);
+  });
+};
+
 const normalizeAiSource = (source: unknown): Exclude<AiSource, "offline"> =>
   // This connects the backend's source field to the UI. Unknown sources stay safe
   // by falling back to "local" instead of crashing the task planner.
@@ -337,6 +352,8 @@ const formatMinutesToTaskTime = (minutes: number) => {
 
 const cleanLocalTitle = (segment: string) => {
   const cleaned = segment
+    .replace(/\b(add|create|schedule|make)\s+(a\s+)?task\s+(to\s+)?/gi, "")
+    .replace(/\b(remind\s+me\s+to|i\s+need\s+to|i\s+want\s+to)\b/gi, "")
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(
       /\b(only\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)(\s*(?:-|to|through|thru)\s*(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?))?\b/gi,
@@ -430,28 +447,35 @@ export const parseNaturalTasks = async ({
   defaultDate,
   timezone,
   existingTasks,
+  planningRules,
 }: {
   text: string;
   defaultDate: string;
   timezone: string;
   existingTasks: AiExistingTask[];
+  planningRules?: string | null;
 }): Promise<ParseNaturalTasksResult> => {
   const fallback = () => localParseNaturalTasks(text, defaultDate);
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/parse-tasks`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/parse-tasks`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          default_date: defaultDate,
+          timezone,
+          now: new Date().toISOString(),
+          existing_tasks: existingTasks,
+          planning_rules: planningRules ?? "",
+        }),
       },
-      body: JSON.stringify({
-        text,
-        default_date: defaultDate,
-        timezone,
-        now: new Date().toISOString(),
-        existing_tasks: existingTasks,
-      }),
-    });
+      6500
+    );
 
     if (!response.ok) return fallback();
 
@@ -629,34 +653,38 @@ export const runRealityCheck = async ({
   const fallback = () => localRealityCheck({ proposedTasks, existingTasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/reality-check`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/reality-check`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          proposed_tasks: proposedTasks.map((task) => ({
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority,
+            duration_minutes: task.durationMinutes ?? null,
+            completed: false,
+            status: "pending",
+          })),
+          existing_tasks: existingTasks.map((task) => ({
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority ?? "Medium",
+            duration_minutes: task.durationMinutes ?? null,
+            completed: task.completed ?? false,
+            status: task.status ?? "pending",
+          })),
+          timezone,
+          now: new Date().toISOString(),
+        }),
       },
-      body: JSON.stringify({
-        proposed_tasks: proposedTasks.map((task) => ({
-          title: task.title,
-          date: task.date,
-          time: task.time,
-          priority: task.priority,
-          duration_minutes: task.durationMinutes ?? null,
-          completed: false,
-          status: "pending",
-        })),
-        existing_tasks: existingTasks.map((task) => ({
-          title: task.title,
-          date: task.date,
-          time: task.time,
-          priority: task.priority ?? "Medium",
-          duration_minutes: task.durationMinutes ?? null,
-          completed: task.completed ?? false,
-          status: task.status ?? "pending",
-        })),
-        timezone,
-        now: new Date().toISOString(),
-      }),
-    });
+      4500
+    );
 
     if (!response.ok) return fallback();
 
@@ -797,38 +825,42 @@ export const runAiReschedule = async ({
   const fallback = () => localAiReschedule({ missedTasks, existingTasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/reschedule`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/reschedule`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          missed_tasks: missedTasks.map((task) => ({
+            id: task.id,
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority ?? "Medium",
+            duration_minutes: task.durationMinutes ?? null,
+            completed: task.completed ?? false,
+            status: task.status ?? "pending",
+            rescheduled_count: task.rescheduledCount ?? 0,
+          })),
+          existing_tasks: existingTasks.map((task) => ({
+            id: task.id,
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority ?? "Medium",
+            duration_minutes: task.durationMinutes ?? null,
+            completed: task.completed ?? false,
+            status: task.status ?? "pending",
+            rescheduled_count: task.rescheduledCount ?? 0,
+          })),
+          timezone,
+          now: new Date().toISOString(),
+        }),
       },
-      body: JSON.stringify({
-        missed_tasks: missedTasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          date: task.date,
-          time: task.time,
-          priority: task.priority ?? "Medium",
-          duration_minutes: task.durationMinutes ?? null,
-          completed: task.completed ?? false,
-          status: task.status ?? "pending",
-          rescheduled_count: task.rescheduledCount ?? 0,
-        })),
-        existing_tasks: existingTasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          date: task.date,
-          time: task.time,
-          priority: task.priority ?? "Medium",
-          duration_minutes: task.durationMinutes ?? null,
-          completed: task.completed ?? false,
-          status: task.status ?? "pending",
-          rescheduled_count: task.rescheduledCount ?? 0,
-        })),
-        timezone,
-        now: new Date().toISOString(),
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 
@@ -963,29 +995,33 @@ export const getDailyFeedback = async ({
   const fallback = () => localDailyFeedback({ date, tasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/daily-feedback`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/daily-feedback`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date,
+          timezone,
+          now: new Date().toISOString(),
+          tasks: tasks.map((task) => ({
+            id: task.id ?? null,
+            title: task.title,
+            date: task.date,
+            time: task.time ?? null,
+            priority: task.priority ?? "Medium",
+            completed: task.completed ?? false,
+            status: task.status ?? "pending",
+            rescheduled_count: task.rescheduledCount ?? 0,
+            completed_at: task.completedAt ?? null,
+            skipped_at: task.skippedAt ?? null,
+          })),
+        }),
       },
-      body: JSON.stringify({
-        date,
-        timezone,
-        now: new Date().toISOString(),
-        tasks: tasks.map((task) => ({
-          id: task.id ?? null,
-          title: task.title,
-          date: task.date,
-          time: task.time ?? null,
-          priority: task.priority ?? "Medium",
-          completed: task.completed ?? false,
-          status: task.status ?? "pending",
-          rescheduled_count: task.rescheduledCount ?? 0,
-          completed_at: task.completedAt ?? null,
-          skipped_at: task.skippedAt ?? null,
-        })),
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 
@@ -1130,17 +1166,21 @@ export const getPatternFeedback = async ({
   const fallback = () => localPatternFeedback({ tasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/pattern-feedback`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/pattern-feedback`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          timezone,
+          now: new Date().toISOString(),
+          tasks: serializeHistoryTasks(tasks),
+        }),
       },
-      body: JSON.stringify({
-        timezone,
-        now: new Date().toISOString(),
-        tasks: serializeHistoryTasks(tasks),
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 
@@ -1263,19 +1303,23 @@ export const getWeeklyReview = async ({
   const fallback = () => localWeeklyReview({ weekStart, weekEnd, tasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/weekly-review`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/weekly-review`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          week_start: weekStart,
+          week_end: weekEnd,
+          timezone,
+          now: new Date().toISOString(),
+          tasks: serializeHistoryTasks(tasks),
+        }),
       },
-      body: JSON.stringify({
-        week_start: weekStart,
-        week_end: weekEnd,
-        timezone,
-        now: new Date().toISOString(),
-        tasks: serializeHistoryTasks(tasks),
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 
@@ -1366,20 +1410,24 @@ export const getRoutineCoach = async ({
   const fallback = () => localRoutineCoach({ routineTitle, tasks });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/routine-coach`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/routine-coach`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          routine_title: routineTitle,
+          recurrence_label: recurrenceLabel,
+          time,
+          timezone,
+          now: new Date().toISOString(),
+          tasks: serializeHistoryTasks(tasks),
+        }),
       },
-      body: JSON.stringify({
-        routine_title: routineTitle,
-        recurrence_label: recurrenceLabel,
-        time,
-        timezone,
-        now: new Date().toISOString(),
-        tasks: serializeHistoryTasks(tasks),
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 
@@ -1524,22 +1572,26 @@ export const breakDownTask = async ({
   const fallback = () => localTaskBreakdown({ title, notes, priority });
 
   try {
-    const response = await fetch(`${getAiApiUrl()}/v1/breakdown-task`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetchWithTimeout(
+      `${getAiApiUrl()}/v1/breakdown-task`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          notes,
+          date,
+          time,
+          priority,
+          timezone,
+          now: new Date().toISOString(),
+          existing_tasks: existingTasks,
+        }),
       },
-      body: JSON.stringify({
-        title,
-        notes,
-        date,
-        time,
-        priority,
-        timezone,
-        now: new Date().toISOString(),
-        existing_tasks: existingTasks,
-      }),
-    });
+      5000
+    );
 
     if (!response.ok) return fallback();
 

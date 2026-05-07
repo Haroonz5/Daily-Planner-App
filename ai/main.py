@@ -35,6 +35,7 @@ class ParseTasksRequest(BaseModel):
     timezone: str = "America/New_York"
     now: str | None = None
     existing_tasks: list[ExistingTask] = Field(default_factory=list)
+    planning_rules: str = ""
 
 
 class ParsedTask(BaseModel):
@@ -362,7 +363,10 @@ def _openai_json(system_prompt: str, prompt: dict) -> dict | None:
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+        # I keep model calls on a short leash so the app can fall back quickly
+        # instead of making the user stare at a frozen "planning" button.
+        timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "5"))
+        client = OpenAI(api_key=api_key, timeout=timeout)
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         response = client.chat.completions.create(
             model=model,
@@ -385,7 +389,7 @@ def _gemini_json(system_prompt: str, prompt: dict) -> dict | None:
         return None
 
     model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview").removeprefix("models/")
-    timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "18"))
+    timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "5"))
     payload = {
         "contents": [
             {
@@ -644,9 +648,21 @@ def _task_time_bucket(task: FeedbackTask) -> str:
 
 def _clean_title(segment: str) -> str:
     cleaned = re.sub(
-        r"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b",
+        r"\b(add|create|schedule|make)\s+(a\s+)?task\s+(to\s+)?\b",
         "",
         segment,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(remind\s+me\s+to|i\s+need\s+to|i\s+want\s+to)\b",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(?:every\s+day|everyday|daily|each\s+day)\s+(?:except|not|excluding|besides)\s+(sun(?:day)?|mon(?:day)?|tue(?:s|sday)?|wed(?:s|nesday)?|thrs|thu(?:r|rs|rsday|rday)?|fri(?:day)?|sat(?:urday)?)\b",
+        "",
+        cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
@@ -835,6 +851,7 @@ def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             "timezone": request.timezone,
             "now": now,
             "existing_tasks": [task.model_dump() for task in request.existing_tasks],
+            "planning_rules": request.planning_rules,
         }
         system_prompt = (
             "You parse natural language into Daily Discipline tasks. "
@@ -853,6 +870,10 @@ def _ai_parse(request: ParseTasksRequest) -> ParseTasksResponse | None:
             "If the user says every day except Sunday, use custom with [1,2,3,4,5,6]. "
             "Use [] for recurrence_days unless recurrence is custom. "
             "If AM/PM is ambiguous, infer the most likely future time for a productivity planner. "
+            "If the user says phrases like add a task to, schedule, remind me to, "
+            "or I need to, remove those command words from the title. "
+            "Respect planning_rules when they are present, but do not invent tasks "
+            "that the user did not ask for. "
             "Keep titles short and action-oriented. Do not invent tasks."
         )
         result = _remote_ai_json(system_prompt, prompt)

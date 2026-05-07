@@ -27,10 +27,16 @@ import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import { auth, db } from "@/constants/firebaseConfig";
 import { formatDateKey } from "@/utils/task-helpers";
+import {
+  formatUsername,
+  getUsernameError,
+  normalizeUsername,
+} from "@/utils/usernames";
 
 type FriendProfile = {
   uid: string;
   email: string;
+  username?: string | null;
   displayName?: string | null;
   linkedAt?: any;
 };
@@ -39,9 +45,11 @@ type FriendRequest = {
   id: string;
   requesterUid: string;
   requesterEmail: string;
+  requesterUsername?: string | null;
   requesterName?: string | null;
   recipientUid: string;
   recipientEmail: string;
+  recipientUsername?: string | null;
   recipientName?: string | null;
   status: "pending" | "accepted" | "declined";
   createdAt?: any;
@@ -54,13 +62,22 @@ type FriendProgress = {
   open: number;
   skipped: number;
   highOpen: number;
+  spotlightTasks?: SpotlightTask[];
   updatedAt?: any;
+};
+
+type SpotlightTask = {
+  id: string;
+  title: string;
+  time: string;
+  priority: "Low" | "Medium" | "High";
 };
 
 type Nudge = {
   id: string;
   fromUid: string;
   fromEmail: string;
+  fromUsername?: string | null;
   fromName?: string | null;
   toUid: string;
   message: string;
@@ -84,6 +101,8 @@ type FriendChallenge = {
 
 type Task = {
   id: string;
+  title: string;
+  time: string;
   date: string;
   completed: boolean;
   priority?: "Low" | "Medium" | "High";
@@ -112,7 +131,7 @@ const challengeTemplates: Record<
 };
 
 const getDisplayName = (profile: Partial<FriendProfile>) =>
-  profile.displayName?.trim() || profile.email;
+  formatUsername(profile.username) || profile.displayName?.trim() || profile.email;
 
 const toDateLabel = (value: any) => {
   const date =
@@ -131,6 +150,29 @@ const toDateLabel = (value: any) => {
     minute: "2-digit",
   });
 };
+
+const getSpotlightTasks = (sourceTasks: Task[], today: string) =>
+  sourceTasks
+    .filter(
+      (task) =>
+        task.date === today &&
+        !task.completed &&
+        (task.status ?? "pending") !== "skipped"
+    )
+    .sort((a, b) => {
+      const priorityRank = { High: 0, Medium: 1, Low: 2 };
+      const rankA = priorityRank[a.priority ?? "Medium"];
+      const rankB = priorityRank[b.priority ?? "Medium"];
+      if (rankA !== rankB) return rankA - rankB;
+      return a.time.localeCompare(b.time);
+    })
+    .slice(0, 3)
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      time: task.time,
+      priority: task.priority ?? "Medium",
+    }));
 
 export default function FriendsScreen() {
   const router = useRouter();
@@ -159,6 +201,7 @@ export default function FriendsScreen() {
     const fallback = {
       uid,
       email,
+      username: null,
       displayName: null,
     };
     const unsubscribe = onSnapshot(
@@ -357,6 +400,7 @@ export default function FriendsScreen() {
         open,
         skipped,
         highOpen,
+        spotlightTasks: getSpotlightTasks(tasks, today),
         updatedAt: new Date(),
       },
       { merge: true }
@@ -418,6 +462,7 @@ export default function FriendsScreen() {
       open,
       skipped,
       highOpen,
+      spotlightTasks: getSpotlightTasks(tasks, today),
     };
   }, [tasks, today]);
   const unseenNudges = useMemo(
@@ -476,29 +521,65 @@ export default function FriendsScreen() {
   const sendFriendRequest = async () => {
     if (!uid || !email || !myProfile) return;
 
-    const normalizedEmail = friendEmail.trim().toLowerCase();
-    if (!normalizedEmail) {
-      setStatusMessage("Enter your friend's account email first.");
+    const rawLookup = friendEmail.trim();
+    const normalizedLookup = normalizeUsername(rawLookup);
+    const normalizedEmail = rawLookup.toLowerCase();
+    const isEmailLookup = rawLookup.includes("@");
+
+    if (!rawLookup) {
+      setStatusMessage("Enter your friend's username or email first.");
       return;
     }
 
-    if (normalizedEmail === email) {
-      setStatusMessage("That is your own email. Accountability requires another human.");
+    if (!isEmailLookup) {
+      const usernameError = getUsernameError(normalizedLookup);
+      if (usernameError) {
+        setStatusMessage(usernameError);
+        return;
+      }
+    }
+
+    if (
+      (isEmailLookup && normalizedEmail === email) ||
+      (!isEmailLookup && normalizedLookup === myProfile.username)
+    ) {
+      setStatusMessage("That is your own account. Accountability requires another human.");
       return;
     }
 
     setIsSending(true);
 
     try {
-      const profileQuery = query(
-        collection(db, "publicProfiles"),
-        where("email", "==", normalizedEmail)
-      );
-      const snapshot = await getDocs(profileQuery);
-      const target = snapshot.docs[0]?.data() as FriendProfile | undefined;
+      let target: FriendProfile | undefined;
+
+      if (isEmailLookup) {
+        const profileQuery = query(
+          collection(db, "publicProfiles"),
+          where("email", "==", normalizedEmail)
+        );
+        const snapshot = await getDocs(profileQuery);
+        target = snapshot.docs[0]?.data() as FriendProfile | undefined;
+      } else {
+        // I added username lookup here so friends can connect as @names. The
+        // publicUsernames doc only reserves the name, then publicProfiles gives
+        // the friend card display data.
+        const usernameSnapshot = await getDoc(
+          doc(db, "publicUsernames", normalizedLookup)
+        );
+        const usernameData = usernameSnapshot.data() as FriendProfile | undefined;
+
+        if (usernameData?.uid) {
+          const profileSnapshot = await getDoc(
+            doc(db, "publicProfiles", usernameData.uid)
+          );
+          target =
+            (profileSnapshot.data() as FriendProfile | undefined) ??
+            usernameData;
+        }
+      }
 
       if (!target?.uid) {
-        setStatusMessage("No user found with that email yet.");
+        setStatusMessage("No user found with that username or email yet.");
         return;
       }
 
@@ -527,9 +608,11 @@ export default function FriendsScreen() {
         {
           requesterUid: uid,
           requesterEmail: email,
+          requesterUsername: myProfile.username ?? null,
           requesterName: myProfile.displayName ?? null,
           recipientUid: target.uid,
           recipientEmail: target.email,
+          recipientUsername: target.username ?? null,
           recipientName: target.displayName ?? null,
           status: "pending",
           createdAt: new Date(),
@@ -560,17 +643,23 @@ export default function FriendsScreen() {
       await setDoc(doc(db, "users", uid, "friends", request.requesterUid), {
         uid: request.requesterUid,
         email: request.requesterEmail,
+        username: request.requesterUsername ?? null,
         displayName: request.requesterName ?? null,
         linkedAt: new Date(),
       });
       await setDoc(doc(db, "users", request.requesterUid, "friends", uid), {
         uid,
         email,
+        username: myProfile.username ?? null,
         displayName: myProfile.displayName ?? null,
         linkedAt: new Date(),
       });
 
-      setStatusMessage(`${getDisplayName({ email: request.requesterEmail, displayName: request.requesterName })} added.`);
+      setStatusMessage(`${getDisplayName({
+        email: request.requesterEmail,
+        username: request.requesterUsername,
+        displayName: request.requesterName,
+      })} added.`);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
       setStatusMessage("Could not accept yet. Deploy the latest Firestore rules and try again.");
@@ -589,21 +678,30 @@ export default function FriendsScreen() {
     }
   };
 
-  const sendNudge = async (friend: FriendProfile) => {
+  const sendNudge = async (friend: FriendProfile, task?: SpotlightTask) => {
     if (!uid || !email || !myProfile) return;
 
     try {
       await addDoc(collection(db, "accountabilityNudges"), {
         fromUid: uid,
         fromEmail: email,
+        fromUsername: myProfile.username ?? null,
         fromName: myProfile.displayName ?? null,
         toUid: friend.uid,
-        message: "Quick accountability check: are you still on your plan today?",
+        message: task
+          ? `Specific check-in: are you still doing "${task.title}" at ${task.time}?`
+          : "Quick accountability check: are you still on your plan today?",
+        taskId: task?.id ?? null,
+        taskTitle: task?.title ?? null,
         seen: false,
         createdAt: new Date(),
       });
 
-      setStatusMessage(`Check-in sent to ${getDisplayName(friend)}.`);
+      setStatusMessage(
+        task
+          ? `Task check-in sent to ${getDisplayName(friend)}.`
+          : `Check-in sent to ${getDisplayName(friend)}.`
+      );
       await Haptics.selectionAsync();
     } catch {
       setStatusMessage("Could not send that check-in yet. Deploy the latest Firestore rules first.");
@@ -628,7 +726,7 @@ export default function FriendsScreen() {
           createdByUid: uid,
           participantUids: [uid, friend.uid],
           participantNames: {
-            [uid]: myProfile.displayName ?? email,
+            [uid]: getDisplayName(myProfile),
             [friend.uid]: getDisplayName(friend),
           },
           date: today,
@@ -747,7 +845,7 @@ export default function FriendsScreen() {
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>Add Friend</Text>
         <Text style={[styles.cardText, { color: colors.subtle }]}>
-          Use the email they signed up with.
+          Search by username first, or use the email they signed up with.
         </Text>
         <TextInput
           style={[
@@ -758,13 +856,12 @@ export default function FriendsScreen() {
               color: colors.text,
             },
           ]}
-          placeholder="friend@email.com"
+          placeholder="@friend or friend@email.com"
           placeholderTextColor={colors.subtle}
           value={friendEmail}
           onChangeText={setFriendEmail}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType="email-address"
         />
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: colors.tint }]}
@@ -793,7 +890,7 @@ export default function FriendsScreen() {
             >
               <View style={styles.requestCopy}>
                 <Text style={[styles.requestName, { color: colors.text }]}>
-                  {nudge.fromName || nudge.fromEmail}
+                  {formatUsername(nudge.fromUsername) || nudge.fromName || nudge.fromEmail}
                 </Text>
                 <Text style={[styles.requestMeta, { color: colors.subtle }]}>
                   {nudge.message}
@@ -812,7 +909,11 @@ export default function FriendsScreen() {
             <View key={request.id} style={[styles.requestRow, { borderBottomColor: colors.border }]}>
               <View style={styles.requestCopy}>
                 <Text style={[styles.requestName, { color: colors.text }]}>
-                  {request.requesterName || request.requesterEmail}
+                  {getDisplayName({
+                    email: request.requesterEmail,
+                    username: request.requesterUsername,
+                    displayName: request.requesterName,
+                  })}
                 </Text>
                 <Text style={[styles.requestMeta, { color: colors.subtle }]}>
                   Wants to be accountability friends.
@@ -883,6 +984,37 @@ export default function FriendsScreen() {
                   />
                 </View>
 
+                {!!progress?.spotlightTasks?.length && (
+                  <View style={styles.spotlightWrap}>
+                    <Text style={[styles.spotlightLabel, { color: colors.subtle }]}>
+                      Accountability watchlist
+                    </Text>
+                    {progress.spotlightTasks.map((task) => (
+                      <View
+                        key={task.id}
+                        style={[
+                          styles.spotlightTask,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
+                        ]}
+                      >
+                        <View style={styles.spotlightCopy}>
+                          <Text style={[styles.spotlightTitle, { color: colors.text }]}>
+                            {task.title}
+                          </Text>
+                          <Text style={[styles.spotlightMeta, { color: colors.subtle }]}>
+                            {task.time} • {task.priority}
+                          </Text>
+                        </View>
+                        <TouchableOpacity onPress={() => sendNudge(friend, task)}>
+                          <Text style={[styles.spotlightAction, { color: colors.tint }]}>
+                            Check
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <View style={styles.friendFooter}>
                   <Text style={[styles.friendMeta, { color: colors.subtle }]}>
                     Updated {toDateLabel(progress?.updatedAt)}
@@ -937,7 +1069,11 @@ export default function FriendsScreen() {
               key={request.id}
               style={[styles.cardText, { color: colors.subtle }]}
             >
-              Waiting on {request.recipientName || request.recipientEmail}
+              Waiting on {getDisplayName({
+                email: request.recipientEmail,
+                username: request.recipientUsername,
+                displayName: request.recipientName,
+              })}
             </Text>
           ))}
         </View>
@@ -1161,6 +1297,41 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 8,
     borderRadius: 999,
+  },
+  spotlightWrap: {
+    marginTop: 12,
+  },
+  spotlightLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  spotlightTask: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 11,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  spotlightCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  spotlightTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 3,
+  },
+  spotlightMeta: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  spotlightAction: {
+    fontSize: 12,
+    fontWeight: "900",
   },
   friendFooter: {
     flexDirection: "row",

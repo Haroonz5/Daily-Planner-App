@@ -6,7 +6,7 @@ import {
   onSnapshot,
   writeBatch,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -237,6 +237,7 @@ export default function AddTask() {
   const [breakdownBusy, setBreakdownBusy] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const aiInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -472,6 +473,18 @@ export default function AddTask() {
     setShowFutureTimePicker(false);
   };
 
+  const handleVoiceTaskCapture = async () => {
+    // I kept voice capture Expo-Go friendly here: the button focuses the AI text
+    // box, then iOS/Android keyboard dictation turns speech into planner text.
+    setError("");
+    setSuccessMessage(
+      "Voice mode ready. Tap the keyboard mic and say: add a task to do homework tomorrow at 7 PM."
+    );
+    aiInputRef.current?.focus();
+    await playSelectionFeedback(profile);
+    setTimeout(() => setSuccessMessage(""), 4200);
+  };
+
   const handleParseNaturalTasks = async () => {
     if (!naturalInput.trim()) {
       setError("Type a few tasks first, like: Gym at 6 PM, study at 8 PM.");
@@ -495,6 +508,7 @@ export default function AddTask() {
           completed: task.completed,
           status: task.status,
         })),
+        planningRules: profile.planningRules,
       });
 
       setParsedTasks(result.tasks);
@@ -561,6 +575,52 @@ export default function AddTask() {
     const date = new Date();
     date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     return formatTimeFromDate(date);
+  };
+
+  const syncCreatedTasksInBackground = async (
+    uid: string,
+    createdTasks: {
+      id: string;
+      title: string;
+      time: string;
+      date: string;
+      priority?: TaskPriority;
+      notes?: string;
+      completed?: boolean;
+      status?: TaskStatus;
+      recurrence?: RecurrenceRule;
+      recurrenceGroupId?: string | null;
+      recurrenceDays?: number[] | null;
+    }[]
+  ) => {
+    if (createdTasks.length === 0) return;
+
+    const normalizedTasks = createdTasks.map((task) => ({
+      ...task,
+      priority: task.priority ?? "Medium",
+      completed: task.completed ?? false,
+      status: task.status ?? "pending",
+      recurrence: task.recurrence ?? "none",
+      recurrenceGroupId: task.recurrenceGroupId ?? null,
+      recurrenceDays: task.recurrenceDays ?? null,
+    }));
+
+    await ensureRollingRoutineTasks({
+      uid,
+      tasks: [...tasks, ...normalizedTasks],
+    }).catch(() => {});
+
+    await Promise.all(
+      normalizedTasks.map((task) =>
+        syncTaskNotifications({
+          ...task,
+          completed: false,
+          status: "pending",
+        })
+      )
+    ).catch(() => {});
+
+    await syncMorningSummaryNotification(uid).catch(() => {});
   };
 
   const applyTimePreset = (timeLabel: string) => {
@@ -733,18 +793,7 @@ export default function AddTask() {
       });
 
       await batch.commit();
-
-      await Promise.all(
-        createdTasks.map((task) =>
-          syncTaskNotifications({
-            ...task,
-            completed: false,
-            status: "pending",
-          })
-        )
-      ).catch(() => {});
-
-      await syncMorningSummaryNotification(uid).catch(() => {});
+      void syncCreatedTasksInBackground(uid, createdTasks);
 
       resetForm();
       setError("");
@@ -839,22 +888,10 @@ export default function AddTask() {
       });
 
       await batch.commit();
-      await ensureRollingRoutineTasks({
-        uid,
-        tasks: [...tasks, ...createdTasks],
-      }).catch(() => {});
 
-      await Promise.all(
-        createdTasks.map((task) =>
-          syncTaskNotifications({
-            ...task,
-            completed: false,
-            status: "pending",
-          })
-        )
-      ).catch(() => {});
-
-      await syncMorningSummaryNotification(uid).catch(() => {});
+      // I moved reminder/routine syncing into the background so pressing Add
+      // feels instant even when the device has a lot of reminders to rebuild.
+      void syncCreatedTasksInBackground(uid, createdTasks);
 
       setNaturalInput("");
       setParsedTasks([]);
@@ -937,22 +974,7 @@ export default function AddTask() {
       });
 
       await batch.commit();
-      await ensureRollingRoutineTasks({
-        uid,
-        tasks: [...tasks, ...createdTasks],
-      }).catch(() => {});
-
-      await Promise.all(
-        createdTasks.map((task) =>
-          syncTaskNotifications({
-            ...task,
-            completed: false,
-            status: "pending",
-          })
-        )
-      ).catch(() => {});
-
-      await syncMorningSummaryNotification(uid).catch(() => {});
+      void syncCreatedTasksInBackground(uid, createdTasks);
 
       resetForm();
       setError("");
@@ -1224,6 +1246,7 @@ export default function AddTask() {
           </View>
 
           <TextInput
+            ref={aiInputRef}
             style={[
               styles.aiInput,
               {
@@ -1257,6 +1280,16 @@ export default function AddTask() {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={[styles.aiSecondaryButton, { backgroundColor: colors.surface }]}
+              onPress={handleVoiceTaskCapture}
+              disabled={aiBusy}
+            >
+              <Text style={[styles.aiSecondaryText, { color: colors.subtle }]}>
+                Speak Task
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[styles.aiPrimaryButton, { backgroundColor: colors.tint }]}
               onPress={handleParseNaturalTasks}
               disabled={aiBusy}
@@ -1286,8 +1319,8 @@ export default function AddTask() {
                   : aiSource === "openai" || aiSource === "gemini"
                     ? "AI plan ready"
                     : aiSource === "local"
-                      ? "Backend planner used"
-                      : "Backend offline - using built-in planner"}
+                      ? "Fast planner used"
+                      : "Offline planner used"}
               </Text>
               <Text style={[styles.aiStatusBody, { color: colors.subtle }]}>
                 {aiBusy
@@ -1295,7 +1328,7 @@ export default function AddTask() {
                   : aiSource === "openai" || aiSource === "gemini"
                     ? `The backend used ${aiSource === "gemini" ? "Gemini" : "OpenAI"} to understand your tasks and check the schedule.`
                     : aiSource === "local"
-                      ? "The backend is online but no model key is configured. Add GEMINI_API_KEY or OPENAI_API_KEY in ai/.env when you want model-powered responses."
+                      ? "The backend is online, but the model was unavailable or too slow, so the app used the built-in planner and kept your flow moving."
                       : "Your tasks still work. To use the real backend on your phone, run the Python AI server and restart Expo with npm run start:ai."}
               </Text>
             </View>

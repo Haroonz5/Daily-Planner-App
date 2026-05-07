@@ -536,6 +536,40 @@ export default function FocusScreen() {
           )}
         </View>
 
+        {/* I added this explainer because real iPhone app blocking needs native
+            Screen Time entitlements, while Expo Go can safely track app switches. */}
+        <View
+          style={[
+            styles.nativeFocusCard,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.nativeFocusTitle, { color: colors.text }]}>
+            Native App Blocking Path
+          </Text>
+          <Text style={[styles.nativeFocusBody, { color: colors.subtle }]}>
+            Today this mode catches app switching. A development build can later
+            connect iOS Screen Time or Android focus APIs for true app limits.
+          </Text>
+          <View style={styles.nativeFocusChipRow}>
+            {["Expo Go: strikes", "Dev build: blockers", "Store: review"].map(
+              (label) => (
+                <View
+                  key={label}
+                  style={[
+                    styles.nativeFocusChip,
+                    { borderColor: colors.border, backgroundColor: colors.surface },
+                  ]}
+                >
+                  <Text style={[styles.nativeFocusChipText, { color: colors.text }]}>
+                    {label}
+                  </Text>
+                </View>
+              )
+            )}
+          </View>
+        </View>
+
         <Text style={[styles.timerValue, { color: colors.text }]}>
           {formatClock(secondsLeft)}
         </Text>
@@ -842,6 +876,39 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 18,
     marginTop: 8,
+  },
+  nativeFocusCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 18,
+  },
+  nativeFocusTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  nativeFocusBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  nativeFocusChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -3,
+    marginTop: 10,
+  },
+  nativeFocusChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    marginHorizontal: 3,
+    marginBottom: 6,
+  },
+  nativeFocusChipText: {
+    fontSize: 10,
+    fontWeight: "900",
   },
   timerValue: {
     fontSize: 48,

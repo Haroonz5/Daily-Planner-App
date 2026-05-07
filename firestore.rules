@@ -65,6 +65,15 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
+    match /publicUsernames/{username} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.username == username;
+      allow update, delete: if isSignedIn() &&
+        resource.data.uid == request.auth.uid;
+    }
+
     match /publicProgress/{userId} {
       allow read: if isOwner(userId) || isFriend(userId, request.auth.uid);
       allow create, update: if isOwner(userId);

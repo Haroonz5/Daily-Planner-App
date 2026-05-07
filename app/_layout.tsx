@@ -13,6 +13,7 @@ import { ActivityIndicator, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import {
   AppThemeContext,
   getStoredTheme,
@@ -145,6 +146,7 @@ export default function RootLayout() {
     const inWeek = firstSegment === "week";
     const inFriends = firstSegment === "friends";
     const inTutorial = firstSegment === "tutorial";
+    const inVerifyEmail = firstSegment === "verify-email";
     const inOnboarding = firstSegment === "onboarding";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
 
@@ -174,9 +176,27 @@ export default function RootLayout() {
         inPetHome ||
         inWeek ||
         inFriends ||
-        inTutorial)
+        inTutorial ||
+        inVerifyEmail)
     ) {
       router.replace("/login");
+      return;
+    }
+
+    if (user && !user.emailVerified) {
+      // I added this email gate so signup is protected twice: Firebase account
+      // auth first, then verified email before tasks, friends, and progress open.
+      if (!inVerifyEmail) {
+        router.replace("/verify-email" as never);
+      }
+      return;
+    }
+
+    if (user && user.emailVerified && inVerifyEmail) {
+      if (tutorialCompleted === undefined) return;
+      router.replace(
+        (tutorialCompleted === false ? "/tutorial" : "/(tabs)") as never
+      );
       return;
     }
 
@@ -281,20 +301,23 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AppThemeContext.Provider value={{ themeName, setThemeName }}>
         <ThemeProvider value={navigationTheme}>
-          <Stack>
-            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-            <Stack.Screen name="tutorial" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="login" options={{ headerShown: false }} />
-            <Stack.Screen name="signup" options={{ headerShown: false }} />
-            <Stack.Screen name="summary" options={{ headerShown: false }} />
-            <Stack.Screen name="focus" options={{ headerShown: false }} />
-            <Stack.Screen name="pet-home" options={{ headerShown: false }} />
-            <Stack.Screen name="week" options={{ headerShown: false }} />
-            <Stack.Screen name="friends" options={{ headerShown: false }} />
-            <Stack.Screen name="settings" options={{ headerShown: false }} />
-            <Stack.Screen name="modal" options={{ headerShown: false }} />
-          </Stack>
+          <ErrorBoundary>
+            <Stack>
+              <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+              <Stack.Screen name="tutorial" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="login" options={{ headerShown: false }} />
+              <Stack.Screen name="signup" options={{ headerShown: false }} />
+              <Stack.Screen name="verify-email" options={{ headerShown: false }} />
+              <Stack.Screen name="summary" options={{ headerShown: false }} />
+              <Stack.Screen name="focus" options={{ headerShown: false }} />
+              <Stack.Screen name="pet-home" options={{ headerShown: false }} />
+              <Stack.Screen name="week" options={{ headerShown: false }} />
+              <Stack.Screen name="friends" options={{ headerShown: false }} />
+              <Stack.Screen name="settings" options={{ headerShown: false }} />
+              <Stack.Screen name="modal" options={{ headerShown: false }} />
+            </Stack>
+          </ErrorBoundary>
           <StatusBar style={palette.statusBar} />
         </ThemeProvider>
       </AppThemeContext.Provider>

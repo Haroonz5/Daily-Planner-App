@@ -73,7 +73,11 @@ GEMINI_MODEL=gemini-3-flash-preview
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
+AI_TIMEOUT_SECONDS=5
 ```
+
+Keep model timeouts short during testing. If Gemini is slow, the app should fall
+back quickly instead of making the Add Task screen feel frozen.
 
 After deployment, copy the public backend URL. It should respond at:
 
@@ -122,6 +126,8 @@ Ask testers to report:
 - Whether reminders arrive once and at the expected time.
 - Any screen that feels confusing.
 - Any AI output that feels wrong or too generic.
+- Whether adding friends by username works cleanly.
+- Whether AI planning feels fast enough or falls back clearly.
 - Screenshots of errors.
 
 Start with 3-5 testers before sending it wider. Small testing groups catch the sharp edges without burying you in feedback.

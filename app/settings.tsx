@@ -5,6 +5,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   setDoc,
@@ -39,6 +40,7 @@ import { useUserProfile } from "@/hooks/use-user-profile";
 import {
   formatDateKey,
   formatRecurrenceLabel,
+  getNextRecurringDate,
   getRelativeDateLabel,
   parseTimeToMinutes,
   type RecurrenceRule,
@@ -53,6 +55,11 @@ import {
   playSelectionFeedback,
   playWarningFeedback,
 } from "@/utils/feedback";
+import {
+  formatUsername,
+  getUsernameError,
+  normalizeUsername,
+} from "@/utils/usernames";
 import {
   cancelManyTaskNotifications,
   getScheduledNotificationAudit,
@@ -108,6 +115,7 @@ type RoutineGroup = {
   currentStreak: number;
   bestStreak: number;
   recentCompletionRate: number;
+  upcomingDates: string[];
   tasks: Task[];
 };
 
@@ -131,6 +139,8 @@ export default function SettingsScreen({
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
+  const [planningRules, setPlanningRules] = useState("");
   const [petNickname, setPetNickname] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [remindersBusy, setRemindersBusy] = useState(false);
@@ -189,6 +199,14 @@ export default function SettingsScreen({
   }, [profile.displayName]);
 
   useEffect(() => {
+    setUsername(profile.username ?? "");
+  }, [profile.username]);
+
+  useEffect(() => {
+    setPlanningRules(profile.planningRules ?? "");
+  }, [profile.planningRules]);
+
+  useEffect(() => {
     const user = auth.currentUser;
     if (!user?.email) return;
 
@@ -197,12 +215,13 @@ export default function SettingsScreen({
       {
         uid: user.uid,
         email: user.email.toLowerCase(),
+        username: profile.username ?? null,
         displayName: profile.displayName ?? null,
         updatedAt: new Date(),
       },
       { merge: true }
     ).catch(() => {});
-  }, [profile.displayName]);
+  }, [profile.displayName, profile.username]);
 
   useEffect(() => {
     let active = true;
@@ -304,6 +323,29 @@ export default function SettingsScreen({
         const recentCompletionRate = recentTasks.length
           ? Math.round((recentCompleted / recentTasks.length) * 100)
           : 0;
+        const upcomingDates = [nextTask?.date]
+          .filter(Boolean)
+          .reduce<string[]>((dates, firstDate) => {
+            if (!firstDate) return dates;
+
+            let cursor = firstDate;
+            const nextDates = [firstDate];
+
+            for (let i = 0; i < 2; i += 1) {
+              const nextDate = getNextRecurringDate({
+                fromDateKey: cursor,
+                recurrence: nextTask?.recurrence ?? "none",
+                recurrenceDays: nextTask?.recurrenceDays,
+                weeklyAnchorDateKey: nextTask?.date,
+              });
+
+              if (!nextDate) break;
+              nextDates.push(nextDate);
+              cursor = nextDate;
+            }
+
+            return nextDates;
+          }, []);
         let currentStreak = 0;
         for (const task of [...attemptedTasks].reverse()) {
           if (task.completed) {
@@ -340,6 +382,7 @@ export default function SettingsScreen({
           currentStreak,
           bestStreak,
           recentCompletionRate,
+          upcomingDates,
           tasks: sortedTasks,
         };
       })
@@ -352,6 +395,8 @@ export default function SettingsScreen({
 
   const profileDirty =
     displayName !== (profile.displayName ?? "") ||
+    normalizeUsername(username) !== (profile.username ?? "") ||
+    planningRules !== (profile.planningRules ?? "") ||
     petNickname !== savedActivePetNickname;
 
   const statusColor =
@@ -442,6 +487,10 @@ export default function SettingsScreen({
       await deleteCollectionDocs(uid, "feedback");
       const profileBatch = writeBatch(db);
       profileBatch.delete(doc(db, "users", uid));
+      profileBatch.delete(doc(db, "publicProfiles", uid));
+      if (profile.username) {
+        profileBatch.delete(doc(db, "publicUsernames", profile.username));
+      }
       await profileBatch.commit();
       await deleteUser(user);
     } catch {
@@ -472,6 +521,19 @@ export default function SettingsScreen({
   };
 
   const handleSaveProfile = async () => {
+    const user = auth.currentUser;
+    if (!user?.email) return;
+
+    const nextUsername = normalizeUsername(username);
+    const previousUsername = profile.username ?? "";
+    const usernameError = getUsernameError(nextUsername);
+
+    if (usernameError) {
+      setStatusTone("warning");
+      setStatusMessage(usernameError);
+      return;
+    }
+
     setProfileSaving(true);
 
     try {
@@ -480,38 +542,66 @@ export default function SettingsScreen({
         ...(profile.petNicknames ?? {}),
         [rewardData.activePet.key]: nextPetNickname,
       };
+      const usernameChanged = nextUsername !== previousUsername;
 
-      await saveProfile({
-        displayName: displayName.trim() || null,
-        petNickname: nextPetNickname,
-        petNicknames: nextPetNicknames,
-      });
-      let publicProfileSynced = true;
-      if (auth.currentUser?.email) {
-        await setDoc(
-          doc(db, "publicProfiles", auth.currentUser.uid),
-          {
-            uid: auth.currentUser.uid,
-            email: auth.currentUser.email.toLowerCase(),
-            displayName: displayName.trim() || null,
-            updatedAt: new Date(),
-          },
-          { merge: true }
-        ).catch(() => {
-          publicProfileSynced = false;
+      if (usernameChanged) {
+        const usernameSnapshot = await getDoc(
+          doc(db, "publicUsernames", nextUsername)
+        );
+        const usernameOwner = usernameSnapshot.data()?.uid;
+
+        if (usernameSnapshot.exists() && usernameOwner !== user.uid) {
           setStatusTone("warning");
-          setStatusMessage(
-            "Profile saved, but friend profile sync needs deployed Firestore rules."
-          );
+          setStatusMessage("That username is already taken.");
+          return;
+        }
+      }
+
+      // I save profile and username reservation together so the public friend
+      // lookup cannot point at a username the private profile did not keep.
+      const batch = writeBatch(db);
+      batch.set(
+        doc(db, "users", user.uid),
+        {
+          displayName: displayName.trim() || null,
+          username: nextUsername,
+          planningRules: planningRules.trim() || null,
+          petNickname: nextPetNickname,
+          petNicknames: nextPetNicknames,
+        },
+        { merge: true }
+      );
+      batch.set(
+        doc(db, "publicProfiles", user.uid),
+        {
+          uid: user.uid,
+          email: user.email.toLowerCase(),
+          username: nextUsername,
+          displayName: displayName.trim() || null,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
+
+      if (usernameChanged) {
+        batch.set(doc(db, "publicUsernames", nextUsername), {
+          uid: user.uid,
+          email: user.email.toLowerCase(),
+          username: nextUsername,
+          updatedAt: new Date(),
         });
       }
-      if (publicProfileSynced) {
-        await playSaveFeedback(profile);
-        setStatusTone("success");
-        setStatusMessage(
-          "Profile updated. Your app voice and companion name are saved."
-        );
+
+      if (previousUsername && usernameChanged) {
+        batch.delete(doc(db, "publicUsernames", previousUsername));
       }
+
+      await batch.commit();
+      await playSaveFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(
+        `Profile updated. Friends will see you as ${formatUsername(nextUsername)}.`
+      );
     } finally {
       setProfileSaving(false);
     }
@@ -920,6 +1010,37 @@ export default function SettingsScreen({
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Tester Launch Checklist
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Use this before sending a build to friends so account, AI, routines,
+          and accountability all get checked together.
+        </Text>
+        {[
+          "Deploy Firestore rules after username or friend changes.",
+          "Create two fresh accounts and verify both emails.",
+          "Add each other by username, accept, nudge, and start one challenge.",
+          "Use Plan with AI for a normal task and an ongoing routine.",
+          "Complete one high-priority task with proof and confirm XP updates.",
+          "Run Strict Focus once, then switch apps to confirm strikes work.",
+          "Run npm run release:check before making an EAS preview build.",
+        ].map((item) => (
+          <View key={item} style={styles.checklistRow}>
+            <Text style={[styles.checklistDot, { color: colors.tint }]}>•</Text>
+            <Text style={[styles.checklistText, { color: colors.subtle }]}>
+              {item}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           Calendar, Widgets & Lock Screen
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
@@ -980,7 +1101,7 @@ export default function SettingsScreen({
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>Profile</Text>
         <Text style={[styles.profileText, { color: colors.text }]}>
-          {auth.currentUser?.email ?? "Signed in"}
+          {formatUsername(profile.username) || auth.currentUser?.email || "Signed in"}
         </Text>
         <Text style={[styles.profileHint, { color: colors.subtle }]}>
           Active companion: {activePetDisplayName}
@@ -1003,6 +1124,52 @@ export default function SettingsScreen({
           value={displayName}
           onChangeText={setDisplayName}
         />
+
+        <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+          Username
+        </Text>
+        <TextInput
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          placeholder="@username"
+          placeholderTextColor={colors.subtle}
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <Text style={[styles.profileHint, { color: colors.subtle }]}>
+          Friends use this to find you without needing your email.
+        </Text>
+
+        <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+          AI Planning Rules
+        </Text>
+        <TextInput
+          style={[
+            styles.input,
+            styles.largeTextInput,
+            {
+              backgroundColor: colors.background,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          placeholder="Example: keep Sundays open, no workouts after 8 PM, plan school first"
+          placeholderTextColor={colors.subtle}
+          value={planningRules}
+          onChangeText={setPlanningRules}
+          multiline
+        />
+        <Text style={[styles.profileHint, { color: colors.subtle }]}>
+          These rules are sent with Plan with AI so the planner feels more personal.
+        </Text>
 
         <Text style={[styles.inputLabel, { color: colors.subtle }]}>
           Companion Nickname
@@ -1319,6 +1486,23 @@ export default function SettingsScreen({
                   {routine.bestStreak} · last 7 rate{" "}
                   {routine.recentCompletionRate}%
                 </Text>
+                {routine.upcomingDates.length > 0 && (
+                  <View style={styles.routineUpcomingRow}>
+                    {routine.upcomingDates.map((dateKey) => (
+                      <View
+                        key={`${routine.id}-${dateKey}`}
+                        style={[
+                          styles.routineUpcomingPill,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
+                        ]}
+                      >
+                        <Text style={[styles.routineUpcomingText, { color: colors.subtle }]}>
+                          {getRelativeDateLabel(dateKey)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
 
                   <View
@@ -2076,6 +2260,11 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     fontSize: 15,
   },
+  largeTextInput: {
+    minHeight: 86,
+    lineHeight: 20,
+    textAlignVertical: "top",
+  },
   primaryButton: {
     borderRadius: 14,
     paddingVertical: 15,
@@ -2192,6 +2381,23 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: 10,
   },
+  checklistRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginTop: 9,
+  },
+  checklistDot: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginRight: 9,
+    lineHeight: 20,
+  },
+  checklistText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+  },
   feedbackTypeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2265,6 +2471,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     lineHeight: 17,
+  },
+  routineUpcomingRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 9,
+    marginHorizontal: -3,
+  },
+  routineUpcomingPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    marginHorizontal: 3,
+    marginBottom: 5,
+  },
+  routineUpcomingText: {
+    fontSize: 10,
+    fontWeight: "900",
   },
   routineHealthPill: {
     borderWidth: 1,

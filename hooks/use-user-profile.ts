@@ -13,6 +13,7 @@ export type UserProfile = {
   displayName?: string | null;
   energyMode?: "light" | "steady" | "lockedIn" | null;
   planningGoal?: "school" | "fitness" | "work" | "discipline" | "wellness" | null;
+  planningRules?: string | null;
   focusDurationMinutes?: number | null;
   habitatStyle?: "garden" | "dojo" | "cosmic" | null;
   tutorialCompleted?: boolean | null;
