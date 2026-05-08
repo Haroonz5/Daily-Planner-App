@@ -16,6 +16,11 @@
     "release:check": "npm run qa:device",
     "deploy:rules": "npx firebase-tools@latest deploy --only firestore:rules",
     "ai:dev": "cd ai && .venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "ai:stats": "cd services/stats-aggregator && go run .",
+    "security:dev": "cd services/security-gateway && go run .",
+    "dev:secure": "bash scripts/dev-secure-stack.sh",
+    "ops:check": "bash scripts/check-backend.sh",
+    "ops:deploy:ai": "bash scripts/deploy-ai.sh",
     "eas:preview": "eas build --profile preview --platform all",
     "eas:simulator": "eas build --profile simulator --platform ios",
     "eas:production": "eas build --profile production --platform all"

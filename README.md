@@ -15,6 +15,7 @@ feedback, rewards, and accountability all live in the same loop.
 - Reality checks for overloaded schedules
 - AI rescheduling for missed tasks
 - AI backend health card with response time, model/fallback status, and timeout visibility
+- Go security gateway for Firebase token checks, rate limits, proxying, and audit logs
 - Setup Quest checklist for new users
 - Weekly Focus goal shown on the Today screen
 - Daily feedback, pattern feedback, weekly review, routine coaching, and task breakdowns
@@ -123,6 +124,11 @@ whether the backend is reachable and model-powered.
 - AsyncStorage
 - FastAPI
 - Python
+- Go security gateway
+- Go microservice for stats aggregation
+- SQLite analytics endpoint
+- PostgreSQL security audit log
+- Bash operational scripts
 - Gemini or OpenAI API
 - EAS Build
 - Render-ready backend setup
@@ -154,6 +160,10 @@ my-app/
     requirements.txt
     Dockerfile
     README.md
+
+  services/
+    security-gateway/  # Go middleware for auth, rate limiting, audit logs
+    stats-aggregator/  # Go microservice for task event aggregation
 
   assets/
     images/
@@ -240,10 +250,61 @@ Run the backend from the project root:
 npm run ai:dev
 ```
 
+The backend also includes a small SQLite analytics slice:
+
+- `POST /v1/analytics/events` stores anonymized task events.
+- `GET /v1/analytics/completion-by-time` runs a SQL query that returns average completion rate by time of day.
+
+Local analytics data is stored under `ai/data/` and is not committed.
+
+## Security Gateway
+
+For a production-shaped setup, point the mobile app at the Go security gateway
+instead of directly at the Python AI backend:
+
+```txt
+React Native app -> Go security gateway -> Python AI backend
+```
+
+The gateway lives in `services/security-gateway/` and handles:
+
+- Firebase ID token verification
+- Rate limiting by uid or IP
+- Proxying `/v1/...` requests to the Python backend
+- PostgreSQL audit logging for `uid`, endpoint, timestamp, IP, and status
+
+Run it locally:
+
+```bash
+npm run security:dev
+```
+
+For secure local development with Expo, Python, and Go together:
+
+```bash
+npm run dev:secure
+```
+
+Production gateway environment:
+
+```env
+AI_BACKEND_URL=https://your-python-ai-backend.example.com
+SECURITY_AUTH_MODE=firebase
+FIREBASE_PROJECT_ID=daily-planner-76712
+DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
+RATE_LIMIT_PER_MINUTE=60
+```
+
+After deploying the gateway, set the mobile app URL to the gateway:
+
+```env
+EXPO_PUBLIC_AI_API_URL=https://your-security-gateway.example.com
+```
+
 For a real phone, Expo needs your Mac's local network IP:
 
 ```bash
-EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8000 npx expo start -c
+EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8020 npx expo start -c
 ```
 
 You can also start Expo with the helper script:
@@ -251,6 +312,34 @@ You can also start Expo with the helper script:
 ```bash
 npm run start:ai
 ```
+
+## Go Stats Microservice
+
+The repository includes a standalone Go service at `services/stats-aggregator/`.
+It accepts task events and returns completion-rate aggregates. The app does not
+depend on it, but it demonstrates a separate backend/infra service next to the
+Python AI backend.
+
+```bash
+npm run ai:stats
+```
+
+Endpoints:
+
+- `GET /health`
+- `POST /v1/events`
+- `GET /v1/completion-rate`
+
+## Ops Scripts and CI
+
+Operational scripts live in `scripts/`:
+
+```bash
+npm run ops:check
+npm run ops:deploy:ai
+```
+
+GitHub Actions also checks the Expo app, Python backend syntax, and Go service.
 
 ## API Key Safety
 

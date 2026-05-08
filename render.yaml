@@ -19,3 +19,23 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+  - type: web
+    name: daily-discipline-security-gateway
+    env: docker
+    rootDir: services/security-gateway
+    plan: starter
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: AI_BACKEND_URL
+        sync: false
+      - key: SECURITY_AUTH_MODE
+        value: firebase
+      - key: FIREBASE_PROJECT_ID
+        value: daily-planner-76712
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: UPSTREAM_TIMEOUT_SECONDS
+        value: "8"
+      - key: DATABASE_URL
+        sync: false

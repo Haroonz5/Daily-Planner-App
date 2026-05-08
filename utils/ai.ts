@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 
+import { auth } from "@/constants/firebaseConfig";
 import { formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
@@ -204,16 +205,58 @@ const fetchWithTimeout = (
   });
 };
 
+const normalizeHeaders = (headers?: HeadersInit) => {
+  const next: Record<string, string> = {};
+
+  if (!headers) return next;
+
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => {
+      next[key] = value;
+    });
+    return next;
+  }
+
+  if (Array.isArray(headers)) {
+    headers.forEach(([key, value]) => {
+      next[key] = value;
+    });
+    return next;
+  }
+
+  Object.entries(headers).forEach(([key, value]) => {
+    next[key] = String(value);
+  });
+  return next;
+};
+
+const getAiAuthHeaders = async (): Promise<Record<string, string>> => {
+  const user = auth.currentUser;
+  if (!user) return {};
+
+  try {
+    const token = await user.getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+};
+
 const fetchAiEndpoint = async (
   path: string,
   init: RequestInit,
   timeoutMs: number
 ) => {
   let lastError: unknown = null;
+  const authHeaders = await getAiAuthHeaders();
+  const headers = {
+    ...normalizeHeaders(init.headers),
+    ...authHeaders,
+  };
 
   for (const url of getAiApiUrls()) {
     try {
-      return await fetchWithTimeout(`${url}${path}`, init, timeoutMs);
+      return await fetchWithTimeout(`${url}${path}`, { ...init, headers }, timeoutMs);
     } catch (error) {
       lastError = error;
     }

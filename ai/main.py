@@ -1,9 +1,11 @@
 import json
 import os
 import re
+import sqlite3
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -227,6 +229,37 @@ class BreakdownResponse(BaseModel):
     steps: list[BreakdownStep]
     summary: str
     source: AiSource
+
+
+class AnalyticsEventRequest(BaseModel):
+    user_hash: str = Field(min_length=3, max_length=128)
+    task_id: str | None = None
+    event_type: Literal["created", "completed", "skipped", "rescheduled", "focused"] = "completed"
+    title: str = Field(default="", max_length=180)
+    date: str
+    time: str | None = None
+    priority: Priority = "Medium"
+    completed: bool = False
+    status: Literal["pending", "completed", "skipped"] = "pending"
+    duration_minutes: int | None = Field(default=None, ge=1, le=720)
+    created_at: str | None = None
+
+
+class AnalyticsEventResponse(BaseModel):
+    ok: bool
+    event_id: int
+
+
+class CompletionBucket(BaseModel):
+    bucket: str
+    task_count: int
+    completed_count: int
+    completion_rate: float
+
+
+class CompletionByTimeResponse(BaseModel):
+    buckets: list[CompletionBucket]
+    total_events: int
 
 
 TASK_SCHEMA = {
@@ -680,6 +713,152 @@ def _task_time_bucket(task: FeedbackTask) -> str:
     if minutes < 17 * 60:
         return "afternoon"
     return "evening"
+
+
+def _analytics_db_path() -> Path:
+    return Path(os.getenv("ANALYTICS_DB_PATH", "data/discipline_analytics.sqlite3"))
+
+
+def _analytics_connection() -> sqlite3.Connection:
+    db_path = _analytics_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+
+    # I added this tiny relational store so the repo demonstrates SQL analytics
+    # without adding Postgres infrastructure during local development.
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS task_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_hash TEXT NOT NULL,
+            task_id TEXT,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            task_date TEXT NOT NULL,
+            task_time TEXT,
+            time_minutes INTEGER,
+            priority TEXT NOT NULL,
+            completed INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            duration_minutes INTEGER,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_events_date_time ON task_events(task_date, time_minutes)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_events_user ON task_events(user_hash)"
+    )
+    return connection
+
+
+def _analytics_created_at(value: str | None) -> str:
+    if not value:
+        return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    return value
+
+
+def _insert_analytics_event(request: AnalyticsEventRequest) -> int:
+    time_minutes = _time_to_minutes(request.time) if request.time else None
+
+    with _analytics_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO task_events (
+                user_hash,
+                task_id,
+                event_type,
+                title,
+                task_date,
+                task_time,
+                time_minutes,
+                priority,
+                completed,
+                status,
+                duration_minutes,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request.user_hash,
+                request.task_id,
+                request.event_type,
+                request.title,
+                request.date,
+                request.time,
+                time_minutes,
+                request.priority,
+                1 if request.completed else 0,
+                request.status,
+                request.duration_minutes,
+                _analytics_created_at(request.created_at),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def _completion_by_time_bucket(start_date: str | None, end_date: str | None) -> CompletionByTimeResponse:
+    where_parts = ["event_type IN ('created', 'completed', 'skipped', 'rescheduled')"]
+    params: list[str] = []
+
+    if start_date:
+        where_parts.append("task_date >= ?")
+        params.append(start_date)
+    if end_date:
+        where_parts.append("task_date <= ?")
+        params.append(end_date)
+
+    where_sql = " AND ".join(where_parts)
+
+    # The CASE expression is intentionally in SQL so this endpoint shows real
+    # relational analytics rather than just Python looping over Firestore data.
+    query = f"""
+        SELECT
+            CASE
+                WHEN time_minutes IS NULL THEN 'unscheduled'
+                WHEN time_minutes < 540 THEN 'early morning'
+                WHEN time_minutes < 720 THEN 'morning'
+                WHEN time_minutes < 1020 THEN 'afternoon'
+                ELSE 'evening'
+            END AS bucket,
+            COUNT(*) AS task_count,
+            SUM(CASE WHEN completed = 1 OR status = 'completed' THEN 1 ELSE 0 END) AS completed_count,
+            ROUND(
+                100.0 * SUM(CASE WHEN completed = 1 OR status = 'completed' THEN 1 ELSE 0 END) / COUNT(*),
+                1
+            ) AS completion_rate
+        FROM task_events
+        WHERE {where_sql}
+        GROUP BY bucket
+        ORDER BY
+            CASE bucket
+                WHEN 'early morning' THEN 1
+                WHEN 'morning' THEN 2
+                WHEN 'afternoon' THEN 3
+                WHEN 'evening' THEN 4
+                ELSE 5
+            END
+    """
+
+    with _analytics_connection() as connection:
+        rows = connection.execute(query, params).fetchall()
+
+    buckets = [
+        CompletionBucket(
+            bucket=str(row["bucket"]),
+            task_count=int(row["task_count"]),
+            completed_count=int(row["completed_count"] or 0),
+            completion_rate=float(row["completion_rate"] or 0),
+        )
+        for row in rows
+    ]
+    total_events = sum(bucket.task_count for bucket in buckets)
+    return CompletionByTimeResponse(buckets=buckets, total_events=total_events)
 
 
 def _clean_title(segment: str) -> str:
@@ -2025,3 +2204,14 @@ def breakdown_task(request: BreakdownRequest):
     baseline = _local_breakdown(request)
     ai_breakdown = _ai_breakdown(request, baseline)
     return ai_breakdown or baseline
+
+
+@app.post("/v1/analytics/events", response_model=AnalyticsEventResponse)
+def create_analytics_event(request: AnalyticsEventRequest):
+    event_id = _insert_analytics_event(request)
+    return AnalyticsEventResponse(ok=True, event_id=event_id)
+
+
+@app.get("/v1/analytics/completion-by-time", response_model=CompletionByTimeResponse)
+def completion_by_time(start_date: str | None = None, end_date: str | None = None):
+    return _completion_by_time_bucket(start_date, end_date)

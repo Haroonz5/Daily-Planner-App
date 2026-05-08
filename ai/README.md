@@ -24,6 +24,7 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 AI_ALLOWED_ORIGINS=*
 AI_TIMEOUT_SECONDS=5
+ANALYTICS_DB_PATH=data/discipline_analytics.sqlite3
 ```
 
 With `AI_PROVIDER=auto`, the backend uses Gemini when `GEMINI_API_KEY` exists,
@@ -75,12 +76,26 @@ EXPO_PUBLIC_AI_API_URL=https://your-ai-backend npx expo start -c
 - `POST /v1/weekly-review`
 - `POST /v1/routine-coach`
 - `POST /v1/breakdown-task`
+- `POST /v1/analytics/events`
+- `GET /v1/analytics/completion-by-time`
 
 If model keys are missing, the backend uses local fallbacks so development can
 continue.
 
 `GET /health` returns safe status metadata such as provider, configured model
 source, active model name, and timeout seconds. It never returns API keys.
+
+## SQL Analytics Slice
+
+The backend also includes a tiny SQLite analytics layer. It is intentionally
+small, but it shows relational database thinking:
+
+- `POST /v1/analytics/events` stores anonymized task events.
+- `GET /v1/analytics/completion-by-time` runs a SQL aggregation by time bucket.
+
+Local SQLite files live under `ai/data/` by default and are gitignored. For a
+real deployment, set `ANALYTICS_DB_PATH` to a persistent disk path or replace the
+SQLite connection with PostgreSQL while keeping the endpoint contract.
 
 ## API Key Safety
 

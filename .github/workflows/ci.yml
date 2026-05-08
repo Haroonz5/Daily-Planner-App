@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  app-and-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Typecheck and lint app
+        run: npm run qa
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AI backend dependencies
+        run: pip install -r ai/requirements.txt
+
+      - name: Compile AI backend
+        run: python -c "compile(open('ai/main.py', encoding='utf-8').read(), 'ai/main.py', 'exec')"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Test Go stats aggregator
+        run: go test ./...
+        working-directory: services/stats-aggregator
+
+      - name: Test Go security gateway
+        run: go test ./...
+        working-directory: services/security-gateway

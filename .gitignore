@@ -42,6 +42,10 @@ firebase-debug.log
 __pycache__/
 *.py[cod]
 .venv/
+*.sqlite
+*.sqlite3
+ai/data/
+services/stats-aggregator/data/
 
 app-example
 
