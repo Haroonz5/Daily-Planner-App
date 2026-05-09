@@ -269,7 +269,9 @@ React Native app -> Go security gateway -> Python AI backend
 The gateway lives in `services/security-gateway/` and handles:
 
 - Firebase ID token verification
-- Rate limiting by uid or IP
+- Optional or required Firebase App Check token verification
+- Rate limiting by uid or IP, with stricter limits for AI-heavy endpoints
+- CORS origin allowlisting for deployed web/custom clients
 - Proxying `/v1/...` requests to the Python backend
 - PostgreSQL audit logging for `uid`, endpoint, timestamp, IP, and status
 
@@ -291,9 +293,16 @@ Production gateway environment:
 AI_BACKEND_URL=https://your-python-ai-backend.example.com
 SECURITY_AUTH_MODE=firebase
 FIREBASE_PROJECT_ID=daily-planner-76712
+APP_CHECK_MODE=optional
+SECURITY_ALLOWED_ORIGINS=https://your-app-domain.example.com
 DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
 RATE_LIMIT_PER_MINUTE=60
+AI_RATE_LIMIT_PER_MINUTE=20
 ```
+
+Use `APP_CHECK_MODE=off` for Expo Go/local development, `optional` while you are
+rolling App Check out, and `required` only after the mobile app is sending valid
+`X-Firebase-AppCheck` tokens.
 
 After deploying the gateway, set the mobile app URL to the gateway:
 

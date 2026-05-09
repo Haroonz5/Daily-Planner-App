@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "qa": "npm run typecheck && npx eslint . --no-cache",
     "qa:device": "npm run qa && npx expo install --check && npx expo config --type public",
+    "security:check": "bash scripts/security-check.sh",
     "release:check": "npm run qa:device",
     "deploy:rules": "npx firebase-tools@latest deploy --only firestore:rules",
     "ai:dev": "cd ai && .venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000",
@@ -41,6 +42,7 @@
     "expo-linking": "~8.0.12",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.23",
+    "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-symbols": "~1.0.8",
@@ -62,6 +64,12 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.13"
+    },
+    "postcss": "8.5.10"
   },
   "private": true
 }

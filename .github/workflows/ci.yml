@@ -26,6 +26,12 @@ jobs:
       - name: Typecheck and lint app
         run: npm run qa
 
+      - name: Repository security checks
+        run: npm run security:check
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=critical
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -40,7 +46,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.23"
 
       - name: Test Go stats aggregator
         run: go test ./...

@@ -33,8 +33,14 @@ services:
         value: firebase
       - key: FIREBASE_PROJECT_ID
         value: daily-planner-76712
+      - key: APP_CHECK_MODE
+        value: optional
+      - key: SECURITY_ALLOWED_ORIGINS
+        sync: false
       - key: RATE_LIMIT_PER_MINUTE
         value: "60"
+      - key: AI_RATE_LIMIT_PER_MINUTE
+        value: "20"
       - key: UPSTREAM_TIMEOUT_SECONDS
         value: "8"
       - key: DATABASE_URL

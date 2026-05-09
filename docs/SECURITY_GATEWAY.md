@@ -7,6 +7,7 @@ backend.
 Expo app
   |
   | Authorization: Bearer <Firebase ID token>
+  | X-Firebase-AppCheck: <optional App Check token>
   v
 Go security gateway
   |
@@ -18,7 +19,10 @@ Python AI backend
 ## Responsibilities
 
 - Verify Firebase ID tokens in production mode.
+- Verify Firebase App Check tokens when `APP_CHECK_MODE=optional` or `required`.
 - Rate-limit AI calls by authenticated `uid`, falling back to IP.
+- Apply a stricter `AI_RATE_LIMIT_PER_MINUTE` to model-heavy `/v1/...` endpoints.
+- Restrict browser origins with `SECURITY_ALLOWED_ORIGINS` instead of allowing every origin in production.
 - Proxy AI requests to FastAPI.
 - Write every request to PostgreSQL for auditability.
 - Preserve a request ID across the boundary for debugging.
@@ -90,6 +94,8 @@ Local dev can use:
 
 ```env
 SECURITY_AUTH_MODE=dev
+APP_CHECK_MODE=off
+SECURITY_ALLOWED_ORIGINS=*
 DATABASE_URL=
 ```
 
@@ -98,5 +104,12 @@ Production should use:
 ```env
 SECURITY_AUTH_MODE=firebase
 FIREBASE_PROJECT_ID=daily-planner-76712
+APP_CHECK_MODE=optional
+SECURITY_ALLOWED_ORIGINS=https://your-app-domain.example.com
+AI_RATE_LIMIT_PER_MINUTE=20
 DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
 ```
+
+Move `APP_CHECK_MODE` from `optional` to `required` only after the mobile app is
+configured to send valid Firebase App Check tokens. Until then, optional mode
+lets the gateway verify tokens when present without breaking Expo Go testing.

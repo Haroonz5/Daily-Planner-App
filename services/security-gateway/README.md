@@ -9,7 +9,10 @@ React Native app -> Go security gateway -> Python FastAPI AI backend
 It is intentionally small but production-shaped:
 
 - Verifies Firebase ID tokens when `SECURITY_AUTH_MODE=firebase`.
+- Verifies Firebase App Check tokens when `APP_CHECK_MODE=optional` or `required`.
 - Rate-limits requests by authenticated `uid`, falling back to IP when needed.
+- Gives model-heavy AI endpoints a stricter `AI_RATE_LIMIT_PER_MINUTE`.
+- Restricts CORS with `SECURITY_ALLOWED_ORIGINS` in production.
 - Proxies AI requests to the Python backend.
 - Writes security audit logs to PostgreSQL.
 - Adds request IDs and forwards the authenticated UID to the upstream service.
@@ -27,7 +30,10 @@ Local defaults:
 PORT=8020
 AI_BACKEND_URL=http://127.0.0.1:8000
 SECURITY_AUTH_MODE=dev
+APP_CHECK_MODE=off
+SECURITY_ALLOWED_ORIGINS=*
 RATE_LIMIT_PER_MINUTE=60
+AI_RATE_LIMIT_PER_MINUTE=20
 UPSTREAM_TIMEOUT_SECONDS=8
 DATABASE_URL=
 FIREBASE_PROJECT_ID=
@@ -39,8 +45,14 @@ In dev mode, missing tokens are allowed and audit logs fall back to stdout if
 ```env
 SECURITY_AUTH_MODE=firebase
 FIREBASE_PROJECT_ID=daily-planner-76712
+APP_CHECK_MODE=optional
+SECURITY_ALLOWED_ORIGINS=https://your-app-domain.example.com
+AI_RATE_LIMIT_PER_MINUTE=20
 DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
 ```
+
+`APP_CHECK_MODE=required` should only be enabled after the app is sending valid
+`X-Firebase-AppCheck` tokens. Use `optional` while rolling it out.
 
 Then point the app at the gateway instead of the Python backend:
 

@@ -7,6 +7,9 @@ GATEWAY_PORT="${GATEWAY_PORT:-8020}"
 GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:${GATEWAY_PORT}}"
 SECURITY_AUTH_MODE="${SECURITY_AUTH_MODE:-dev}"
 FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID:-daily-planner-76712}"
+APP_CHECK_MODE="${APP_CHECK_MODE:-off}"
+SECURITY_ALLOWED_ORIGINS="${SECURITY_ALLOWED_ORIGINS:-*}"
+AI_RATE_LIMIT_PER_MINUTE="${AI_RATE_LIMIT_PER_MINUTE:-20}"
 
 AI_PID=""
 GATEWAY_PID=""
@@ -42,7 +45,7 @@ if ! command -v go >/dev/null 2>&1; then
   cat >&2 <<'GO_INSTALL'
 Go is required for the security gateway, but it is not installed yet.
 
-On this Mac, install Go 1.22+ with one of these options:
+On this Mac, install Go 1.23+ with one of these options:
   1. Official installer: https://go.dev/dl/ -> macOS ARM64 package
   2. Homebrew, if you install Homebrew later: brew install go
 
@@ -68,6 +71,9 @@ echo "Starting Go security gateway..."
   AI_BACKEND_URL="${AI_URL}" \
   SECURITY_AUTH_MODE="${SECURITY_AUTH_MODE}" \
   FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID}" \
+  APP_CHECK_MODE="${APP_CHECK_MODE}" \
+  SECURITY_ALLOWED_ORIGINS="${SECURITY_ALLOWED_ORIGINS}" \
+  AI_RATE_LIMIT_PER_MINUTE="${AI_RATE_LIMIT_PER_MINUTE}" \
   go run .
 ) &
 GATEWAY_PID="$!"

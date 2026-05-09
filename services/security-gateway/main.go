@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/appcheck"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -36,7 +38,10 @@ type config struct {
 	databaseURL       string
 	firebaseProjectID string
 	authMode          string
+	appCheckMode      string
+	allowedOrigins    []string
 	rateLimitPerMin   int
+	aiRateLimitPerMin int
 	requestTimeout    time.Duration
 }
 
@@ -45,7 +50,9 @@ type server struct {
 	client      *http.Client
 	auditor     *auditStore
 	certCache   *firebaseCertCache
+	appCheck    *appcheck.Client
 	rateLimiter *rateLimiter
+	aiLimiter   *rateLimiter
 	backendURL  *url.URL
 }
 
@@ -54,7 +61,7 @@ type firebaseTokenClaims struct {
 	Issuer    string `json:"iss"`
 	Subject   string `json:"sub"`
 	ExpiresAt int64  `json:"exp"`
-	IssuedAt   int64  `json:"iat"`
+	IssuedAt  int64  `json:"iat"`
 }
 
 type jwtHeader struct {
@@ -110,6 +117,11 @@ func main() {
 	}
 	defer auditor.Close()
 
+	appCheckClient, err := newAppCheckClient(context.Background(), cfg)
+	if err != nil {
+		log.Fatalf("app check: %v", err)
+	}
+
 	app := &server{
 		config: cfg,
 		client: &http.Client{
@@ -117,7 +129,9 @@ func main() {
 		},
 		auditor:     auditor,
 		certCache:   &firebaseCertCache{},
+		appCheck:    appCheckClient,
 		rateLimiter: newRateLimiter(cfg.rateLimitPerMin, time.Minute),
+		aiLimiter:   newRateLimiter(cfg.aiRateLimitPerMin, time.Minute),
 		backendURL:  backendURL,
 	}
 
@@ -126,7 +140,7 @@ func main() {
 	mux.HandleFunc("/", app.proxy)
 
 	log.Printf("security gateway listening on :%s and proxying to %s", cfg.port, cfg.aiBackendURL)
-	if err := http.ListenAndServe(":"+cfg.port, withCORS(mux)); err != nil {
+	if err := http.ListenAndServe(":"+cfg.port, withCORS(mux, cfg.allowedOrigins)); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -138,7 +152,10 @@ func loadConfig() config {
 		databaseURL:       os.Getenv("DATABASE_URL"),
 		firebaseProjectID: os.Getenv("FIREBASE_PROJECT_ID"),
 		authMode:          strings.ToLower(getenv("SECURITY_AUTH_MODE", "dev")),
+		appCheckMode:      normalizeMode(getenv("APP_CHECK_MODE", "off"), []string{"off", "optional", "required"}, "off"),
+		allowedOrigins:    parseCSV(getenv("SECURITY_ALLOWED_ORIGINS", "*")),
 		rateLimitPerMin:   getenvInt("RATE_LIMIT_PER_MINUTE", 60),
+		aiRateLimitPerMin: getenvInt("AI_RATE_LIMIT_PER_MINUTE", 20),
 		requestTimeout:    time.Duration(getenvInt("UPSTREAM_TIMEOUT_SECONDS", 8)) * time.Second,
 	}
 }
@@ -159,10 +176,38 @@ func getenvInt(key string, fallback int) int {
 	return value
 }
 
-func withCORS(next http.Handler) http.Handler {
+func normalizeMode(value string, allowed []string, fallback string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, option := range allowed {
+		if normalized == option {
+			return normalized
+		}
+	}
+	return fallback
+}
+
+func parseCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return []string{"*"}
+	}
+	return items
+}
+
+func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+		if origin := allowedOrigin(r.Header.Get("Origin"), allowedOrigins); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID, X-Firebase-AppCheck")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
 
 		if r.Method == http.MethodOptions {
@@ -174,15 +219,30 @@ func withCORS(next http.Handler) http.Handler {
 	})
 }
 
+func allowedOrigin(origin string, allowedOrigins []string) string {
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" {
+			return "*"
+		}
+		if origin != "" && origin == allowed {
+			return origin
+		}
+	}
+	return ""
+}
+
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":              true,
 		"service":         "daily-discipline-security-gateway",
 		"auth_mode":       s.config.authMode,
+		"app_check_mode":  s.config.appCheckMode,
 		"rate_limit":      s.config.rateLimitPerMin,
+		"ai_rate_limit":   s.config.aiRateLimitPerMin,
 		"audit_db":        s.auditor.Enabled(),
 		"ai_backend_url":  s.config.aiBackendURL,
 		"firebase_config": s.config.firebaseProjectID != "",
+		"allowed_origins": s.config.allowedOrigins,
 	})
 }
 
@@ -220,11 +280,22 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	uid = authenticatedUID
 
+	if err := s.verifyAppCheck(r); err != nil {
+		status = http.StatusUnauthorized
+		reason = err.Error()
+		writeError(w, status, "app check failed")
+		return
+	}
+
 	limitKey := uid
 	if limitKey == "" {
 		limitKey = ip
 	}
-	if !s.rateLimiter.Allow(limitKey) {
+	limiter := s.rateLimiter
+	if isAIHeavyEndpoint(r.URL.Path) {
+		limiter = s.aiLimiter
+	}
+	if !limiter.Allow(limitKey) {
 		status = http.StatusTooManyRequests
 		reason = "rate limit exceeded"
 		writeError(w, status, "rate limit exceeded")
@@ -255,6 +326,81 @@ func (s *server) authenticate(r *http.Request) (string, error) {
 	}
 
 	return s.verifyFirebaseToken(r.Context(), token)
+}
+
+func newAppCheckClient(ctx context.Context, cfg config) (*appcheck.Client, error) {
+	if cfg.appCheckMode == "off" {
+		return nil, nil
+	}
+	if cfg.firebaseProjectID == "" {
+		if cfg.appCheckMode == "required" {
+			return nil, errors.New("APP_CHECK_MODE=required needs FIREBASE_PROJECT_ID")
+		}
+		log.Println("APP_CHECK_MODE is optional but FIREBASE_PROJECT_ID is empty; skipping App Check verification")
+		return nil, nil
+	}
+
+	// I used the official Firebase Admin SDK here so production can verify
+	// X-Firebase-AppCheck tokens before proxying expensive AI requests.
+	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: cfg.firebaseProjectID})
+	if err != nil {
+		if cfg.appCheckMode == "required" {
+			return nil, err
+		}
+		log.Printf("App Check optional mode disabled because Firebase app init failed: %v", err)
+		return nil, nil
+	}
+
+	client, err := app.AppCheck(ctx)
+	if err != nil {
+		if cfg.appCheckMode == "required" {
+			return nil, err
+		}
+		log.Printf("App Check optional mode disabled because client init failed: %v", err)
+		return nil, nil
+	}
+	return client, nil
+}
+
+func (s *server) verifyAppCheck(r *http.Request) error {
+	if s.config.appCheckMode == "off" {
+		return nil
+	}
+
+	token := strings.TrimSpace(r.Header.Get("X-Firebase-AppCheck"))
+	if token == "" {
+		if s.config.appCheckMode == "required" {
+			return errors.New("missing app check token")
+		}
+		return nil
+	}
+	if s.appCheck == nil {
+		if s.config.appCheckMode == "required" {
+			return errors.New("app check verifier unavailable")
+		}
+		return nil
+	}
+
+	if _, err := s.appCheck.VerifyToken(token); err != nil {
+		return fmt.Errorf("invalid app check token: %w", err)
+	}
+	return nil
+}
+
+func isAIHeavyEndpoint(path string) bool {
+	switch path {
+	case "/v1/parse-tasks",
+		"/v1/reality-check",
+		"/v1/reschedule",
+		"/v1/task-breakdown",
+		"/v1/daily-feedback",
+		"/v1/pattern-feedback",
+		"/v1/weekly-review",
+		"/v1/routine-coach":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *server) verifyFirebaseToken(ctx context.Context, token string) (string, error) {

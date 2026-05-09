@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import {
   sendEmailVerification,
@@ -17,6 +16,7 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import { getSecureItem, removeSecureItem, setSecureItem } from "@/utils/secure-storage";
 import { auth } from "../constants/firebaseConfig";
 
 export default function Login() {
@@ -32,7 +32,7 @@ export default function Login() {
 
   useEffect(() => {
     const loadSavedEmail = async () => {
-      const saved = await AsyncStorage.getItem("savedEmail");
+      const saved = await getSecureItem("savedEmail");
       if (saved) {
         setEmail(saved);
         setRememberMe(true);
@@ -65,16 +65,16 @@ export default function Login() {
         // straight back to Login.
         await sendEmailVerification(credential.user).catch(() => {});
         if (rememberMe) {
-          await AsyncStorage.setItem("savedEmail", normalizedEmail);
+          await setSecureItem("savedEmail", normalizedEmail);
         }
         router.replace("/verify-email" as never);
         return;
       }
 
       if (rememberMe) {
-        await AsyncStorage.setItem("savedEmail", normalizedEmail);
+        await setSecureItem("savedEmail", normalizedEmail);
       } else {
-        await AsyncStorage.removeItem("savedEmail");
+        await removeSecureItem("savedEmail");
       }
 
       router.replace("/(tabs)");

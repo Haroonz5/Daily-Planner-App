@@ -28,17 +28,119 @@ service cloud.firestore {
       return isSignedIn() && hasFriendDoc(userId, friendId);
     }
 
+    function validShortString(value, maxSize) {
+      return value is string && value.size() > 0 && value.size() <= maxSize;
+    }
+
+    function optionalString(field, maxSize) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        (request.resource.data[field] is string &&
+          request.resource.data[field].size() <= maxSize);
+    }
+
+    function optionalBool(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] is bool;
+    }
+
+    function optionalNumber(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] is number;
+    }
+
+    function validDateKey(value) {
+      return value is string && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function validTaskDoc() {
+      return validShortString(request.resource.data.title, 180) &&
+        validDateKey(request.resource.data.date) &&
+        validShortString(request.resource.data.time, 20) &&
+        request.resource.data.priority in ["Low", "Medium", "High"] &&
+        request.resource.data.status in ["pending", "completed", "skipped"] &&
+        request.resource.data.completed is bool &&
+        optionalString("notes", 4000) &&
+        optionalString("originalTime", 20) &&
+        optionalString("recurrenceGroupId", 120) &&
+        optionalString("parentTaskTitle", 180) &&
+        optionalBool("aiCreated") &&
+        optionalBool("breakdownCreated") &&
+        optionalBool("rollingRoutine") &&
+        optionalNumber("rescheduledCount") &&
+        optionalNumber("focusSessionCount") &&
+        optionalNumber("focusMinutes") &&
+        optionalNumber("cleanFocusSessions") &&
+        (!("recurrence" in request.resource.data) ||
+          request.resource.data.recurrence in ["none", "daily", "weekdays", "weekly", "custom"]) &&
+        (!("recurrenceDays" in request.resource.data) ||
+          request.resource.data.recurrenceDays == null ||
+          (request.resource.data.recurrenceDays is list &&
+            request.resource.data.recurrenceDays.size() <= 7));
+    }
+
+    function validProfileDoc(userId) {
+      return (!("uid" in request.resource.data) || request.resource.data.uid == userId) &&
+        optionalString("email", 160) &&
+        optionalString("username", 32) &&
+        optionalString("displayName", 60) &&
+        optionalString("activePetKey", 40) &&
+        optionalString("petNickname", 60) &&
+        optionalBool("tutorialCompleted") &&
+        optionalBool("enableSounds") &&
+        optionalBool("enableHaptics") &&
+        optionalNumber("focusDurationMinutes");
+    }
+
+    function validPublicProfile(userId) {
+      return request.resource.data.uid == userId &&
+        optionalString("email", 160) &&
+        optionalString("username", 32) &&
+        optionalString("displayName", 60);
+    }
+
+    function validUsernameReservation(username) {
+      return request.resource.data.uid == request.auth.uid &&
+        request.resource.data.username == username &&
+        username.matches('^[a-z0-9_]{3,20}$') &&
+        optionalString("email", 160);
+    }
+
+    function validFeedbackDoc() {
+      return request.resource.data.type in ["Bug", "Confusing", "Idea", "Praise"] &&
+        validShortString(request.resource.data.message, 2000) &&
+        optionalString("email", 160) &&
+        optionalString("appVersion", 40) &&
+        optionalString("theme", 40);
+    }
+
+    function validFocusSessionDoc() {
+      return validShortString(request.resource.data.taskTitle, 180) &&
+        request.resource.data.minutes is number &&
+        request.resource.data.minutes > 0 &&
+        request.resource.data.minutes <= 240 &&
+        optionalString("taskId", 120) &&
+        optionalBool("strictFocus") &&
+        optionalNumber("distractionStrikes");
+    }
+
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validProfileDoc(userId);
+      allow delete: if isOwner(userId);
 
       match /tasks/{taskId} {
         // Routines are stored on task docs through recurrenceGroupId, so owner-only
         // task access protects normal tasks, future tasks, and rolling routines together.
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validTaskDoc();
+        allow delete: if isOwner(userId);
       }
 
       match /focusSessions/{sessionId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validFocusSessionDoc();
+        allow delete: if isOwner(userId);
       }
 
       match /widgetSummary/{summaryId} {
@@ -46,7 +148,9 @@ service cloud.firestore {
       }
 
       match /feedback/{feedbackId} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && validFeedbackDoc();
+        allow delete: if isOwner(userId);
       }
 
       match /friends/{friendId} {
@@ -61,7 +165,7 @@ service cloud.firestore {
 
     match /publicProfiles/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validPublicProfile(userId);
       allow delete: if isOwner(userId);
     }
 
@@ -69,8 +173,11 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.username == username;
-      allow update, delete: if isSignedIn() &&
+        validUsernameReservation(username);
+      allow update: if isSignedIn() &&
+        resource.data.uid == request.auth.uid &&
+        validUsernameReservation(username);
+      allow delete: if isSignedIn() &&
         resource.data.uid == request.auth.uid;
     }
 
@@ -89,7 +196,14 @@ service cloud.firestore {
         requestId == request.auth.uid + "_" + request.resource.data.recipientUid &&
         request.resource.data.requesterUid == request.auth.uid &&
         request.resource.data.recipientUid is string &&
-        request.resource.data.status == "pending";
+        request.resource.data.recipientUid != request.auth.uid &&
+        request.resource.data.status == "pending" &&
+        optionalString("requesterEmail", 160) &&
+        optionalString("requesterUsername", 32) &&
+        optionalString("requesterName", 60) &&
+        optionalString("recipientEmail", 160) &&
+        optionalString("recipientUsername", 32) &&
+        optionalString("recipientName", 60);
 
       allow update: if isSignedIn() &&
         resource.data.recipientUid == request.auth.uid &&
