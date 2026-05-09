@@ -26,6 +26,7 @@ Python AI backend
 - Proxy AI requests to FastAPI.
 - Write every request to PostgreSQL for auditability.
 - Preserve a request ID across the boundary for debugging.
+- Serve a token-protected audit dashboard at `/admin`.
 
 ## PostgreSQL Table
 
@@ -88,6 +89,37 @@ GROUP BY uid, ip
 ORDER BY limited_requests DESC;
 ```
 
+## Admin Dashboard
+
+Set a private dashboard token:
+
+```env
+ADMIN_DASHBOARD_TOKEN=long-random-value
+```
+
+Then open:
+
+```txt
+http://127.0.0.1:8020/admin
+```
+
+`npm run dev:secure` passes `local-dev-admin` as the local token unless you set
+`ADMIN_DASHBOARD_TOKEN` yourself.
+
+The dashboard calls `/admin/audit-summary` with `X-Admin-Token` and shows:
+
+- 24-hour request count.
+- Failed request count.
+- Rate-limited request count.
+- Average latency.
+- Top endpoints.
+- Suspicious IPs.
+- Recent blocked or failed requests.
+
+If `DATABASE_URL` is not set, the gateway still works and logs audit events to
+stdout. The dashboard will report `audit_db: false` until PostgreSQL is
+configured.
+
 ## Local vs Production
 
 Local dev can use:
@@ -108,6 +140,7 @@ APP_CHECK_MODE=optional
 SECURITY_ALLOWED_ORIGINS=https://your-app-domain.example.com
 AI_RATE_LIMIT_PER_MINUTE=20
 DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
+ADMIN_DASHBOARD_TOKEN=long-random-value
 ```
 
 Move `APP_CHECK_MODE` from `optional` to `required` only after the mobile app is

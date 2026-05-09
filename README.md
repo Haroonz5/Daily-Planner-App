@@ -15,7 +15,8 @@ feedback, rewards, and accountability all live in the same loop.
 - Reality checks for overloaded schedules
 - AI rescheduling for missed tasks
 - AI backend health card with response time, model/fallback status, and timeout visibility
-- Go security gateway for Firebase token checks, rate limits, proxying, and audit logs
+- Go security gateway for Firebase token checks, rate limits, proxying, audit logs, and an admin dashboard
+- Account security with verified email changes, password reset, and authenticator-app 2FA
 - Setup Quest checklist for new users
 - Weekly Focus goal shown on the Today screen
 - Daily feedback, pattern feedback, weekly review, routine coaching, and task breakdowns
@@ -28,9 +29,10 @@ feedback, rewards, and accountability all live in the same loop.
 - Focus Mode with Strict Focus app-switch strike tracking, haptics, sounds, and focus music
 - Accountability friends with usernames, nudges, progress sharing, watchlists, and challenges
 - Stats dashboard with Discipline Score, weekly review, time-window analysis, and XP progress
-- Month calendar, next-7-days planner, and Google Calendar export links
+- Month calendar, next-7-days planner, and native phone calendar export
+- Public landing page for testers or portfolio demos
 - Shareable daily progress card
-- Local notifications for task reminders, morning summaries, evening planning, Complete, and Snooze
+- Local notifications for task reminders, morning summaries, evening planning, Complete, Snooze, and Skip
 - Multiple themes including light, dark, GitHub Dark, Amazon Light, Void Black, Slate Steel, and Rose Quartz
 - Tester tools for feedback, reminder health, data reset, and account deletion
 
@@ -152,6 +154,7 @@ my-app/
     settings.tsx       # Full settings screen
     onboarding.tsx
     tutorial.tsx
+    landing.tsx
     login.tsx
     signup.tsx
 
@@ -274,6 +277,7 @@ The gateway lives in `services/security-gateway/` and handles:
 - CORS origin allowlisting for deployed web/custom clients
 - Proxying `/v1/...` requests to the Python backend
 - PostgreSQL audit logging for `uid`, endpoint, timestamp, IP, and status
+- A token-protected `/admin` dashboard for request volume, failures, suspicious IPs, and rate limits
 
 Run it locally:
 
@@ -296,6 +300,7 @@ FIREBASE_PROJECT_ID=daily-planner-76712
 APP_CHECK_MODE=optional
 SECURITY_ALLOWED_ORIGINS=https://your-app-domain.example.com
 DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
+ADMIN_DASHBOARD_TOKEN=long-random-value
 RATE_LIMIT_PER_MINUTE=60
 AI_RATE_LIMIT_PER_MINUTE=20
 ```
@@ -388,12 +393,14 @@ npm run lint
 npm run typecheck
 npm run qa
 npm run qa:device
+npm run release:full-check
 npm run release:check
 npm run ai:dev
 npm run deploy:rules
 npm run eas:preview
 npm run eas:simulator
 npm run eas:production
+npm run eas:testflight
 ```
 
 ## Testing With Other People
@@ -423,6 +430,7 @@ Useful tester docs:
 - `docs/TESTER_HANDOFF.md`
 - `docs/TESTING_AND_RELEASE.md`
 - `docs/PRODUCTION_CHECKLIST.md`
+- `docs/RELEASE_PIPELINE.md`
 
 ## Current Limitations
 

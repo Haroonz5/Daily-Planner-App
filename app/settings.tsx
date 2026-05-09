@@ -1,6 +1,13 @@
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
-import { deleteUser, signOut } from "firebase/auth";
+import {
+  deleteUser,
+  multiFactor,
+  sendPasswordResetEmail,
+  signOut,
+  TotpMultiFactorGenerator,
+  verifyBeforeUpdateEmail,
+} from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -62,6 +69,7 @@ import {
   getUsernameError,
   normalizeUsername,
 } from "@/utils/usernames";
+import { exportTasksToCalendar } from "@/utils/calendar";
 import {
   cancelManyTaskNotifications,
   getScheduledNotificationAudit,
@@ -167,6 +175,14 @@ export default function SettingsScreen({
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [dangerBusy, setDangerBusy] = useState(false);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [totpSecret, setTotpSecret] = useState<Awaited<
+    ReturnType<typeof TotpMultiFactorGenerator.generateSecret>
+  > | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [, refreshMfaFactors] = useState(0);
   const [routineCoachById, setRoutineCoachById] = useState<
     Record<string, RoutineCoachResult>
   >({});
@@ -176,6 +192,17 @@ export default function SettingsScreen({
   const [editRoutineTime, setEditRoutineTime] = useState("");
   const today = formatDateKey(new Date());
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const currentUser = auth.currentUser;
+  const enrolledFactors = currentUser
+    ? multiFactor(currentUser).enrolledFactors
+    : [];
+  const totpFactors = enrolledFactors.filter(
+    (factor) => factor.factorId === TotpMultiFactorGenerator.FACTOR_ID
+  );
+  const totpQrUrl = totpSecret?.generateQrCodeUrl(
+    currentUser?.email ?? currentUser?.uid ?? "Daily Discipline",
+    "Daily Discipline"
+  );
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -438,6 +465,181 @@ export default function SettingsScreen({
     const audit = await getScheduledNotificationAudit();
     setNotificationAudit(audit);
     return audit;
+  };
+
+  const showSecurityError = (fallback: string, error: unknown) => {
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? String((error as { code?: string }).code)
+        : "";
+
+    setStatusTone("warning");
+    if (code.includes("requires-recent-login")) {
+      setStatusMessage(
+        "Security changes need a fresh login. Log out, sign back in, then try again."
+      );
+      return;
+    }
+    if (code.includes("operation-not-allowed")) {
+      setStatusMessage(
+        "Firebase has not enabled this security method yet. Enable email changes or TOTP MFA in the Firebase console."
+      );
+      return;
+    }
+    if (code.includes("email-already-in-use")) {
+      setStatusMessage("That email is already attached to another account.");
+      return;
+    }
+
+    setStatusMessage(fallback);
+  };
+
+  const handleRequestEmailChange = async () => {
+    const user = auth.currentUser;
+    const nextEmail = newEmail.trim().toLowerCase();
+    if (!user || !nextEmail || securityBusy) return;
+
+    setSecurityBusy(true);
+
+    try {
+      // I use Firebase's verification-first email update so someone cannot
+      // change the account address until they prove they own the new inbox.
+      await verifyBeforeUpdateEmail(user, nextEmail);
+      await playSaveFeedback(profile);
+      setNewEmail("");
+      setStatusTone("success");
+      setStatusMessage(
+        `Email-change link sent to ${nextEmail}. Open it to finish the update.`
+      );
+    } catch (error) {
+      await playWarningFeedback(profile);
+      showSecurityError("Email change could not be started.", error);
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    const email = auth.currentUser?.email;
+    if (!email || securityBusy) return;
+
+    setSecurityBusy(true);
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      await playSaveFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(`Password reset email sent to ${email}.`);
+    } catch (error) {
+      await playWarningFeedback(profile);
+      showSecurityError("Password reset email could not be sent.", error);
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const startTotpEnrollment = async () => {
+    const user = auth.currentUser;
+    if (!user || securityBusy) return;
+
+    setSecurityBusy(true);
+
+    try {
+      const session = await multiFactor(user).getSession();
+      const secret = await TotpMultiFactorGenerator.generateSecret(session);
+      setTotpSecret(secret);
+      setTotpCode("");
+      await playSelectionFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(
+        "Authenticator setup started. Copy the secret key into your authenticator app, then enter the 6-digit code."
+      );
+    } catch (error) {
+      await playWarningFeedback(profile);
+      showSecurityError("Two-factor setup could not start.", error);
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const confirmTotpEnrollment = async () => {
+    const user = auth.currentUser;
+    const code = totpCode.replace(/\s/g, "");
+    if (!user || !totpSecret || securityBusy) return;
+
+    if (code.length < 6) {
+      setStatusTone("warning");
+      setStatusMessage("Enter the 6-digit authenticator code first.");
+      return;
+    }
+
+    setSecurityBusy(true);
+
+    try {
+      const assertion = TotpMultiFactorGenerator.assertionForEnrollment(
+        totpSecret,
+        code
+      );
+      await multiFactor(user).enroll(assertion, "Authenticator app");
+      await user.reload();
+      setTotpSecret(null);
+      setTotpCode("");
+      refreshMfaFactors((value) => value + 1);
+      await playSaveFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage("Two-factor authentication is now enabled.");
+    } catch (error) {
+      await playWarningFeedback(profile);
+      showSecurityError("Authenticator code was not accepted.", error);
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const removeTotpFactor = async (factorUid: string) => {
+    const user = auth.currentUser;
+    if (!user || securityBusy) return;
+
+    setSecurityBusy(true);
+
+    try {
+      await multiFactor(user).unenroll(factorUid);
+      await user.reload();
+      refreshMfaFactors((value) => value + 1);
+      await playWarningFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage("Authenticator app removed from this account.");
+    } catch (error) {
+      await playWarningFeedback(profile);
+      showSecurityError("Authenticator app could not be removed.", error);
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const handleExportCalendar = async () => {
+    if (calendarBusy) return;
+
+    setCalendarBusy(true);
+
+    try {
+      const result = await exportTasksToCalendar(tasks, 30);
+      await playSaveFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(
+        `${result.created} task${result.created === 1 ? "" : "s"} exported to ${result.calendarTitle}. ${result.skipped} completed, skipped, old, or duplicate task${result.skipped === 1 ? " was" : "s were"} ignored.`
+      );
+    } catch (error) {
+      await playWarningFeedback(profile);
+      setStatusTone("warning");
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Calendar export could not finish on this device."
+      );
+    } finally {
+      setCalendarBusy(false);
+    }
   };
 
   const deleteCollectionDocs = async (
@@ -1151,9 +1353,9 @@ export default function SettingsScreen({
           Calendar, Widgets & Lock Screen
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
-          The app now writes richer widget summary data, supports Complete and
-          Snooze actions from task notifications, and can export individual
-          tasks to Google Calendar from the Week Planner.
+          The app now writes richer widget summary data, supports Complete,
+          Snooze, and Skip actions from task notifications, and can export the
+          next month of active tasks to your phone calendar.
         </Text>
 
         <View
@@ -1166,16 +1368,34 @@ export default function SettingsScreen({
             Native feature readiness
           </Text>
           <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
-            Full iPhone home-screen widgets and direct Apple Calendar writes
-            need a development or production build. Expo Go can still test the
-            app-side data, week view, and reminder actions.
+            Full iPhone home-screen widgets need a development or production
+            build. Calendar export can be tested on device after giving calendar
+            permission.
           </Text>
-          <TouchableOpacity
-            style={[styles.inlineActionButton, { backgroundColor: colors.tint }]}
-            onPress={() => router.push("/week" as never)}
-          >
-            <Text style={styles.inlineActionText}>Open Week Planner</Text>
-          </TouchableOpacity>
+          <View style={styles.inlineActionRow}>
+            <TouchableOpacity
+              style={[styles.inlineActionButton, { backgroundColor: colors.tint }]}
+              onPress={() => router.push("/week" as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Open week planner"
+            >
+              <Text style={styles.inlineActionText}>Open Week Planner</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.inlineActionButton,
+                { backgroundColor: calendarBusy ? colors.border : colors.tint },
+              ]}
+              onPress={handleExportCalendar}
+              disabled={calendarBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Export next thirty days of active tasks to calendar"
+            >
+              <Text style={styles.inlineActionText}>
+                {calendarBusy ? "Exporting..." : "Export 30 Days"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -1198,6 +1418,205 @@ export default function SettingsScreen({
         >
           <Text style={styles.primaryButtonText}>Open Friends</Text>
         </TouchableOpacity>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Account Security
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Update your login email, send a password reset, and protect the
+          account with an authenticator app.
+        </Text>
+
+        <View
+          style={[
+            styles.securityPanel,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.securityLabel, { color: colors.subtle }]}>
+            Current Email
+          </Text>
+          <Text style={[styles.securityValue, { color: colors.text }]}>
+            {currentUser?.email ?? "Signed in"}
+          </Text>
+
+          <Text style={[styles.inputLabel, { color: colors.subtle }]}>
+            New Email
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            placeholder="new@email.com"
+            placeholderTextColor={colors.subtle}
+            value={newEmail}
+            onChangeText={setNewEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: colors.surface },
+              ]}
+              onPress={handleRequestEmailChange}
+              disabled={securityBusy || !newEmail.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Send email change verification link"
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+                Email Link
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: colors.surface },
+              ]}
+              onPress={handlePasswordReset}
+              disabled={securityBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Send password reset email"
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+                Reset Password
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.securityPanel,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.securityHeaderRow}>
+            <View style={styles.securityHeaderCopy}>
+              <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+                Two-Factor Authentication
+              </Text>
+              <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+                {totpFactors.length > 0
+                  ? `${totpFactors.length} authenticator app${totpFactors.length === 1 ? "" : "s"} connected.`
+                  : "Add an authenticator app so signing in needs a 6-digit code."}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.inlineActionButton, { backgroundColor: colors.tint }]}
+              onPress={startTotpEnrollment}
+              disabled={securityBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Start authenticator app setup"
+            >
+              <Text style={styles.inlineActionText}>
+                {totpSecret ? "Restart" : "Set Up"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {totpSecret ? (
+            <View
+              style={[
+                styles.secretBox,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.securityLabel, { color: colors.subtle }]}>
+                Authenticator Setup Key
+              </Text>
+              <Text
+                selectable
+                style={[styles.secretText, { color: colors.text }]}
+              >
+                {totpSecret.secretKey}
+              </Text>
+              {totpQrUrl ? (
+                <Text
+                  selectable
+                  style={[styles.secretHint, { color: colors.subtle }]}
+                >
+                  QR URI: {totpQrUrl}
+                </Text>
+              ) : null}
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    color: colors.text,
+                    marginTop: 12,
+                  },
+                ]}
+                placeholder="6-digit code"
+                placeholderTextColor={colors.subtle}
+                value={totpCode}
+                onChangeText={setTotpCode}
+                keyboardType="number-pad"
+                maxLength={8}
+              />
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+                onPress={confirmTotpEnrollment}
+                disabled={securityBusy}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm two-factor authenticator code"
+              >
+                <Text style={styles.primaryButtonText}>
+                  {securityBusy ? "Checking..." : "Confirm 2FA"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {totpFactors.map((factor) => (
+            <View
+              key={factor.uid}
+              style={[
+                styles.factorRow,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.securityHeaderCopy}>
+                <Text style={[styles.securityValue, { color: colors.text }]}>
+                  {factor.displayName ?? "Authenticator app"}
+                </Text>
+                <Text style={[styles.securityLabel, { color: colors.subtle }]}>
+                  Added to this Firebase account
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionButton,
+                  { backgroundColor: colors.warning },
+                ]}
+                onPress={() => removeTotpFactor(factor.uid)}
+                disabled={securityBusy}
+                accessibilityRole="button"
+                accessibilityLabel="Remove authenticator app from account"
+              >
+                <Text style={styles.inlineActionText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
       </View>
 
       <View
@@ -2788,11 +3207,69 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     marginTop: 12,
+    marginRight: 8,
+  },
+  inlineActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
   },
   inlineActionText: {
     color: "#fff",
     fontSize: 12,
     fontWeight: "900",
+  },
+  securityPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 12,
+  },
+  securityHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  securityHeaderCopy: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  securityLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  securityValue: {
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 20,
+  },
+  secretBox: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 12,
+  },
+  secretText: {
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+    lineHeight: 22,
+  },
+  secretHint: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    marginTop: 8,
+  },
+  factorRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
   },
   auditCard: {
     borderWidth: 1,

@@ -20,6 +20,7 @@ Test on a real phone:
 
 - Sign up and log in.
 - Confirm Today shows the Setup Quest for a fresh account.
+- Open Settings > Account Security and confirm password reset sends.
 - Add a task manually.
 - Save and reuse one task template.
 - Use "Plan with AI" for multiple tasks.
@@ -46,12 +47,15 @@ group.
 
 Then confirm:
 
-- A task reminder appears once and shows the Complete action.
+- A task reminder appears once and shows Complete, Snooze, and Skip actions.
 - Tapping Complete from the notification marks the task complete in the app.
+- Tapping Skip from the notification keeps the task in history as skipped.
+- Settings can export the next 30 days of active tasks to the phone calendar.
 - Focus Mode music starts, loops quietly, and stops when the session ends.
 - Pet names stay saved after changing tabs and reopening the app.
 - Weekly Focus Goal saves in Settings and appears on Today.
 - Friends, accountability nudges, challenges, feedback, and progress sharing do not show permission errors.
+- Optional: enable authenticator-app 2FA in Settings, then confirm login asks for the code.
 
 ## 3. Deploy The AI Backend
 

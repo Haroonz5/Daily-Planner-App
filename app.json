@@ -44,7 +44,14 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow Daily Discipline to export your planned tasks to your calendar.",
+          "remindersPermission": "Allow Daily Discipline to connect tasks with device reminders."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

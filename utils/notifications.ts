@@ -47,6 +47,7 @@ const EVENING_REMINDER_NOTIFICATION_ID = "daily-discipline-evening-reminder";
 const TASK_NOTIFICATION_CATEGORY_ID = "dailyDisciplineTaskActions";
 const COMPLETE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineCompleteTask";
 const SNOOZE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineSnoozeTask";
+const SKIP_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineSkipTask";
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   taskRemindersEnabled: true,
@@ -85,6 +86,15 @@ export const configureTaskNotificationActions = async () => {
         buttonTitle: "Snooze 15m",
         options: {
           opensAppToForeground: false,
+          isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: SKIP_TASK_NOTIFICATION_ACTION_ID,
+        buttonTitle: "Skip",
+        options: {
+          opensAppToForeground: false,
+          isDestructive: true,
           isAuthenticationRequired: false,
         },
       },
@@ -189,11 +199,43 @@ const snoozeTaskFromNotificationResponse = async (
   return true;
 };
 
+const skipTaskFromNotificationResponse = async (
+  response: Notifications.NotificationResponse
+) => {
+  if (response.actionIdentifier !== SKIP_TASK_NOTIFICATION_ACTION_ID) {
+    return false;
+  }
+
+  const uid = auth.currentUser?.uid;
+  const taskId = getNotificationData(response.notification.request).taskId;
+  if (!uid || !taskId) return false;
+
+  // I added this so the lock-screen Skip button behaves like the app's skip
+  // flow: the task stays in history, notifications are cleaned up, and summary
+  // reminders recalculate without forcing the user to open the app.
+  await updateDoc(doc(db, "users", uid, "tasks", taskId), {
+    completed: false,
+    status: "skipped",
+    skippedAt: new Date(),
+    lastActionAt: new Date(),
+    skippedFromNotification: true,
+  });
+
+  await cancelTaskNotifications(taskId).catch(() => {});
+  await syncMorningSummaryNotification(uid).catch(() => {});
+  await Notifications.dismissNotificationAsync(
+    response.notification.request.identifier
+  ).catch(() => {});
+
+  return true;
+};
+
 export const handleTaskNotificationResponse = async (
   response: Notifications.NotificationResponse
 ) =>
   (await completeTaskFromNotificationResponse(response)) ||
-  (await snoozeTaskFromNotificationResponse(response));
+  (await snoozeTaskFromNotificationResponse(response)) ||
+  (await skipTaskFromNotificationResponse(response));
 
 const getNotificationAuditKey = (request: Notifications.NotificationRequest) => {
   const data = getNotificationData(request);

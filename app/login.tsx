@@ -1,7 +1,11 @@
 import { useRouter } from "expo-router";
 import {
+  getMultiFactorResolver,
+  type MultiFactorResolver,
   sendEmailVerification,
   signInWithEmailAndPassword,
+  TotpMultiFactorGenerator,
+  type User,
 } from "firebase/auth";
 import { useEffect, useState } from "react";
 import {
@@ -29,6 +33,10 @@ export default function Login() {
   const [error, setError] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(
+    null
+  );
+  const [mfaCode, setMfaCode] = useState("");
 
   useEffect(() => {
     const loadSavedEmail = async () => {
@@ -41,6 +49,28 @@ export default function Login() {
 
     loadSavedEmail();
   }, []);
+
+  const finishSignIn = async (user: User, normalizedEmail: string) => {
+    if (!user.emailVerified) {
+      // Keep the user signed in so Verify Email can resend, check, or skip.
+      // Signing out here caused a flash to Verify Email and then a bounce
+      // straight back to Login.
+      await sendEmailVerification(user).catch(() => {});
+      if (rememberMe) {
+        await setSecureItem("savedEmail", normalizedEmail);
+      }
+      router.replace("/verify-email" as never);
+      return;
+    }
+
+    if (rememberMe) {
+      await setSecureItem("savedEmail", normalizedEmail);
+    } else {
+      await removeSecureItem("savedEmail");
+    }
+
+    router.replace("/(tabs)");
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -59,27 +89,70 @@ export default function Login() {
         password
       );
 
-      if (!credential.user.emailVerified) {
-        // Keep the user signed in so Verify Email can resend, check, or skip.
-        // Signing out here caused a flash to Verify Email and then a bounce
-        // straight back to Login.
-        await sendEmailVerification(credential.user).catch(() => {});
-        if (rememberMe) {
-          await setSecureItem("savedEmail", normalizedEmail);
+      await finishSignIn(credential.user, normalizedEmail);
+    } catch (loginError) {
+      const code =
+        typeof loginError === "object" && loginError && "code" in loginError
+          ? String((loginError as { code?: string }).code)
+          : "";
+
+      if (code === "auth/multi-factor-auth-required") {
+        const resolver = getMultiFactorResolver(auth, loginError as never);
+        const hasTotpFactor = resolver.hints.some(
+          (hint) => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID
+        );
+
+        if (!hasTotpFactor) {
+          setError(
+            "This account has a second factor that this app cannot finish yet."
+          );
+          return;
         }
-        router.replace("/verify-email" as never);
+
+        // I keep the MFA resolver in state so the second screen can finish the
+        // same Firebase sign-in attempt instead of asking for the password again.
+        setMfaResolver(resolver);
+        setMfaCode("");
+        setError("Enter the 6-digit code from your authenticator app.");
         return;
       }
 
-      if (rememberMe) {
-        await setSecureItem("savedEmail", normalizedEmail);
-      } else {
-        await removeSecureItem("savedEmail");
-      }
-
-      router.replace("/(tabs)");
-    } catch {
       setError("Invalid email or password");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMfaConfirm = async () => {
+    const code = mfaCode.replace(/\s/g, "");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!mfaResolver || code.length < 6) {
+      setError("Enter the 6-digit authenticator code first.");
+      return;
+    }
+
+    const hint = mfaResolver.hints.find(
+      (item) => item.factorId === TotpMultiFactorGenerator.FACTOR_ID
+    );
+    if (!hint) {
+      setError("No authenticator app is available for this account.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setError("");
+
+      const assertion = TotpMultiFactorGenerator.assertionForSignIn(
+        hint.uid,
+        code
+      );
+      const credential = await mfaResolver.resolveSignIn(assertion);
+      setMfaResolver(null);
+      setMfaCode("");
+      await finishSignIn(credential.user, normalizedEmail);
+    } catch {
+      setError("That authenticator code did not work. Try the newest code.");
     } finally {
       setIsSubmitting(false);
     }
@@ -138,6 +211,54 @@ export default function Login() {
 
           {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
+          {mfaResolver ? (
+            <View
+              style={[
+                styles.mfaPanel,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.mfaTitle, { color: colors.text }]}>
+                Two-Factor Code
+              </Text>
+              <Text style={[styles.mfaBody, { color: colors.subtle }]}>
+                Open your authenticator app and enter the current 6-digit code.
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                    color: colors.text,
+                    marginBottom: 10,
+                  },
+                ]}
+                placeholder="123456"
+                placeholderTextColor={colors.subtle}
+                value={mfaCode}
+                onChangeText={setMfaCode}
+                keyboardType="number-pad"
+                maxLength={8}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  { backgroundColor: colors.tint, marginBottom: 0 },
+                  isSubmitting && styles.buttonDisabled,
+                ]}
+                onPress={handleMfaConfirm}
+                disabled={isSubmitting}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm two factor authentication code"
+              >
+                <Text style={styles.buttonText}>
+                  {isSubmitting ? "Confirming..." : "Confirm Code"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
           <TouchableOpacity
             style={styles.rememberMe}
             onPress={() => setRememberMe((prev) => !prev)}
@@ -160,6 +281,8 @@ export default function Login() {
             style={[styles.button, { backgroundColor: colors.tint }, isSubmitting && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={isSubmitting}
+            accessibilityRole="button"
+            accessibilityLabel="Log in"
           >
             <Text style={styles.buttonText}>
               {isSubmitting ? "Logging In..." : "Log In"}
@@ -254,6 +377,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontSize: 13,
     textAlign: "center",
+  },
+  mfaPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+  },
+  mfaTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  mfaBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
   },
   rememberMe: {
     flexDirection: "row",

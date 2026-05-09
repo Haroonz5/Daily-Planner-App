@@ -15,6 +15,7 @@
     "qa:device": "npm run qa && npx expo install --check && npx expo config --type public",
     "security:check": "bash scripts/security-check.sh",
     "release:check": "npm run qa:device",
+    "release:full-check": "bash scripts/release-checklist.sh",
     "deploy:rules": "npx firebase-tools@latest deploy --only firestore:rules",
     "ai:dev": "cd ai && .venv/bin/uvicorn main:app --reload --host 0.0.0.0 --port 8000",
     "ai:stats": "cd services/stats-aggregator && go run .",
@@ -24,7 +25,8 @@
     "ops:deploy:ai": "bash scripts/deploy-ai.sh",
     "eas:preview": "eas build --profile preview --platform all",
     "eas:simulator": "eas build --profile simulator --platform ios",
-    "eas:production": "eas build --profile production --platform all"
+    "eas:production": "eas build --profile production --platform all",
+    "eas:testflight": "eas build --profile production --platform ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -35,6 +37,7 @@
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.34",
     "expo-av": "~16.0.8",
+    "expo-calendar": "~15.0.8",
     "expo-constants": "~18.0.13",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",

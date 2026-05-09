@@ -178,9 +178,10 @@ export default function RootLayout() {
     const inTutorial = firstSegment === "tutorial";
     const inVerifyEmail = firstSegment === "verify-email";
     const inOnboarding = firstSegment === "onboarding";
+    const inLanding = firstSegment === "landing";
     const inAuthScreen = firstSegment === "login" || firstSegment === "signup";
 
-    if (!onboardingSeen && !inOnboarding) {
+    if (!onboardingSeen && !inOnboarding && !inLanding && !inAuthScreen) {
       router.replace("/onboarding");
       return;
     }
@@ -369,6 +370,7 @@ export default function RootLayout() {
           <ErrorBoundary>
             <Stack>
               <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+              <Stack.Screen name="landing" options={{ headerShown: false }} />
               <Stack.Screen name="tutorial" options={{ headerShown: false }} />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="login" options={{ headerShown: false }} />

@@ -45,3 +45,5 @@ services:
         value: "8"
       - key: DATABASE_URL
         sync: false
+      - key: ADMIN_DASHBOARD_TOKEN
+        sync: false
