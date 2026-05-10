@@ -80,6 +80,10 @@ export default function VerifyEmailScreen() {
     try {
       await setEmailVerificationSkipped(user.uid);
       router.replace("/tutorial" as never);
+    } catch {
+      setMessage(
+        "Skip could not save on this device yet. Reload the app and try Skip Verification again."
+      );
     } finally {
       setBusy(false);
     }

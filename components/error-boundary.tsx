@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { reportAppError } from "@/utils/error-reporting";
+
 type ErrorBoundaryProps = {
   children: ReactNode;
 };
@@ -23,6 +25,13 @@ export class ErrorBoundary extends Component<
     // I added this boundary as a last safety net. If a screen throws, the app
     // shows a recovery screen instead of leaving testers stuck on a red crash.
     console.warn("Daily Discipline screen crash", error, info.componentStack);
+    void reportAppError({
+      source: "ErrorBoundary",
+      error,
+      metadata: {
+        componentStack: info.componentStack,
+      },
+    });
   }
 
   reset = () => {

@@ -30,7 +30,11 @@ export type AppThemeName =
   | "cherryInk"
   | "paperTrail"
   | "solarFlare"
-  | "cobaltCircuit";
+  | "cobaltCircuit"
+  | "jadeGlass"
+  | "mangoRush"
+  | "arcticNight"
+  | "graphiteGold";
 
 type ThemePalette = {
   text: string;
@@ -81,6 +85,10 @@ export const ThemeLabels: Record<AppThemeName, string> = {
   paperTrail: "Paper Trail",
   solarFlare: "Solar Flare",
   cobaltCircuit: "Cobalt Circuit",
+  jadeGlass: "Jade Glass",
+  mangoRush: "Mango Rush",
+  arcticNight: "Arctic Night",
+  graphiteGold: "Graphite Gold",
 };
 
 export const Colors: Record<AppThemeName, ThemePalette> = {
@@ -591,6 +599,74 @@ export const Colors: Record<AppThemeName, ThemePalette> = {
     danger: "#ff7a90",
     success: "#5ee0a8",
     warning: "#ffd23f",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  jadeGlass: {
+    text: "#10251d",
+    background: "#eefaf3",
+    card: "#fbfffd",
+    surface: "#d8f1e4",
+    tint: "#16a06f",
+    icon: "#426859",
+    tabIconDefault: "#68877b",
+    tabIconSelected: "#16a06f",
+    subtle: "#435a50",
+    border: "#bfe2d1",
+    danger: "#c84d62",
+    success: "#168f63",
+    warning: "#c48a20",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  mangoRush: {
+    text: "#2e1a05",
+    background: "#fff4d6",
+    card: "#fffaf0",
+    surface: "#ffd99a",
+    tint: "#f15a24",
+    icon: "#80522a",
+    tabIconDefault: "#9b7246",
+    tabIconSelected: "#f15a24",
+    subtle: "#674921",
+    border: "#f0c979",
+    danger: "#d33f49",
+    success: "#368a5b",
+    warning: "#e08900",
+    statusBar: "dark",
+    navigationTone: "light",
+  },
+  arcticNight: {
+    text: "#eef8ff",
+    background: "#07131d",
+    card: "#0f2230",
+    surface: "#18364a",
+    tint: "#8ee8ff",
+    icon: "#9cb8c8",
+    tabIconDefault: "#5f7889",
+    tabIconSelected: "#8ee8ff",
+    subtle: "#bfd2dc",
+    border: "#24495e",
+    danger: "#ff7b9c",
+    success: "#6ee7b7",
+    warning: "#f8d36d",
+    statusBar: "light",
+    navigationTone: "dark",
+  },
+  graphiteGold: {
+    text: "#f8f3e8",
+    background: "#101010",
+    card: "#1a1a1a",
+    surface: "#26231d",
+    tint: "#e1b84f",
+    icon: "#a89f8b",
+    tabIconDefault: "#706a5d",
+    tabIconSelected: "#e1b84f",
+    subtle: "#c7bda7",
+    border: "#363126",
+    danger: "#ff7a7a",
+    success: "#87d99a",
+    warning: "#e1b84f",
     statusBar: "light",
     navigationTone: "dark",
   },

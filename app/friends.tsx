@@ -12,7 +12,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -100,6 +100,9 @@ type FriendChallenge = {
   participantNames: Record<string, string>;
   date: string;
   status?: "active" | "completed";
+  targetValue?: number;
+  completedAt?: any;
+  winnerUid?: string | null;
   createdAt?: any;
 };
 
@@ -115,27 +118,31 @@ type Task = {
 
 const challengeTemplates: Record<
   ChallengeType,
-  { title: string; body: string; targetLabel: string }
+  { title: string; body: string; targetLabel: string; targetValue: number }
 > = {
   combinedFive: {
     title: "5-Win Team Push",
     body: "Together, complete 5 tasks today.",
     targetLabel: "combined completions",
+    targetValue: 5,
   },
   cleanDay: {
     title: "No-Skip Pact",
     body: "Both people finish the day without skipping.",
     targetLabel: "clean plans",
+    targetValue: 2,
   },
   highPriorityRescue: {
     title: "High Priority Rescue",
     body: "Both people clear or move every high-priority task.",
     targetLabel: "high-priority pressure",
+    targetValue: 2,
   },
   accountabilityContract: {
     title: "Accountability Contract",
     body: "A stronger pact: no skips, visible progress, and daily pressure to finish the plan honestly.",
     targetLabel: "contract integrity",
+    targetValue: 100,
   },
 };
 
@@ -484,25 +491,55 @@ export default function FriendsScreen() {
   const activeChallenges = useMemo(
     () =>
       challenges
-        .filter((challenge) => challenge.date === today)
+        .filter(
+          (challenge) =>
+            challenge.date === today && (challenge.status ?? "active") === "active"
+        )
         .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
     [challenges, today]
   );
+  const completedChallenges = useMemo(
+    () =>
+      challenges
+        .filter((challenge) => (challenge.status ?? "active") === "completed")
+        .sort((a, b) =>
+          String(b.completedAt ?? b.createdAt ?? "").localeCompare(
+            String(a.completedAt ?? a.createdAt ?? "")
+          )
+        ),
+    [challenges]
+  );
 
-  const getChallengeProgress = (challenge: FriendChallenge) => {
-    const friendUid = challenge.participantUids.find((participantUid) => participantUid !== uid);
-    const otherProgress = friendUid ? friendProgress[friendUid] : null;
-    const participants = [myProgress, otherProgress].filter(Boolean) as FriendProgress[];
+  const getChallengeProgress = useCallback((challenge: FriendChallenge) => {
+    const participantProgress = challenge.participantUids
+      .map((participantUid) => ({
+        uid: participantUid,
+        progress: participantUid === uid ? myProgress : friendProgress[participantUid],
+      }))
+      .filter((item): item is { uid: string; progress: FriendProgress } =>
+        Boolean(item.progress)
+      );
+    const participants = participantProgress.map((item) => item.progress);
+    const topParticipant = [...participantProgress].sort(
+      (a, b) => b.progress.completed - a.progress.completed
+    )[0];
+    const winnerUid = topParticipant?.uid ?? null;
+    const winnerName = winnerUid ? challenge.participantNames[winnerUid] : null;
 
     if (challenge.type === "combinedFive") {
       const completed = participants.reduce(
         (sum, progress) => sum + progress.completed,
         0
       );
+      const complete = completed >= (challenge.targetValue ?? 5);
       return {
         value: Math.min(100, Math.round((completed / 5) * 100)),
         label: `${completed}/5 tasks complete`,
-        complete: completed >= 5,
+        complete,
+        winnerUid: complete ? winnerUid : null,
+        badge: complete
+          ? `Team badge earned${winnerName ? ` • MVP ${winnerName}` : ""}`
+          : "Badge locks when the team hits 5 wins.",
       };
     }
 
@@ -510,10 +547,13 @@ export default function FriendsScreen() {
       const cleanCount = participants.filter(
         (progress) => progress.total > 0 && progress.skipped === 0
       ).length;
+      const complete = participants.length >= 2 && cleanCount === participants.length;
       return {
         value: participants.length ? Math.round((cleanCount / participants.length) * 100) : 0,
         label: `${cleanCount}/${participants.length || 2} clean plans`,
-        complete: participants.length >= 2 && cleanCount === participants.length,
+        complete,
+        winnerUid: complete ? null : null,
+        badge: complete ? "No-Skip badge earned." : "Badge requires both people to avoid skips.",
       };
     }
 
@@ -527,27 +567,52 @@ export default function FriendsScreen() {
       const cleanScore = participants.length
         ? (cleanCount / participants.length) * 30
         : 0;
+      const complete =
+        participants.length >= 2 &&
+        totalTasks > 0 &&
+        completed === totalTasks &&
+        cleanCount === participants.length;
 
       return {
         value: Math.min(100, Math.round(completionScore + cleanScore)),
         label: `${completed}/${totalTasks || 1} done • ${cleanCount}/${participants.length || 2} no-skip`,
-        complete:
-          participants.length >= 2 &&
-          totalTasks > 0 &&
-          completed === totalTasks &&
-          cleanCount === participants.length,
+        complete,
+        winnerUid: complete ? null : null,
+        badge: complete
+          ? "Contract badge earned."
+          : "Contract badge requires all tasks done with no skips.",
       };
     }
 
     const rescuedCount = participants.filter(
       (progress) => progress.total > 0 && progress.highOpen === 0
     ).length;
+    const complete = participants.length >= 2 && rescuedCount === participants.length;
     return {
       value: participants.length ? Math.round((rescuedCount / participants.length) * 100) : 0,
       label: `${rescuedCount}/${participants.length || 2} high-priority queues clear`,
-      complete: participants.length >= 2 && rescuedCount === participants.length,
+      complete,
+      winnerUid: complete ? null : null,
+      badge: complete ? "Rescue badge earned." : "Clear both high-priority queues to earn the badge.",
     };
-  };
+  }, [friendProgress, myProgress, uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
+    activeChallenges.forEach((challenge) => {
+      const progress = getChallengeProgress(challenge);
+      if (!progress.complete) return;
+
+      // I close completed challenges automatically so the friend screen becomes
+      // a real challenge loop: start, progress, earn badge, then history.
+      updateDoc(doc(db, "friendChallenges", challenge.id), {
+        status: "completed",
+        completedAt: new Date(),
+        winnerUid: progress.winnerUid ?? null,
+      }).catch(() => {});
+    });
+  }, [activeChallenges, friendProgress, getChallengeProgress, myProgress, uid]);
 
   const sendFriendRequest = async () => {
     if (!uid || !email || !myProfile) return;
@@ -762,6 +827,7 @@ export default function FriendsScreen() {
           },
           date: today,
           status: "active",
+          targetValue: template.targetValue,
           createdAt: new Date(),
         },
         { merge: true }
@@ -867,11 +933,49 @@ export default function FriendsScreen() {
                 <Text style={[styles.challengeMeta, { color: colors.subtle }]}>
                   {progress.label} • {template.targetLabel}
                 </Text>
+                <Text
+                  style={[
+                    styles.challengeBadge,
+                    { color: progress.complete ? colors.success : colors.subtle },
+                  ]}
+                >
+                  {progress.badge}
+                </Text>
               </View>
             );
           })
         )}
       </View>
+
+      {completedChallenges.length > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>
+            Challenge Badges
+          </Text>
+          {completedChallenges.slice(0, 5).map((challenge) => (
+            <View
+              key={`completed-${challenge.id}`}
+              style={[
+                styles.badgeRow,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={styles.requestCopy}>
+                <Text style={[styles.requestName, { color: colors.text }]}>
+                  {challenge.title}
+                </Text>
+                <Text style={[styles.requestMeta, { color: colors.subtle }]}>
+                  Earned {toDateLabel(challenge.completedAt)} with{" "}
+                  {Object.values(challenge.participantNames).join(" + ")}
+                </Text>
+              </View>
+              <Text style={[styles.badgeMark, { color: colors.success }]}>
+                Won
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>Add Friend</Text>
@@ -1244,9 +1348,29 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 8,
   },
+  challengeBadge: {
+    fontSize: 11,
+    fontWeight: "900",
+    lineHeight: 16,
+    marginTop: 6,
+    textTransform: "uppercase",
+  },
   challengePercent: {
     fontSize: 18,
     fontWeight: "900",
+  },
+  badgeRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  badgeMark: {
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
   },
   input: {
     borderWidth: 1,

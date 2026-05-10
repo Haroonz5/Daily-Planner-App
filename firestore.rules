@@ -64,9 +64,15 @@ service cloud.firestore {
         optionalString("originalTime", 20) &&
         optionalString("recurrenceGroupId", 120) &&
         optionalString("parentTaskTitle", 180) &&
+        optionalString("completionProof", 4000) &&
+        optionalString("offlineQueuedAt", 80) &&
+        optionalString("calendarEventId", 240) &&
+        optionalString("calendarId", 240) &&
         optionalBool("aiCreated") &&
         optionalBool("breakdownCreated") &&
         optionalBool("rollingRoutine") &&
+        optionalBool("offlineQueued") &&
+        optionalBool("completionProofRequired") &&
         optionalNumber("rescheduledCount") &&
         optionalNumber("focusSessionCount") &&
         optionalNumber("focusMinutes") &&
@@ -86,10 +92,25 @@ service cloud.firestore {
         optionalString("displayName", 60) &&
         optionalString("activePetKey", 40) &&
         optionalString("petNickname", 60) &&
+        optionalString("planningRules", 1200) &&
+        optionalString("weeklyFocusGoal", 240) &&
+        optionalString("aiMemory", 800) &&
+        optionalBool("proPreviewEnabled") &&
         optionalBool("tutorialCompleted") &&
         optionalBool("enableSounds") &&
         optionalBool("enableHaptics") &&
+        optionalBool("soundEnabled") &&
+        optionalBool("hapticsEnabled") &&
+        optionalBool("calmFocusMusicEnabled") &&
         optionalNumber("focusDurationMinutes");
+    }
+
+    function validAppErrorDoc() {
+      return validShortString(request.resource.data.source, 120) &&
+        validShortString(request.resource.data.message, 1000) &&
+        optionalString("name", 120) &&
+        optionalString("stack", 8000) &&
+        optionalString("appVersion", 40);
     }
 
     function validPublicProfile(userId) {
@@ -151,6 +172,12 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow create, update: if isOwner(userId) && validFeedbackDoc();
         allow delete: if isOwner(userId);
+      }
+
+      match /appErrors/{errorId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && validAppErrorDoc();
+        allow update: if false;
       }
 
       match /friends/{friendId} {

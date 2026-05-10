@@ -21,6 +21,8 @@ export type UserProfile = {
   soundEnabled?: boolean | null;
   hapticsEnabled?: boolean | null;
   calmFocusMusicEnabled?: boolean | null;
+  aiMemory?: string | null;
+  proPreviewEnabled?: boolean | null;
 };
 
 export function useUserProfile() {

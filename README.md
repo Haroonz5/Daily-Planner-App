@@ -11,11 +11,15 @@ feedback, rewards, and accountability all live in the same loop.
 ## Highlights
 
 - AI task planning from natural language, such as `Gym at 6 PM, study for 2 hours at 8 PM`
+- AI memory that learns preferred planning windows from completion history
 - Voice-assisted planning through phone keyboard dictation
 - Reality checks for overloaded schedules
 - AI rescheduling for missed tasks
 - AI backend health card with response time, model/fallback status, and timeout visibility
 - Go security gateway for Firebase token checks, rate limits, proxying, audit logs, and an admin dashboard
+- Cloud Functions scaffold for widget summary refresh and ongoing routine refill
+- Offline-first task queue that stores task intent locally and syncs after reconnect
+- Lightweight crash/error reporting into each user's Firestore `appErrors`
 - Account security with verified email changes, password reset, and authenticator-app 2FA
 - Setup Quest checklist for new users
 - Weekly Focus goal shown on the Today screen
@@ -27,13 +31,14 @@ feedback, rewards, and accountability all live in the same loop.
 - Routine Manager with health score, streaks, pause, skip-next, edit, and cancel-all controls
 - XP rewards with unlockable companion pets and custom pet sprites
 - Focus Mode with Strict Focus app-switch strike tracking, haptics, sounds, and focus music
-- Accountability friends with usernames, nudges, progress sharing, watchlists, and challenges
+- Accountability friends with usernames, nudges, progress sharing, watchlists, auto-completing challenges, and badge history
 - Stats dashboard with Discipline Score, weekly review, time-window analysis, and XP progress
-- Month calendar, next-7-days planner, and native phone calendar export
+- Month calendar, next-7-days planner, native phone calendar export, and basic pull-sync from moved calendar events
 - Public landing page for testers or portfolio demos
 - Shareable daily progress card
 - Local notifications for task reminders, morning summaries, evening planning, Complete, Snooze, and Skip
-- Multiple themes including light, dark, GitHub Dark, Amazon Light, Void Black, Slate Steel, and Rose Quartz
+- Multiple themes including light, dark, GitHub Dark, Amazon Light, Jade Glass, Mango Rush, Arctic Night, and Graphite Gold
+- Discipline Pro preview toggle for showing future subscription-style packaging without locking testers out
 - Tester tools for feedback, reminder health, data reset, and account deletion
 
 ## Core Screens
@@ -78,7 +83,8 @@ app blocking requires a development/custom build with platform-specific APIs.
 
 Users can add friends by username or email, share progress, send accountability
 nudges, and start challenges. Friend cards show a small task watchlist so nudges
-can be specific instead of generic.
+can be specific instead of generic. Challenges now auto-complete into a badge
+history, and team pushes can record an MVP.
 
 ### Stats
 
@@ -130,6 +136,7 @@ whether the backend is reachable and model-powered.
 - Go microservice for stats aggregation
 - SQLite analytics endpoint
 - PostgreSQL security audit log
+- Firebase Cloud Functions
 - Bash operational scripts
 - Gemini or OpenAI API
 - EAS Build
@@ -167,6 +174,9 @@ my-app/
   services/
     security-gateway/  # Go middleware for auth, rate limiting, audit logs
     stats-aggregator/  # Go microservice for task event aggregation
+
+  functions/
+    index.js           # Cloud Functions for widget summary and routine refill
 
   assets/
     images/
@@ -344,6 +354,25 @@ Endpoints:
 - `POST /v1/events`
 - `GET /v1/completion-rate`
 
+## Cloud Functions
+
+The `functions/` folder adds production-style Firebase automation:
+
+- `updateWidgetSummaryOnTaskWrite` keeps `widgetSummary/today` fresh after task changes.
+- `refillRollingRoutines` creates the next occurrence for ongoing routines each night.
+
+Check syntax:
+
+```bash
+npm run functions:check
+```
+
+Deploy after installing Firebase tools and logging in:
+
+```bash
+npm run functions:deploy
+```
+
 ## Ops Scripts and CI
 
 Operational scripts live in `scripts/`:
@@ -397,6 +426,8 @@ npm run release:full-check
 npm run release:check
 npm run ai:dev
 npm run deploy:rules
+npm run functions:check
+npm run functions:deploy
 npm run eas:preview
 npm run eas:simulator
 npm run eas:production
@@ -436,7 +467,7 @@ Useful tester docs:
 
 - Expo Go does not fully support production notification behavior. Use a development or preview build for realistic notification testing.
 - Strict Focus tracks app switching in Expo Go, but true app blocking needs native Screen Time / FamilyControls or Android focus integrations.
-- Home-screen widgets require native widget work in a custom build.
+- Home-screen widgets require native widget UI in a custom build, but widget-ready summary data is already written to Firestore.
 - Friend features require deployed Firestore rules.
 
 ## Roadmap Ideas

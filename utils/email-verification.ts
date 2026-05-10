@@ -1,6 +1,6 @@
 import { getSecureItem, removeSecureItem, setSecureItem } from "@/utils/secure-storage";
 
-const getSkipKey = (uid: string) => `emailVerificationSkipped:${uid}`;
+const getSkipKey = (uid: string) => `emailVerificationSkipped.${uid}`;
 
 export const getEmailVerificationSkipped = async (uid: string) =>
   (await getSecureItem(getSkipKey(uid))) === "true";

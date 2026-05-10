@@ -24,6 +24,7 @@ import {
 
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
+import { AppDropdown } from "@/components/app-dropdown";
 import { PetSprite } from "@/components/pet-sprite";
 import {
   PET_TIERS,
@@ -49,6 +50,7 @@ import {
   type RecurrenceRule,
 } from "../../utils/task-helpers";
 import { ensureRollingRoutineTasks } from "../../utils/routines";
+import { buildAiMemorySummary } from "../../utils/ai-memory";
 import {
   getPatternFeedback,
   runAiReschedule,
@@ -252,6 +254,30 @@ export default function HomeScreen() {
   const { themeName, setThemeName } = useAppTheme();
   const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
+  const themeDropdownOptions = useMemo(
+    () =>
+      themeOptions.map((theme) => {
+        const preview = Colors[theme];
+
+        return {
+          label: ThemeLabels[theme],
+          value: theme,
+          description:
+            preview.navigationTone === "dark" ? "Dark palette" : "Light palette",
+          swatches: [preview.background, preview.card, preview.tint],
+        };
+      }),
+    []
+  );
+  const priorityDropdownOptions = useMemo(
+    () =>
+      (["Low", "Medium", "High"] as Priority[]).map((item) => ({
+        label: item,
+        value: item,
+        swatches: [priorityColors[item]],
+      })),
+    []
+  );
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -516,6 +542,30 @@ export default function HomeScreen() {
   const showOnboardingChecklist =
     tasksLoaded && onboardingCompleteCount < onboardingChecklist.length;
   const weeklyFocusGoal = profile.weeklyFocusGoal?.trim();
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !tasksLoaded) return;
+
+    const aiMemory = buildAiMemorySummary(tasks);
+    if (!aiMemory || aiMemory === profile.aiMemory) return;
+
+    const timer = setTimeout(() => {
+      // I store a tiny "AI memory" on the profile so future Plan with AI calls
+      // can use behavior patterns without rereading the whole task history.
+      setDoc(
+        doc(db, "users", uid),
+        {
+          aiMemory,
+          aiMemoryUpdatedAt: new Date(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [profile.aiMemory, tasks, tasksLoaded]);
+
   const eveningReview = useMemo(() => {
     const hour = new Date().getHours();
     if (!tasksLoaded || todayTasks.length === 0 || hour < 20) return null;
@@ -3258,34 +3308,13 @@ export default function HomeScreen() {
               multiline
             />
 
-            <View style={styles.priorityPicker}>
-              {(["Low", "Medium", "High"] as Priority[]).map((priority) => (
-                <TouchableOpacity
-                  key={priority}
-                  style={[
-                    styles.priorityChip,
-                    {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.border,
-                    },
-                    editPriority === priority && { borderColor: colors.tint },
-                  ]}
-                  onPress={() => setEditPriority(priority)}
-                >
-                  <View
-                    style={[
-                      styles.priorityDot,
-                      { backgroundColor: priorityColors[priority] },
-                    ]}
-                  />
-                  <Text
-                    style={[styles.priorityChipText, { color: colors.text }]}
-                  >
-                    {priority}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <AppDropdown
+              label="Priority"
+              value={editPriority}
+              options={priorityDropdownOptions}
+              colors={colors}
+              onChange={setEditPriority}
+            />
 
             {isRecurringSeriesTask(editingTask) && (
               <View
@@ -3523,66 +3552,16 @@ export default function HomeScreen() {
               Choose Theme
             </Text>
 
-            <ScrollView
-              style={styles.themeOptionsScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              {themeOptions.map((theme) => {
-                const preview = Colors[theme];
-
-                return (
-                  <TouchableOpacity
-                    key={theme}
-                    style={[
-                      styles.themeOption,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: colors.background,
-                      },
-                      themeName === theme && { borderColor: colors.tint },
-                    ]}
-                    onPress={async () => {
-                      await setThemeName(theme);
-                      setThemeModalVisible(false);
-                    }}
-                  >
-                    <View style={styles.themePreview}>
-                      <View
-                        style={[
-                          styles.themeSwatch,
-                          {
-                            backgroundColor: preview.background,
-                            borderColor: preview.border,
-                          },
-                        ]}
-                      />
-                      <View
-                        style={[
-                          styles.themeSwatch,
-                          {
-                            backgroundColor: preview.card,
-                            borderColor: preview.border,
-                          },
-                        ]}
-                      />
-                      <View
-                        style={[
-                          styles.themeSwatch,
-                          {
-                            backgroundColor: preview.tint,
-                            borderColor: preview.tint,
-                          },
-                        ]}
-                      />
-                    </View>
-
-                    <Text style={[styles.themeLabel, { color: colors.text }]}>
-                      {ThemeLabels[theme]}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            <AppDropdown
+              label="Theme"
+              value={themeName}
+              options={themeDropdownOptions}
+              colors={colors}
+              onChange={async (theme) => {
+                await setThemeName(theme);
+                setThemeModalVisible(false);
+              }}
+            />
 
             <TouchableOpacity
               style={[

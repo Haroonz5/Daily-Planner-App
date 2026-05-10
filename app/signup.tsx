@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   sendEmailVerification,
 } from "firebase/auth";
 import { doc, getDoc, writeBatch } from "firebase/firestore";
@@ -17,6 +18,10 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import {
+  getEmailValidationError,
+  normalizeEmail,
+} from "@/utils/email-validation";
 import { getUsernameError, normalizeUsername } from "@/utils/usernames";
 import { auth, db } from "../constants/firebaseConfig";
 
@@ -49,23 +54,31 @@ export default function Signup() {
       return;
     }
 
+    const normalizedEmail = normalizeEmail(email);
+    const emailError = getEmailValidationError(normalizedEmail);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError("");
-
-      const normalizedEmail = email.trim().toLowerCase();
-      const usernameRef = doc(db, "publicUsernames", normalizedUsername);
-      const usernameSnapshot = await getDoc(usernameRef);
-      if (usernameSnapshot.exists()) {
-        setError("That username is already taken.");
-        return;
-      }
 
       const credential = await createUserWithEmailAndPassword(
         auth,
         normalizedEmail,
         password
       );
+      const usernameRef = doc(db, "publicUsernames", normalizedUsername);
+      const usernameSnapshot = await getDoc(usernameRef);
+      const usernameOwner = usernameSnapshot.data()?.uid;
+
+      if (usernameSnapshot.exists() && usernameOwner !== credential.user.uid) {
+        await deleteUser(credential.user).catch(() => {});
+        setError("That username is already taken. Pick another one.");
+        return;
+      }
 
       // I create both the private profile and the public username reservation
       // here so friends can find each other by username instead of exposing email.
@@ -98,11 +111,53 @@ export default function Signup() {
         username: normalizedUsername,
         createdAt: new Date(),
       });
-      await batch.commit();
+
+      try {
+        await batch.commit();
+      } catch (profileError) {
+        // I reserve usernames after Firebase Auth creates the user because
+        // Firestore rules correctly block anonymous reads of publicUsernames.
+        // If the reservation fails, this fresh auth account is deleted so the
+        // tester can immediately retry with another username.
+        await deleteUser(credential.user).catch(() => {});
+
+        const code =
+          typeof profileError === "object" &&
+          profileError &&
+          "code" in profileError
+            ? String((profileError as { code?: string }).code)
+            : "";
+
+        setError(
+          code.includes("permission-denied")
+            ? "That username may already be taken, or the latest Firestore rules need to be deployed."
+            : "Could not save your profile. Try another username."
+        );
+        return;
+      }
+
       await sendEmailVerification(credential.user).catch(() => {});
 
       router.replace("/verify-email" as never);
-    } catch {
+    } catch (signupError) {
+      const code =
+        typeof signupError === "object" && signupError && "code" in signupError
+          ? String((signupError as { code?: string }).code)
+          : "";
+
+      if (code.includes("email-already-in-use")) {
+        setError("That email already has an account. Try logging in instead.");
+        return;
+      }
+      if (code.includes("invalid-email")) {
+        setError("Enter a valid email address.");
+        return;
+      }
+      if (code.includes("weak-password")) {
+        setError("Password should be at least 6 characters.");
+        return;
+      }
+
       setError("Could not create account. Try again.");
     } finally {
       setIsSubmitting(false);

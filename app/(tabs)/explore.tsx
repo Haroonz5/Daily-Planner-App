@@ -21,6 +21,7 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
+import { AppDropdown } from "@/components/app-dropdown";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
@@ -52,6 +53,7 @@ import {
   syncTaskNotifications,
 } from "../../utils/notifications";
 import { ensureRollingRoutineTasks } from "../../utils/routines";
+import { enqueueOfflineTask } from "../../utils/offline-task-queue";
 import {
   playSaveFeedback,
   playSelectionFeedback,
@@ -201,6 +203,19 @@ const getTaskSaveErrorMessage = (error: any) =>
     ? "Firebase blocked saving tasks. Log out and back in, then deploy the latest Firestore rules."
     : error?.message ?? "Something went wrong while saving tasks.";
 
+const shouldQueueOffline = (error: any) => {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+
+  return (
+    code.includes("unavailable") ||
+    code.includes("deadline-exceeded") ||
+    message.includes("network") ||
+    message.includes("offline") ||
+    message.includes("failed to get document")
+  );
+};
+
 const getDefaultFutureDate = () => {
   const date = new Date();
   date.setDate(date.getDate() + 2);
@@ -212,6 +227,39 @@ export default function AddTask() {
   const { themeName } = useAppTheme();
   const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
+  const priorityDropdownOptions = useMemo(
+    () =>
+      (["Low", "Medium", "High"] as TaskPriority[]).map((item) => ({
+        label: item,
+        value: item,
+        description:
+          item === "High"
+            ? "Important, proof-worthy work"
+            : item === "Medium"
+              ? "Normal daily priority"
+              : "Small or flexible task",
+        swatches: [priorityColors[item]],
+      })),
+    []
+  );
+  const recurrenceDropdownOptions = useMemo(
+    () =>
+      (["none", "daily", "weekdays", "weekly"] as RecurrenceRule[]).map(
+        (rule) => ({
+          label: recurrenceLabels[rule],
+          value: rule,
+          description:
+            rule === "none"
+              ? "Create this task once"
+              : rule === "daily"
+                ? "Keep it going every day"
+                : rule === "weekdays"
+                  ? "Monday through Friday"
+                  : "Repeat once each week",
+        })
+      ),
+    []
+  );
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
@@ -496,6 +544,13 @@ export default function AddTask() {
     setSuccessMessage("");
 
     try {
+      const aiMemoryRules = [
+        profile.planningRules,
+        profile.aiMemory ? `AI memory: ${profile.aiMemory}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
       const result = await parseNaturalTasks({
         text: naturalInput.trim(),
         defaultDate: selectedDateKey,
@@ -508,7 +563,7 @@ export default function AddTask() {
           completed: task.completed,
           status: task.status,
         })),
-        planningRules: profile.planningRules,
+        planningRules: aiMemoryRules,
       });
 
       setParsedTasks(result.tasks);
@@ -802,6 +857,56 @@ export default function AddTask() {
       );
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
+      const uid = auth.currentUser?.uid;
+      if (uid && shouldQueueOffline(e)) {
+        let queuedCount = 0;
+
+        for (const [index, parsedTask] of parsedTasks.entries()) {
+          const taskRecurrence = parsedTask.recurrence ?? "none";
+          const recurrenceGroupId =
+            taskRecurrence === "none" ? null : `${uid}-${Date.now()}-offline-ai-${index}`;
+          const taskDates = buildRecurringDates(
+            parsedTask.date,
+            taskRecurrence,
+            parsedTask.recurrenceDays
+          );
+
+          for (const dateKey of taskDates) {
+            await enqueueOfflineTask({
+              title: parsedTask.title.trim(),
+              notes: composeParsedNotes(parsedTask),
+              priority: parsedTask.priority ?? "Medium",
+              time: parsedTask.time,
+              date: dateKey,
+              completed: false,
+              status: "pending",
+              createdAt: new Date().toISOString(),
+              completedAt: null,
+              skippedAt: null,
+              lastActionAt: new Date().toISOString(),
+              rescheduledCount: 0,
+              originalTime: parsedTask.time,
+              recurrence: taskRecurrence,
+              recurrenceGroupId,
+              recurrenceDays:
+                taskRecurrence === "custom"
+                  ? parsedTask.recurrenceDays ?? []
+                  : null,
+              rollingRoutine: taskRecurrence !== "none",
+              aiCreated: true,
+            });
+            queuedCount += 1;
+          }
+        }
+
+        setError("");
+        setSuccessMessage(
+          `${queuedCount} AI-planned task${queuedCount === 1 ? "" : "s"} saved offline. They will sync when the backend connection comes back.`
+        );
+        setTimeout(() => setSuccessMessage(""), 3200);
+        return;
+      }
+
       setError(getTaskSaveErrorMessage(e));
     }
   };
@@ -902,6 +1007,44 @@ export default function AddTask() {
       setSuccessMessage(`${createdTasks.length} AI-planned task${createdTasks.length === 1 ? "" : "s"} added.`);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
+      const uid = auth.currentUser?.uid;
+      if (uid && shouldQueueOffline(e)) {
+        const recurrenceGroupId =
+          recurrence === "none" ? null : `${uid}-${Date.now()}-offline`;
+        let queuedCount = 0;
+
+        for (const dateKey of recurringDates) {
+          await enqueueOfflineTask({
+            title: title.trim(),
+            notes: notes.trim(),
+            priority,
+            time: formattedTime,
+            date: dateKey,
+            completed: false,
+            status: "pending",
+            createdAt: new Date().toISOString(),
+            completedAt: null,
+            skippedAt: null,
+            lastActionAt: new Date().toISOString(),
+            rescheduledCount: 0,
+            originalTime: formattedTime,
+            recurrence,
+            recurrenceGroupId,
+            recurrenceDays: null,
+            rollingRoutine: recurrence !== "none",
+          });
+          queuedCount += 1;
+        }
+
+        resetForm();
+        setError("");
+        setSuccessMessage(
+          `${queuedCount} task${queuedCount === 1 ? "" : "s"} saved offline. They will sync automatically when connection is back.`
+        );
+        setTimeout(() => setSuccessMessage(""), 3200);
+        return;
+      }
+
       setError(getTaskSaveErrorMessage(e));
     }
   };
@@ -1768,35 +1911,12 @@ export default function AddTask() {
 
         <View style={styles.section}>
           <Text style={[styles.sectionLabel, { color: colors.subtle }]}>Priority</Text>
-          <View style={styles.priorityRow}>
-            {(["Low", "Medium", "High"] as TaskPriority[]).map((item) => (
-              <TouchableOpacity
-                key={item}
-                style={[
-                  styles.priorityChip,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
-                  priority === item && {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.tint,
-                  },
-                ]}
-                onPress={() => setPriority(item)}
-              >
-                <View
-                  style={[
-                    styles.priorityDot,
-                    { backgroundColor: priorityColors[item] },
-                  ]}
-                />
-                <Text style={[styles.priorityChipText, { color: colors.text }]}>
-                  {item}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <AppDropdown
+            value={priority}
+            options={priorityDropdownOptions}
+            colors={colors}
+            onChange={setPriority}
+          />
         </View>
 
         <TouchableOpacity
@@ -1842,32 +1962,12 @@ export default function AddTask() {
           <Text style={[styles.sectionLabel, { color: colors.subtle }]}>
             Repeat
           </Text>
-          <View style={styles.recurrenceWrap}>
-            {(["none", "daily", "weekdays", "weekly"] as RecurrenceRule[]).map(
-              (rule) => (
-                <TouchableOpacity
-                  key={rule}
-                  style={[
-                    styles.infoChip,
-                    styles.recurrenceChip,
-                    {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
-                    },
-                    recurrence === rule && {
-                      backgroundColor: colors.surface,
-                      borderColor: colors.tint,
-                    },
-                  ]}
-                  onPress={() => setRecurrence(rule)}
-                >
-                  <Text style={[styles.infoChipText, { color: colors.text }]}>
-                    {recurrenceLabels[rule]}
-                  </Text>
-                </TouchableOpacity>
-              )
-            )}
-          </View>
+          <AppDropdown
+            value={recurrence}
+            options={recurrenceDropdownOptions}
+            colors={colors}
+            onChange={setRecurrence}
+          />
         </View>
 
         {showTimePicker && (

@@ -28,6 +28,8 @@ import {
 } from "../utils/notifications";
 import { getStartupQuote } from "../utils/discipline-quotes";
 import { getEmailVerificationSkipped } from "../utils/email-verification";
+import { reportAppError } from "../utils/error-reporting";
+import { flushOfflineTaskQueue } from "../utils/offline-task-queue";
 import { auth, db } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
@@ -83,9 +85,13 @@ export default function RootLayout() {
     }
 
     setEmailVerificationSkippedState(undefined);
-    void getEmailVerificationSkipped(user.uid).then((skipped) => {
-      if (active) setEmailVerificationSkippedState(skipped);
-    });
+    void getEmailVerificationSkipped(user.uid)
+      .then((skipped) => {
+        if (active) setEmailVerificationSkippedState(skipped);
+      })
+      .catch(() => {
+        if (active) setEmailVerificationSkippedState(false);
+      });
 
     return () => {
       active = false;
@@ -145,7 +151,36 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    const errorUtils = (globalThis as any).ErrorUtils;
+    if (!errorUtils?.setGlobalHandler || !errorUtils?.getGlobalHandler) return;
+
+    const previousHandler = errorUtils.getGlobalHandler();
+
+    // I added this lightweight global reporter for async/native errors that do
+    // not pass through React's ErrorBoundary. It logs and still lets React
+    // Native's original red-screen handler do its normal work.
+    errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+      reportAppError({
+        source: "GlobalErrorHandler",
+        error,
+        metadata: { isFatal: Boolean(isFatal) },
+      }).catch(() => {});
+
+      previousHandler?.(error, isFatal);
+    });
+
+    return () => {
+      errorUtils.setGlobalHandler(previousHandler);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
+
+    // I added this offline flush here because RootLayout is the first place that
+    // reliably knows the user is signed in again. Queued task intent gets synced
+    // quietly instead of making the user hunt for a manual retry button.
+    flushOfflineTaskQueue(user.uid).catch(() => {});
 
     const response = Notifications.getLastNotificationResponse();
     if (!response) return;

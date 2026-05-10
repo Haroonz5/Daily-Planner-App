@@ -1,7 +1,14 @@
 import * as Calendar from "expo-calendar";
+import { doc, updateDoc } from "firebase/firestore";
 import { Linking, Platform } from "react-native";
 
-import { parseDateKey, parseTimeToMinutes } from "@/utils/task-helpers";
+import { db } from "@/constants/firebaseConfig";
+import {
+  formatDateKey,
+  formatTimeFromDate,
+  parseDateKey,
+  parseTimeToMinutes,
+} from "@/utils/task-helpers";
 
 export type CalendarExportTask = {
   id: string;
@@ -11,12 +18,20 @@ export type CalendarExportTask = {
   completed?: boolean;
   status?: "pending" | "completed" | "skipped";
   priority?: "Low" | "Medium" | "High";
+  calendarEventId?: string | null;
+  calendarId?: string | null;
 };
 
 type CalendarExportResult = {
   created: number;
   skipped: number;
   calendarTitle: string;
+};
+
+type CalendarPullResult = {
+  checked: number;
+  updated: number;
+  missing: number;
 };
 
 const DAILY_DISCIPLINE_CALENDAR_TITLE = "Daily Discipline";
@@ -94,7 +109,8 @@ const getWritableCalendarId = async () => {
 
 export const exportTasksToCalendar = async (
   tasks: CalendarExportTask[],
-  daysAhead = 30
+  daysAhead = 30,
+  options?: { uid?: string }
 ): Promise<CalendarExportResult> => {
   const granted = await ensureCalendarPermission();
   if (!granted) {
@@ -119,6 +135,7 @@ export const exportTasksToCalendar = async (
       task.completed ||
       task.status === "completed" ||
       task.status === "skipped" ||
+      task.calendarEventId ||
       exportedIds.has(`${task.id}-${task.date}-${task.time}`)
     ) {
       skipped += 1;
@@ -130,7 +147,7 @@ export const exportTasksToCalendar = async (
     // I export each active task as a normal phone calendar event so testers can
     // verify the app connects with the device calendar without changing the
     // Firestore task itself.
-    await Calendar.createEventAsync(calendarId, {
+    const eventId = await Calendar.createEventAsync(calendarId, {
       title: task.title,
       notes: `Daily Discipline task${task.priority ? ` - ${task.priority} priority` : ""}`,
       startDate,
@@ -138,6 +155,14 @@ export const exportTasksToCalendar = async (
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       alarms: [{ relativeOffset: -10 }],
     });
+
+    if (options?.uid) {
+      await updateDoc(doc(db, "users", options.uid, "tasks", task.id), {
+        calendarEventId: eventId,
+        calendarId,
+        calendarSyncedAt: new Date(),
+      }).catch(() => {});
+    }
     created += 1;
   }
 
@@ -146,6 +171,53 @@ export const exportTasksToCalendar = async (
     skipped,
     calendarTitle: DAILY_DISCIPLINE_CALENDAR_TITLE,
   };
+};
+
+export const syncCalendarChangesToTasks = async (
+  uid: string,
+  tasks: CalendarExportTask[]
+): Promise<CalendarPullResult> => {
+  const granted = await ensureCalendarPermission();
+  if (!granted) {
+    throw new Error("Calendar permission is off.");
+  }
+
+  let checked = 0;
+  let updated = 0;
+  let missing = 0;
+
+  for (const task of tasks) {
+    if (!task.calendarEventId) continue;
+
+    checked += 1;
+    const event = await Calendar.getEventAsync(task.calendarEventId).catch(
+      () => null
+    );
+
+    if (!event?.startDate) {
+      missing += 1;
+      continue;
+    }
+
+    const startDate = new Date(event.startDate);
+    const nextDate = formatDateKey(startDate);
+    const nextTime = formatTimeFromDate(startDate);
+
+    if (nextDate === task.date && nextTime === task.time) continue;
+
+    // I added this pull-sync as a practical first calendar sync: if a tester
+    // drags a Daily Discipline event in their phone calendar, Settings can pull
+    // the changed date/time back onto the matching task.
+    await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+      date: nextDate,
+      time: nextTime,
+      originalTime: task.time,
+      calendarLastPulledAt: new Date(),
+    });
+    updated += 1;
+  }
+
+  return { checked, updated, missing };
 };
 
 export const openTaskInGoogleCalendar = async (task: CalendarExportTask) => {

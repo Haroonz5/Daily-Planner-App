@@ -21,6 +21,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -30,6 +31,7 @@ import {
   View,
 } from "react-native";
 
+import { AppDropdown } from "@/components/app-dropdown";
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { PetSprite } from "@/components/pet-sprite";
 import {
@@ -44,6 +46,7 @@ import {
 } from "@/constants/rewards";
 import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import { getEmailValidationError } from "@/utils/email-validation";
 import {
   formatDateKey,
   formatRecurrenceLabel,
@@ -69,7 +72,14 @@ import {
   getUsernameError,
   normalizeUsername,
 } from "@/utils/usernames";
-import { exportTasksToCalendar } from "@/utils/calendar";
+import {
+  exportTasksToCalendar,
+  syncCalendarChangesToTasks,
+} from "@/utils/calendar";
+import {
+  flushOfflineTaskQueue,
+  getOfflineTaskQueue,
+} from "@/utils/offline-task-queue";
 import {
   cancelManyTaskNotifications,
   getScheduledNotificationAudit,
@@ -102,6 +112,8 @@ type Task = {
   recurrence?: RecurrenceRule;
   recurrenceGroupId?: string | null;
   recurrenceDays?: number[] | null;
+  calendarEventId?: string | null;
+  calendarId?: string | null;
 };
 
 type SettingsScreenProps = {
@@ -146,6 +158,33 @@ export default function SettingsScreen({
   const { themeName, setThemeName } = useAppTheme();
   const { profile, saveProfile } = useUserProfile();
   const colors = Colors[themeName];
+  const themeDropdownOptions = useMemo(
+    () =>
+      themeOptions.map((theme) => {
+        const preview = Colors[theme];
+
+        return {
+          label: ThemeLabels[theme],
+          value: theme,
+          description:
+            preview.navigationTone === "dark" ? "Dark palette" : "Light palette",
+          swatches: [preview.background, preview.card, preview.tint],
+        };
+      }),
+    []
+  );
+  const feedbackTypeOptions = useMemo(
+    () => feedbackTypes.map((type) => ({ label: type, value: type })),
+    []
+  );
+  const morningTimeDropdownOptions = useMemo(
+    () => notificationTimeOptions.map((time) => ({ label: time, value: time })),
+    []
+  );
+  const eveningTimeDropdownOptions = useMemo(
+    () => eveningTimeOptions.map((time) => ({ label: time, value: time })),
+    []
+  );
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [displayName, setDisplayName] = useState("");
@@ -176,6 +215,9 @@ export default function SettingsScreen({
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [dangerBusy, setDangerBusy] = useState(false);
   const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarPullBusy, setCalendarPullBusy] = useState(false);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [offlineSyncBusy, setOfflineSyncBusy] = useState(false);
   const [securityBusy, setSecurityBusy] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [totpSecret, setTotpSecret] = useState<Awaited<
@@ -282,6 +324,18 @@ export default function SettingsScreen({
     });
     void getScheduledNotificationAudit().then((audit) => {
       if (active) setNotificationAudit(audit);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void getOfflineTaskQueue().then((queue) => {
+      if (active) setOfflineQueueCount(queue.length);
     });
 
     return () => {
@@ -499,6 +553,13 @@ export default function SettingsScreen({
     const nextEmail = newEmail.trim().toLowerCase();
     if (!user || !nextEmail || securityBusy) return;
 
+    const emailError = getEmailValidationError(nextEmail);
+    if (emailError) {
+      setStatusTone("warning");
+      setStatusMessage(emailError);
+      return;
+    }
+
     setSecurityBusy(true);
 
     try {
@@ -619,11 +680,12 @@ export default function SettingsScreen({
 
   const handleExportCalendar = async () => {
     if (calendarBusy) return;
+    const uid = auth.currentUser?.uid;
 
     setCalendarBusy(true);
 
     try {
-      const result = await exportTasksToCalendar(tasks, 30);
+      const result = await exportTasksToCalendar(tasks, 30, { uid });
       await playSaveFeedback(profile);
       setStatusTone("success");
       setStatusMessage(
@@ -640,6 +702,74 @@ export default function SettingsScreen({
     } finally {
       setCalendarBusy(false);
     }
+  };
+
+  const handlePullCalendarChanges = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || calendarPullBusy) return;
+
+    setCalendarPullBusy(true);
+
+    try {
+      const result = await syncCalendarChangesToTasks(uid, tasks);
+      await playSelectionFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(
+        `Calendar pull checked ${result.checked} exported task${result.checked === 1 ? "" : "s"} and updated ${result.updated}. ${result.missing} missing event${result.missing === 1 ? "" : "s"} ignored.`
+      );
+    } catch (error) {
+      await playWarningFeedback(profile);
+      setStatusTone("warning");
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Calendar pull-sync could not finish on this device."
+      );
+    } finally {
+      setCalendarPullBusy(false);
+    }
+  };
+
+  const handleFlushOfflineQueue = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || offlineSyncBusy) return;
+
+    setOfflineSyncBusy(true);
+
+    try {
+      const result = await flushOfflineTaskQueue(uid);
+      setOfflineQueueCount(result.remaining);
+      await playSaveFeedback(profile);
+      setStatusTone(result.flushed > 0 ? "success" : "idle");
+      setStatusMessage(
+        result.flushed > 0
+          ? `${result.flushed} offline task${result.flushed === 1 ? "" : "s"} synced.`
+          : "No offline tasks were waiting to sync."
+      );
+    } finally {
+      setOfflineSyncBusy(false);
+    }
+  };
+
+  const openSecurityDashboard = async () => {
+    let dashboardUrl = "http://127.0.0.1:8020/admin";
+
+    if (aiHealth?.url) {
+      try {
+        const parsed = new URL(aiHealth.url);
+        parsed.port = "8020";
+        dashboardUrl = `${parsed.origin}/admin`;
+      } catch {
+        dashboardUrl = "http://127.0.0.1:8020/admin";
+      }
+    }
+
+    // I link to the Go gateway dashboard from Settings so the security layer is
+    // visible during demos instead of hidden in terminal logs.
+    await Linking.openURL(dashboardUrl).catch(() => {
+      setStatusTone("warning");
+      setStatusMessage("Could not open the security dashboard on this device.");
+    });
   };
 
   const deleteCollectionDocs = async (
@@ -1341,6 +1471,22 @@ export default function SettingsScreen({
             fall back so task creation does not freeze.
           </Text>
         </View>
+
+        <View style={styles.inlineActionRow}>
+          <TouchableOpacity
+            style={[
+              styles.inlineActionButton,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+            onPress={openSecurityDashboard}
+            accessibilityRole="button"
+            accessibilityLabel="Open security gateway admin dashboard"
+          >
+            <Text style={[styles.inlineActionText, { color: colors.text }]}>
+              Open Ops Dashboard
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View
@@ -1393,6 +1539,56 @@ export default function SettingsScreen({
             >
               <Text style={styles.inlineActionText}>
                 {calendarBusy ? "Exporting..." : "Export 30 Days"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.inlineActionButton,
+                {
+                  backgroundColor: calendarPullBusy
+                    ? colors.border
+                    : colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={handlePullCalendarChanges}
+              disabled={calendarPullBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Pull changed calendar event times back into tasks"
+            >
+              <Text style={[styles.inlineActionText, { color: colors.text }]}>
+                {calendarPullBusy ? "Syncing..." : "Pull Changes"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View
+            style={[
+              styles.offlineQueuePanel,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.securityHeaderCopy}>
+              <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+                Offline Queue
+              </Text>
+              <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+                {offlineQueueCount} task{offlineQueueCount === 1 ? "" : "s"} waiting.
+                The app auto-syncs these after login, but you can retry now.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.inlineActionButton,
+                { backgroundColor: offlineSyncBusy ? colors.border : colors.tint },
+              ]}
+              onPress={handleFlushOfflineQueue}
+              disabled={offlineSyncBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Sync queued offline tasks now"
+            >
+              <Text style={styles.inlineActionText}>
+                {offlineSyncBusy ? "Syncing..." : "Sync Queue"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1828,87 +2024,78 @@ export default function SettingsScreen({
           { backgroundColor: colors.card, shadowColor: colors.tint },
         ]}
       >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Discipline Pro Preview
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          A mock subscription layer for demos: it lets you show what could be
+          paid later without blocking any tester from using the core app.
+        </Text>
+        <View
+          style={[
+            styles.proPreviewPanel,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.securityHeaderCopy}>
+            <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+              {profile.proPreviewEnabled
+                ? "Pro Preview Enabled"
+                : "Free Tester Mode"}
+            </Text>
+            <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+              Pro preview unlocks labels for AI memory, advanced challenges,
+              calendar pull-sync, and accountability proof tools.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.inlineActionButton,
+              {
+                backgroundColor: profile.proPreviewEnabled
+                  ? colors.surface
+                  : colors.tint,
+                borderColor: colors.border,
+              },
+            ]}
+            onPress={async () => {
+              await saveProfile({
+                proPreviewEnabled: profile.proPreviewEnabled !== true,
+              });
+              await playSelectionFeedback(profile);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle Discipline Pro preview mode"
+          >
+            <Text
+              style={[
+                styles.inlineActionText,
+                { color: profile.proPreviewEnabled ? colors.text : "#fff" },
+              ]}
+            >
+              {profile.proPreviewEnabled ? "Turn Off" : "Try Pro"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>Themes</Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
           Choose a look that matches how you want the app to feel today.
         </Text>
-        <View style={styles.themeGrid}>
-          {themeOptions.map((theme) => {
-            const preview = Colors[theme];
-            const selected = themeName === theme;
-            const toneLabel =
-              preview.navigationTone === "dark" ? "Dark" : "Light";
-
-            return (
-              <TouchableOpacity
-                key={theme}
-                activeOpacity={0.84}
-                style={[
-                  styles.themeOption,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                  },
-                  selected && {
-                    borderColor: colors.tint,
-                    backgroundColor: colors.surface,
-                    shadowColor: colors.tint,
-                  },
-                ]}
-                onPress={() => setThemeName(theme)}
-              >
-                <View style={styles.themePreview}>
-                  <View
-                    style={[
-                      styles.themeSwatch,
-                      {
-                        backgroundColor: preview.background,
-                        borderColor: preview.border,
-                      },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.themeSwatch,
-                      {
-                        backgroundColor: preview.card,
-                        borderColor: preview.border,
-                      },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.themeSwatch,
-                      {
-                        backgroundColor: preview.tint,
-                        borderColor: preview.tint,
-                      },
-                    ]}
-                  />
-                </View>
-
-                <Text
-                  numberOfLines={1}
-                  style={[styles.themeLabel, { color: colors.text }]}
-                >
-                  {ThemeLabels[theme]}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.selectedText,
-                    {
-                      backgroundColor: selected ? colors.tint : colors.surface,
-                      color: selected ? colors.background : colors.subtle,
-                    },
-                  ]}
-                >
-                  {selected ? "Active" : toneLabel}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <AppDropdown
+          label="Theme"
+          value={themeName}
+          options={themeDropdownOptions}
+          colors={colors}
+          onChange={setThemeName}
+        />
       </View>
 
       <View
@@ -2400,60 +2587,28 @@ export default function SettingsScreen({
         <Text style={[styles.inputLabel, { color: colors.subtle }]}>
           Morning Summary Time
         </Text>
-        <View style={styles.timeChipRow}>
-          {notificationTimeOptions.map((time) => {
-            const selected = notificationSettings.morningSummaryTime === time;
-            return (
-              <TouchableOpacity
-                key={`morning-${time}`}
-                style={[
-                  styles.timeChip,
-                  {
-                    backgroundColor: selected ? colors.surface : colors.background,
-                    borderColor: selected ? colors.tint : colors.border,
-                  },
-                ]}
-                onPress={() =>
-                  updateNotificationSettings({ morningSummaryTime: time })
-                }
-                disabled={remindersBusy}
-              >
-                <Text style={[styles.timeChipText, { color: colors.text }]}>
-                  {time}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <AppDropdown
+          value={notificationSettings.morningSummaryTime}
+          options={morningTimeDropdownOptions}
+          colors={colors}
+          disabled={remindersBusy}
+          onChange={(time) =>
+            updateNotificationSettings({ morningSummaryTime: time })
+          }
+        />
 
         <Text style={[styles.inputLabel, { color: colors.subtle }]}>
           Evening Planning Time
         </Text>
-        <View style={styles.timeChipRow}>
-          {eveningTimeOptions.map((time) => {
-            const selected = notificationSettings.eveningReminderTime === time;
-            return (
-              <TouchableOpacity
-                key={`evening-${time}`}
-                style={[
-                  styles.timeChip,
-                  {
-                    backgroundColor: selected ? colors.surface : colors.background,
-                    borderColor: selected ? colors.tint : colors.border,
-                  },
-                ]}
-                onPress={() =>
-                  updateNotificationSettings({ eveningReminderTime: time })
-                }
-                disabled={remindersBusy}
-              >
-                <Text style={[styles.timeChipText, { color: colors.text }]}>
-                  {time}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <AppDropdown
+          value={notificationSettings.eveningReminderTime}
+          options={eveningTimeDropdownOptions}
+          colors={colors}
+          disabled={remindersBusy}
+          onChange={(time) =>
+            updateNotificationSettings({ eveningReminderTime: time })
+          }
+        />
 
         <View style={styles.buttonRow}>
           <TouchableOpacity
@@ -2498,33 +2653,13 @@ export default function SettingsScreen({
           testing.
         </Text>
 
-        <View style={styles.feedbackTypeRow}>
-          {feedbackTypes.map((type) => {
-            const selected = feedbackType === type;
-            return (
-              <TouchableOpacity
-                key={type}
-                style={[
-                  styles.feedbackTypeChip,
-                  {
-                    backgroundColor: selected ? colors.tint : colors.background,
-                    borderColor: selected ? colors.tint : colors.border,
-                  },
-                ]}
-                onPress={() => setFeedbackType(type)}
-              >
-                <Text
-                  style={[
-                    styles.feedbackTypeText,
-                    { color: selected ? "#fff" : colors.text },
-                  ]}
-                >
-                  {type}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <AppDropdown
+          label="Feedback Type"
+          value={feedbackType}
+          options={feedbackTypeOptions}
+          colors={colors}
+          onChange={setFeedbackType}
+        />
 
         <TextInput
           style={[
@@ -3201,8 +3336,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  offlineQueuePanel: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  proPreviewPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
   inlineActionButton: {
     alignSelf: "flex-start",
+    borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 9,
