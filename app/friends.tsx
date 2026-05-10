@@ -3,8 +3,8 @@ import { useRouter } from "expo-router";
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
-  getDocs,
   getDoc,
   onSnapshot,
   query,
@@ -35,7 +35,7 @@ import {
 
 type FriendProfile = {
   uid: string;
-  email: string;
+  email?: string | null;
   username?: string | null;
   displayName?: string | null;
   linkedAt?: any;
@@ -44,11 +44,11 @@ type FriendProfile = {
 type FriendRequest = {
   id: string;
   requesterUid: string;
-  requesterEmail: string;
+  requesterEmail?: string | null;
   requesterUsername?: string | null;
   requesterName?: string | null;
   recipientUid: string;
-  recipientEmail: string;
+  recipientEmail?: string | null;
   recipientUsername?: string | null;
   recipientName?: string | null;
   status: "pending" | "accepted" | "declined";
@@ -76,7 +76,7 @@ type SpotlightTask = {
 type Nudge = {
   id: string;
   fromUid: string;
-  fromEmail: string;
+  fromEmail?: string | null;
   fromUsername?: string | null;
   fromName?: string | null;
   toUid: string;
@@ -147,7 +147,9 @@ const challengeTemplates: Record<
 };
 
 const getDisplayName = (profile: Partial<FriendProfile>) =>
-  formatUsername(profile.username) || profile.displayName?.trim() || profile.email;
+  formatUsername(profile.username) ||
+  profile.displayName?.trim() ||
+  "Discipline partner";
 
 const toDateLabel = (value: any) => {
   const date =
@@ -216,7 +218,7 @@ export default function FriendsScreen() {
     const profileRef = doc(db, "publicProfiles", uid);
     const fallback = {
       uid,
-      email,
+      email: null,
       username: null,
       displayName: null,
     };
@@ -239,7 +241,7 @@ export default function FriendsScreen() {
       profileRef,
       {
         uid,
-        email,
+        email: deleteField(),
         updatedAt: new Date(),
       },
       { merge: true }
@@ -619,26 +621,19 @@ export default function FriendsScreen() {
 
     const rawLookup = friendEmail.trim();
     const normalizedLookup = normalizeUsername(rawLookup);
-    const normalizedEmail = rawLookup.toLowerCase();
-    const isEmailLookup = rawLookup.includes("@");
 
     if (!rawLookup) {
-      setStatusMessage("Enter your friend's username or email first.");
+      setStatusMessage("Enter your friend's username first.");
       return;
     }
 
-    if (!isEmailLookup) {
-      const usernameError = getUsernameError(normalizedLookup);
-      if (usernameError) {
-        setStatusMessage(usernameError);
-        return;
-      }
+    const usernameError = getUsernameError(normalizedLookup);
+    if (usernameError) {
+      setStatusMessage(usernameError);
+      return;
     }
 
-    if (
-      (isEmailLookup && normalizedEmail === email) ||
-      (!isEmailLookup && normalizedLookup === myProfile.username)
-    ) {
+    if (normalizedLookup === myProfile.username) {
       setStatusMessage("That is your own account. Accountability requires another human.");
       return;
     }
@@ -648,34 +643,24 @@ export default function FriendsScreen() {
     try {
       let target: FriendProfile | undefined;
 
-      if (isEmailLookup) {
-        const profileQuery = query(
-          collection(db, "publicProfiles"),
-          where("email", "==", normalizedEmail)
-        );
-        const snapshot = await getDocs(profileQuery);
-        target = snapshot.docs[0]?.data() as FriendProfile | undefined;
-      } else {
-        // I added username lookup here so friends can connect as @names. The
-        // publicUsernames doc only reserves the name, then publicProfiles gives
-        // the friend card display data.
-        const usernameSnapshot = await getDoc(
-          doc(db, "publicUsernames", normalizedLookup)
-        );
-        const usernameData = usernameSnapshot.data() as FriendProfile | undefined;
+      // I use username-only lookup here so friend discovery does not expose
+      // email addresses in public profile documents.
+      const usernameSnapshot = await getDoc(
+        doc(db, "publicUsernames", normalizedLookup)
+      );
+      const usernameData = usernameSnapshot.data() as FriendProfile | undefined;
 
-        if (usernameData?.uid) {
-          const profileSnapshot = await getDoc(
-            doc(db, "publicProfiles", usernameData.uid)
-          );
-          target =
-            (profileSnapshot.data() as FriendProfile | undefined) ??
-            usernameData;
-        }
+      if (usernameData?.uid) {
+        const profileSnapshot = await getDoc(
+          doc(db, "publicProfiles", usernameData.uid)
+        );
+        target =
+          (profileSnapshot.data() as FriendProfile | undefined) ??
+          usernameData;
       }
 
       if (!target?.uid) {
-        setStatusMessage("No user found with that username or email yet.");
+        setStatusMessage("No user found with that username yet.");
         return;
       }
 
@@ -703,11 +688,11 @@ export default function FriendsScreen() {
         requestRef,
         {
           requesterUid: uid,
-          requesterEmail: email,
+          requesterEmail: null,
           requesterUsername: myProfile.username ?? null,
           requesterName: myProfile.displayName ?? null,
           recipientUid: target.uid,
-          recipientEmail: target.email,
+          recipientEmail: null,
           recipientUsername: target.username ?? null,
           recipientName: target.displayName ?? null,
           status: "pending",
@@ -738,21 +723,21 @@ export default function FriendsScreen() {
 
       await setDoc(doc(db, "users", uid, "friends", request.requesterUid), {
         uid: request.requesterUid,
-        email: request.requesterEmail,
+        email: null,
         username: request.requesterUsername ?? null,
         displayName: request.requesterName ?? null,
         linkedAt: new Date(),
       });
       await setDoc(doc(db, "users", request.requesterUid, "friends", uid), {
         uid,
-        email,
+        email: null,
         username: myProfile.username ?? null,
         displayName: myProfile.displayName ?? null,
         linkedAt: new Date(),
       });
 
       setStatusMessage(`${getDisplayName({
-        email: request.requesterEmail,
+        email: null,
         username: request.requesterUsername,
         displayName: request.requesterName,
       })} added.`);
@@ -780,7 +765,7 @@ export default function FriendsScreen() {
     try {
       await addDoc(collection(db, "accountabilityNudges"), {
         fromUid: uid,
-        fromEmail: email,
+        fromEmail: null,
         fromUsername: myProfile.username ?? null,
         fromName: myProfile.displayName ?? null,
         toUid: friend.uid,
@@ -980,7 +965,7 @@ export default function FriendsScreen() {
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>Add Friend</Text>
         <Text style={[styles.cardText, { color: colors.subtle }]}>
-          Search by username first, or use the email they signed up with.
+          Search by username so emails stay private.
         </Text>
         <TextInput
           style={[
@@ -991,7 +976,7 @@ export default function FriendsScreen() {
               color: colors.text,
             },
           ]}
-          placeholder="@friend or friend@email.com"
+          placeholder="@friend_username"
           placeholderTextColor={colors.subtle}
           value={friendEmail}
           onChangeText={setFriendEmail}
@@ -1025,7 +1010,7 @@ export default function FriendsScreen() {
             >
               <View style={styles.requestCopy}>
                 <Text style={[styles.requestName, { color: colors.text }]}>
-                  {formatUsername(nudge.fromUsername) || nudge.fromName || nudge.fromEmail}
+                  {formatUsername(nudge.fromUsername) || nudge.fromName || "Discipline partner"}
                 </Text>
                 <Text style={[styles.requestMeta, { color: colors.subtle }]}>
                   {nudge.message}
@@ -1045,7 +1030,7 @@ export default function FriendsScreen() {
               <View style={styles.requestCopy}>
                 <Text style={[styles.requestName, { color: colors.text }]}>
                   {getDisplayName({
-                    email: request.requesterEmail,
+                    email: null,
                     username: request.requesterUsername,
                     displayName: request.requesterName,
                   })}

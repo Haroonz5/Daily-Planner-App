@@ -57,11 +57,21 @@ npx eas-cli@latest login
 npx eas-cli@latest build --profile preview --platform all
 ```
 
-If the AI backend is deployed, set it before building:
+If the AI/security stack is deployed, point the app at the Go security gateway before building. Do not use your laptop IP for friend testers:
 
 ```bash
-npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-backend-url
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-security-gateway-url
 ```
+
+The Python AI URL and Gemini/OpenAI keys stay on the backend host. The phone app should only know the public gateway URL.
+
+
+## Account And Privacy Checks
+
+- Try creating an account with a typo like `person@gmail.con`; the app should block it before Firebase sends a verification email.
+- Usernames must be unique. If a tester chooses a taken username, signup should ask for another one.
+- Friend discovery is username-first. Public profile and username records should not expose emails.
+- Ask each tester to write down their username after signup so friends can add them without sharing emails.
 
 ## Tester Pass Criteria
 

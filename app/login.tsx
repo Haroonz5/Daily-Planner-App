@@ -20,6 +20,10 @@ import {
 
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
+import {
+  getEmailValidationError,
+  normalizeEmail,
+} from "@/utils/email-validation";
 import { getSecureItem, removeSecureItem, setSecureItem } from "@/utils/secure-storage";
 import { auth } from "../constants/firebaseConfig";
 
@@ -78,11 +82,17 @@ export default function Login() {
       return;
     }
 
+    const normalizedEmail = normalizeEmail(email);
+    const emailError = getEmailValidationError(normalizedEmail);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError("");
 
-      const normalizedEmail = email.trim().toLowerCase();
       const credential = await signInWithEmailAndPassword(
         auth,
         normalizedEmail,
@@ -125,7 +135,7 @@ export default function Login() {
 
   const handleMfaConfirm = async () => {
     const code = mfaCode.replace(/\s/g, "");
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     if (!mfaResolver || code.length < 6) {
       setError("Enter the 6-digit authenticator code first.");
       return;

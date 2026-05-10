@@ -443,6 +443,12 @@ npm run release:check
 npm run deploy:rules
 ```
 
+Tester account privacy:
+
+- Email typo domains like `.con` are blocked before Firebase sends verification.
+- Usernames are reserved in `publicUsernames`, so testers cannot claim the same username.
+- Friend lookup is username-first and public friend records do not expose email addresses.
+
 Create an internal EAS build:
 
 ```bash
@@ -450,10 +456,10 @@ npx eas-cli@latest login
 npx eas-cli@latest build --profile preview --platform all
 ```
 
-If using a deployed AI backend, add the URL as an EAS secret:
+If using the deployed AI/security stack, add the Go security gateway URL as an EAS secret. Do not point tester builds at your laptop IP:
 
 ```bash
-npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-backend-url
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-security-gateway-url
 ```
 
 Useful tester docs:

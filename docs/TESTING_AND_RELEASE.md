@@ -10,11 +10,13 @@ npm run qa:device
 npm run ai:dev
 ```
 
-In another terminal:
+In another terminal, use your Mac LAN IP only for local testing:
 
 ```bash
-EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_LAN_IP:8000 npx expo start -c
+EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_LAN_IP:8020 npx expo start -c
 ```
+
+For testers outside your Wi-Fi, deploy the Python AI backend and Go security gateway first, then use the hosted gateway URL in EAS.
 
 Test on a real phone:
 
@@ -29,7 +31,16 @@ Test on a real phone:
 - Confirm task reminders are not duplicated.
 - Open Today, Add Task, Stats, Summary, Focus, and Settings.
 
-## 2. Real Device Final Pass
+## 2. Account Signup Checks
+
+Before inviting testers, create two fresh accounts yourself:
+
+- Use a typo email such as `tester@gmail.con`; signup should reject it before sending verification.
+- Use a real email and a new username; signup should create the account, reserve the username, and show Verify Email.
+- Try the same username on another account; signup should say the username is taken.
+- Add friends by username only. Emails should not appear in public profile lookup.
+
+## 3. Real Device Final Pass
 
 Expo Go is good for layout and most app behavior, but notification action buttons,
 background delivery, and the full sound/haptic experience need a development,
@@ -57,7 +68,7 @@ Then confirm:
 - Friends, accountability nudges, challenges, feedback, and progress sharing do not show permission errors.
 - Optional: enable authenticator-app 2FA in Settings, then confirm login asks for the code.
 
-## 3. Deploy The AI Backend
+## 4. Deploy The AI Backend
 
 The repo includes a Dockerfile for the AI service and a Render blueprint.
 
@@ -87,13 +98,15 @@ AI_TIMEOUT_SECONDS=5
 Keep model timeouts short during testing. If Gemini is slow, the app should fall
 back quickly instead of making the Add Task screen feel frozen.
 
-After deployment, copy the public backend URL. It should respond at:
+After deployment, copy the public AI backend URL. It should respond at:
 
 ```txt
-https://your-backend-url/health
+https://your-ai-backend-url/health
 ```
 
-## 4. Build Tester Apps With EAS
+Then deploy the Go security gateway with `AI_BACKEND_URL` pointing at that Python backend. The app should call the gateway, not the Python service directly.
+
+## 5. Build Tester Apps With EAS
 
 Install or run EAS:
 
@@ -102,10 +115,10 @@ npx eas-cli@latest login
 npx eas-cli@latest build:configure
 ```
 
-Set the AI URL for builds:
+Set the AI URL for builds to the Go security gateway URL:
 
 ```bash
-npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-backend-url
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-security-gateway-url
 ```
 
 Internal tester build:
@@ -126,7 +139,7 @@ Production build:
 npx eas-cli@latest build --profile production --platform all
 ```
 
-## 5. Tester Notes
+## 6. Tester Notes
 
 Ask testers to report:
 

@@ -11,6 +11,7 @@ import {
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -307,13 +308,26 @@ export default function SettingsScreen({
       doc(db, "publicProfiles", user.uid),
       {
         uid: user.uid,
-        email: user.email.toLowerCase(),
+        email: deleteField(),
         username: profile.username ?? null,
         displayName: profile.displayName ?? null,
         updatedAt: new Date(),
       },
       { merge: true }
     ).catch(() => {});
+
+    if (profile.username) {
+      void setDoc(
+        doc(db, "publicUsernames", profile.username),
+        {
+          uid: user.uid,
+          email: deleteField(),
+          username: profile.username,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
   }, [profile.displayName, profile.username]);
 
   useEffect(() => {
@@ -933,7 +947,7 @@ export default function SettingsScreen({
         doc(db, "publicProfiles", user.uid),
         {
           uid: user.uid,
-          email: user.email.toLowerCase(),
+          email: deleteField(),
           username: nextUsername,
           displayName: displayName.trim() || null,
           updatedAt: new Date(),
@@ -944,7 +958,6 @@ export default function SettingsScreen({
       if (usernameChanged) {
         batch.set(doc(db, "publicUsernames", nextUsername), {
           uid: user.uid,
-          email: user.email.toLowerCase(),
           username: nextUsername,
           updatedAt: new Date(),
         });

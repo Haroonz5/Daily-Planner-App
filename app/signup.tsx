@@ -98,7 +98,6 @@ export default function Signup() {
         doc(db, "publicProfiles", credential.user.uid),
         {
           uid: credential.user.uid,
-          email: normalizedEmail,
           username: normalizedUsername,
           displayName: normalizedUsername,
           updatedAt: new Date(),
@@ -107,7 +106,6 @@ export default function Signup() {
       );
       batch.set(usernameRef, {
         uid: credential.user.uid,
-        email: normalizedEmail,
         username: normalizedUsername,
         createdAt: new Date(),
       });
