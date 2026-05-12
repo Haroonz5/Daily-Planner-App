@@ -15,7 +15,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
   setDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -25,6 +28,7 @@ import {
   Linking,
   Modal,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -121,6 +125,24 @@ type SettingsScreenProps = {
   showBackButton?: boolean;
 };
 
+type TesterFeedbackItem = {
+  id: string;
+  type?: (typeof feedbackTypes)[number];
+  message?: string;
+  appVersion?: string | null;
+  theme?: string | null;
+  createdAt?: any;
+};
+
+type DiagnosticItem = {
+  id: string;
+  source?: string;
+  name?: string | null;
+  message?: string;
+  appVersion?: string | null;
+  createdAt?: any;
+};
+
 type RoutineGroup = {
   id: string;
   title: string;
@@ -150,6 +172,25 @@ const addDaysToDateKey = (dateKey: string, days: number) => {
   const date = new Date(`${dateKey}T12:00:00`);
   date.setDate(date.getDate() + days);
   return formatDateKey(date);
+};
+
+const toDateFromValue = (value: any) => {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate() as Date;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatTimestampLabel = (value: any) => {
+  const date = toDateFromValue(value);
+  if (!date) return "recently";
+
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 };
 
 export default function SettingsScreen({
@@ -214,6 +255,10 @@ export default function SettingsScreen({
     useState<(typeof feedbackTypes)[number]>("Bug");
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [recentFeedback, setRecentFeedback] = useState<TesterFeedbackItem[]>([]);
+  const [appErrors, setAppErrors] = useState<DiagnosticItem[]>([]);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(true);
+  const [dataExportSummary, setDataExportSummary] = useState("");
   const [dangerBusy, setDangerBusy] = useState(false);
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarPullBusy, setCalendarPullBusy] = useState(false);
@@ -354,6 +399,73 @@ export default function SettingsScreen({
 
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setDiagnosticsLoading(false);
+      return;
+    }
+
+    setDiagnosticsLoading(true);
+    let loadedStreams = 0;
+    const markLoaded = () => {
+      loadedStreams += 1;
+      if (loadedStreams >= 2) setDiagnosticsLoading(false);
+    };
+
+    const feedbackQuery = query(
+      collection(db, "users", uid, "feedback"),
+      orderBy("createdAt", "desc"),
+      limit(5)
+    );
+    const errorsQuery = query(
+      collection(db, "users", uid, "appErrors"),
+      orderBy("createdAt", "desc"),
+      limit(5)
+    );
+
+    // I keep a tiny local dashboard in Settings so tester feedback and crash-like
+    // reports are visible during builds without needing a separate admin app.
+    const unsubscribeFeedback = onSnapshot(
+      feedbackQuery,
+      (snapshot) => {
+        setRecentFeedback(
+          snapshot.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          })) as TesterFeedbackItem[]
+        );
+        markLoaded();
+      },
+      () => {
+        setRecentFeedback([]);
+        markLoaded();
+      }
+    );
+
+    const unsubscribeErrors = onSnapshot(
+      errorsQuery,
+      (snapshot) => {
+        setAppErrors(
+          snapshot.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          })) as DiagnosticItem[]
+        );
+        markLoaded();
+      },
+      () => {
+        setAppErrors([]);
+        markLoaded();
+      }
+    );
+
+    return () => {
+      unsubscribeFeedback();
+      unsubscribeErrors();
     };
   }, []);
 
@@ -511,6 +623,82 @@ export default function SettingsScreen({
         return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
       });
   }, [tasks, today]);
+
+  const routineInsights = useMemo(
+    () =>
+      routineGroups
+        .filter(
+          (routine) =>
+            routine.healthScore < 80 ||
+            routine.skippedCount > routine.completedCount ||
+            routine.recentCompletionRate < 60
+        )
+        .slice(0, 3)
+        .map((routine) => ({
+          id: routine.id,
+          title: routine.title,
+          message:
+            routine.skippedCount > routine.completedCount
+              ? `${routine.title} has more skips than completions. Try a lighter version or a different time.`
+              : routine.recentCompletionRate < 60
+                ? `${routine.title} is below 60% recently. Move it away from high-friction hours.`
+                : `${routine.title} is close, but could use a small tune-up before it becomes automatic.`,
+        })),
+    [routineGroups]
+  );
+
+  const releaseChecklistItems = useMemo(
+    () => [
+      {
+        label: "Username reserved",
+        done: Boolean(profile.username),
+        detail: profile.username
+          ? `${formatUsername(profile.username)} is ready for friend testing.`
+          : "Set a username so testers can add you without sharing emails.",
+      },
+      {
+        label: "AI or gateway reachable",
+        done: Boolean(aiHealth?.ok),
+        detail: aiHealth?.ok
+          ? `${aiHealth.provider === "gateway" ? "Gateway" : "AI backend"} responded in ${aiHealth.responseMs}ms.`
+          : "Deploy the backend/gateway or use local fallback for Expo Go.",
+      },
+      {
+        label: "Gateway auth visible",
+        done: aiHealth?.provider === "gateway" ? aiHealth.authMode === "firebase" : Boolean(aiHealth?.ok),
+        detail:
+          aiHealth?.provider === "gateway"
+            ? `Auth ${aiHealth.authMode ?? "unknown"}, App Check ${aiHealth.appCheckMode ?? "off"}.`
+            : "Point tester builds at the Go gateway for production-style security.",
+      },
+      {
+        label: "Reminder health clean",
+        done: Boolean(notificationAudit && notificationAudit.duplicateCount === 0),
+        detail: notificationAudit
+          ? `${notificationAudit.total} scheduled, ${notificationAudit.duplicateCount} duplicate.`
+          : "Refresh reminder health before sending a build.",
+      },
+      {
+        label: "Offline queue empty",
+        done: offlineQueueCount === 0,
+        detail:
+          offlineQueueCount === 0
+            ? "No AI-planned tasks are stuck locally."
+            : `${offlineQueueCount} task${offlineQueueCount === 1 ? "" : "s"} still waiting to sync.`,
+      },
+      {
+        label: "Diagnostics quiet",
+        done: appErrors.length === 0,
+        detail:
+          appErrors.length === 0
+            ? "No recent app errors for this tester account."
+            : `${appErrors.length} recent error report${appErrors.length === 1 ? "" : "s"} need review.`,
+      },
+    ],
+    [aiHealth, appErrors.length, notificationAudit, offlineQueueCount, profile.username]
+  );
+
+  const releaseReadyCount = releaseChecklistItems.filter((item) => item.done).length;
 
   const profileDirty =
     displayName !== (profile.displayName ?? "") ||
@@ -788,7 +976,13 @@ export default function SettingsScreen({
 
   const deleteCollectionDocs = async (
     uid: string,
-    collectionName: "tasks" | "focusSessions" | "feedback"
+    collectionName:
+      | "tasks"
+      | "focusSessions"
+      | "feedback"
+      | "appErrors"
+      | "friends"
+      | "widgetSummary"
   ) => {
     const snapshot = await getDocs(collection(db, "users", uid, collectionName));
     if (snapshot.empty) return [];
@@ -811,6 +1005,10 @@ export default function SettingsScreen({
       await cancelManyTaskNotifications(taskIds);
       await deleteCollectionDocs(uid, "focusSessions");
       await deleteCollectionDocs(uid, "feedback");
+      await deleteCollectionDocs(uid, "appErrors");
+      await deleteCollectionDocs(uid, "friends");
+      await deleteCollectionDocs(uid, "widgetSummary");
+      await deleteCollectionDocs(uid, "appErrors");
       await saveProfile({
         activePetKey: null,
         petNickname: null,
@@ -822,6 +1020,137 @@ export default function SettingsScreen({
 
       setStatusTone("success");
       setStatusMessage("Test data reset. Your account and theme stayed intact.");
+    } finally {
+      setDangerBusy(false);
+    }
+  };
+
+  const loadDemoDay = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || dangerBusy) return;
+
+    setDangerBusy(true);
+
+    try {
+      const demoTasks: Task[] = [
+        {
+          id: `demo-${today}-plan`,
+          title: "Plan the day honestly",
+          date: today,
+          time: "8:00 AM",
+          priority: "High",
+          completed: false,
+          status: "pending",
+        },
+        {
+          id: `demo-${today}-focus`,
+          title: "Deep work sprint",
+          date: today,
+          time: "10:30 AM",
+          priority: "High",
+          completed: false,
+          status: "pending",
+        },
+        {
+          id: `demo-${today}-walk`,
+          title: "Ten minute reset walk",
+          date: today,
+          time: "3:00 PM",
+          priority: "Medium",
+          completed: false,
+          status: "pending",
+        },
+        {
+          id: `demo-${addDaysToDateKey(today, 1)}-review`,
+          title: "Review tomorrow's top three",
+          date: addDaysToDateKey(today, 1),
+          time: "7:30 PM",
+          priority: "Medium",
+          completed: false,
+          status: "pending",
+        },
+      ];
+
+      const batch = writeBatch(db);
+      demoTasks.forEach((task) => {
+        batch.set(doc(db, "users", uid, "tasks", task.id), {
+          title: task.title,
+          date: task.date,
+          time: task.time,
+          priority: task.priority,
+          completed: false,
+          status: "pending",
+          notes: "Demo task added from Settings so testers can try the app quickly.",
+          aiCreated: false,
+          createdAt: new Date(),
+        });
+      });
+      await batch.commit();
+      await Promise.all(demoTasks.map((task) => syncTaskNotifications(task)));
+      await syncMorningSummaryNotification(uid);
+      await playSaveFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage("Demo day loaded. Today now has sample tasks for tester walkthroughs.");
+    } finally {
+      setDangerBusy(false);
+    }
+  };
+
+  const shareDataExport = async () => {
+    const user = auth.currentUser;
+    if (!user || dangerBusy) return;
+
+    setDangerBusy(true);
+
+    try {
+      const uid = user.uid;
+      const [taskSnap, focusSnap, feedbackSnap, errorSnap] = await Promise.all([
+        getDocs(collection(db, "users", uid, "tasks")),
+        getDocs(collection(db, "users", uid, "focusSessions")),
+        getDocs(collection(db, "users", uid, "feedback")),
+        getDocs(collection(db, "users", uid, "appErrors")),
+      ]);
+      const toDocs = (snapshot: Awaited<ReturnType<typeof getDocs>>) =>
+        snapshot.docs.map((document) => ({
+          id: document.id,
+          ...(document.data() as Record<string, unknown>),
+        }));
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        appVersion,
+        account: {
+          uid,
+          email: user.email,
+          username: profile.username ?? null,
+          displayName: profile.displayName ?? null,
+        },
+        counts: {
+          tasks: taskSnap.size,
+          focusSessions: focusSnap.size,
+          feedback: feedbackSnap.size,
+          appErrors: errorSnap.size,
+        },
+        data: {
+          tasks: toDocs(taskSnap),
+          focusSessions: toDocs(focusSnap),
+          feedback: toDocs(feedbackSnap),
+          appErrors: toDocs(errorSnap),
+        },
+      };
+
+      const message = JSON.stringify(payload, null, 2);
+      setDataExportSummary(
+        `${payload.counts.tasks} tasks, ${payload.counts.focusSessions} focus sessions, ${payload.counts.feedback} feedback notes, ${payload.counts.appErrors} diagnostics exported.`
+      );
+      await Share.share({
+        title: "Daily Discipline Data Export",
+        message,
+      });
+      setStatusTone("success");
+      setStatusMessage("Data export prepared for sharing or saving.");
+    } catch {
+      setStatusTone("warning");
+      setStatusMessage("Data export could not be prepared on this device.");
     } finally {
       setDangerBusy(false);
     }
@@ -859,6 +1188,7 @@ export default function SettingsScreen({
       const profileBatch = writeBatch(db);
       profileBatch.delete(doc(db, "users", uid));
       profileBatch.delete(doc(db, "publicProfiles", uid));
+      profileBatch.delete(doc(db, "publicProgress", uid));
       if (profile.username) {
         profileBatch.delete(doc(db, "publicUsernames", profile.username));
       }
@@ -1387,20 +1717,49 @@ export default function SettingsScreen({
           Use this before sending a build to friends so account, AI, routines,
           and accountability all get checked together.
         </Text>
-        {[
-          "Deploy Firestore rules after username or friend changes.",
-          "Create two fresh accounts and verify both emails.",
-          "Add each other by username, accept, nudge, and start one challenge.",
-          "Use Plan with AI for a normal task and an ongoing routine.",
-          "Complete one high-priority task with proof and confirm XP updates.",
-          "Run Strict Focus once, then switch apps to confirm strikes work.",
-          "Run npm run release:check before making an EAS preview build.",
-        ].map((item) => (
-          <View key={item} style={styles.checklistRow}>
-            <Text style={[styles.checklistDot, { color: colors.tint }]}>•</Text>
-            <Text style={[styles.checklistText, { color: colors.subtle }]}>
-              {item}
+        <View
+          style={[
+            styles.releaseScorePanel,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.releaseScoreText, { color: colors.text }]}>
+            {releaseReadyCount}/{releaseChecklistItems.length} ready for testers
+          </Text>
+          <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${Math.round((releaseReadyCount / releaseChecklistItems.length) * 100)}%`,
+                  backgroundColor:
+                    releaseReadyCount === releaseChecklistItems.length
+                      ? colors.success
+                      : colors.tint,
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        {releaseChecklistItems.map((item) => (
+          <View key={item.label} style={styles.checklistRow}>
+            <Text
+              style={[
+                styles.checklistDot,
+                { color: item.done ? colors.success : colors.warning },
+              ]}
+            >
+              {item.done ? "✓" : "•"}
             </Text>
+            <View style={styles.checklistCopy}>
+              <Text style={[styles.checklistText, { color: colors.text }]}>
+                {item.label}
+              </Text>
+              <Text style={[styles.checklistDetail, { color: colors.subtle }]}>
+                {item.detail}
+              </Text>
+            </View>
           </View>
         ))}
       </View>
@@ -1448,9 +1807,11 @@ export default function SettingsScreen({
           <View style={styles.aiHealthTopRow}>
             <Text style={[styles.aiHealthTitle, { color: colors.text }]}>
               {aiHealth?.ok
-                ? aiHealth.modelConfigured
-                  ? "Model-powered AI ready"
-                  : "Backend fallback ready"
+                ? aiHealth.provider === "gateway"
+                  ? "Security gateway ready"
+                  : aiHealth.modelConfigured
+                    ? "Model-powered AI ready"
+                    : "Backend fallback ready"
                 : "Backend not reachable"}
             </Text>
             <Text
@@ -1466,17 +1827,21 @@ export default function SettingsScreen({
               ]}
             >
               {aiHealth?.ok
-                ? aiHealth.modelConfigured
-                  ? "Live"
-                  : "Local"
+                ? aiHealth.provider === "gateway"
+                  ? "Gateway"
+                  : aiHealth.modelConfigured
+                    ? "Live"
+                    : "Local"
                 : "Offline"}
             </Text>
           </View>
           <Text style={[styles.aiHealthBody, { color: colors.subtle }]}>
             {aiHealth?.ok
-              ? aiHealth.modelConfigured
-                ? `${aiHealth.remoteSources[0]?.toUpperCase() ?? "AI"} via ${aiHealth.activeModel ?? "configured model"} • ${aiHealth.responseMs}ms`
-                : `Backend is online at ${aiHealth.url}, but no model key is configured.`
+              ? aiHealth.provider === "gateway"
+                ? `Gateway auth ${aiHealth.authMode ?? "unknown"} • App Check ${aiHealth.appCheckMode ?? "off"} • audit ${aiHealth.auditDb ? "DB" : "stdout"}`
+                : aiHealth.modelConfigured
+                  ? `${aiHealth.remoteSources[0]?.toUpperCase() ?? "AI"} via ${aiHealth.activeModel ?? "configured model"} • ${aiHealth.responseMs}ms`
+                  : `Backend is online at ${aiHealth.url}, but no model key is configured.`
               : `Could not reach ${aiHealth?.url ?? "the backend"}. The app will still use its built-in planner.`}
           </Text>
           <Text style={[styles.aiHealthMeta, { color: colors.subtle }]}>
@@ -2190,6 +2555,50 @@ export default function SettingsScreen({
           { backgroundColor: colors.card, shadowColor: colors.tint },
         ]}
       >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>Routine Intelligence</Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          The app watches recurring tasks for friction so routines feel adaptive,
+          not robotic.
+        </Text>
+        {routineInsights.length > 0 ? (
+          routineInsights.map((insight) => (
+            <View
+              key={insight.id}
+              style={[
+                styles.insightRow,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.insightTitle, { color: colors.text }]}>
+                {insight.title}
+              </Text>
+              <Text style={[styles.insightBody, { color: colors.subtle }]}>
+                {insight.message}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <View
+            style={[
+              styles.emptySettingsCard,
+              { backgroundColor: colors.background, borderColor: colors.success },
+            ]}
+          >
+            <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>Routines look stable</Text>
+            <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+              No high-friction recurring tasks detected yet. Keep completing or
+              skipping honestly so the coach has real signal.
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           Routine Manager
         </Text>
@@ -2710,6 +3119,114 @@ export default function SettingsScreen({
       <View
         style={[
           styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Feedback Dashboard
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Recent tester notes from this account, useful when someone is showing
+          you a bug on their phone.
+        </Text>
+        {recentFeedback.length > 0 ? (
+          recentFeedback.map((item) => (
+            <View
+              key={item.id}
+              style={[
+                styles.diagnosticRow,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.diagnosticTitle, { color: colors.text }]}>
+                {item.type ?? "Feedback"} · {formatTimestampLabel(item.createdAt)}
+              </Text>
+              <Text style={[styles.diagnosticBody, { color: colors.subtle }]}>
+                {item.message ?? "No message saved."}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <View
+            style={[
+              styles.emptySettingsCard,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+              No feedback yet
+            </Text>
+            <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+              Tester notes submitted above will appear here instantly.
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Diagnostics
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Crash-style reports caught by the in-app error boundary and manual
+          reporters. Quiet diagnostics are a good sign before a bigger test.
+        </Text>
+        {diagnosticsLoading ? (
+          ["Loading diagnostics", "Checking feedback"].map((label) => (
+            <View
+              key={label}
+              style={[
+                styles.skeletonRow,
+                { backgroundColor: colors.background, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.diagnosticTitle, { color: colors.subtle }]}>
+                {label}...
+              </Text>
+            </View>
+          ))
+        ) : appErrors.length > 0 ? (
+          appErrors.map((item) => (
+            <View
+              key={item.id}
+              style={[
+                styles.diagnosticRow,
+                { backgroundColor: colors.background, borderColor: colors.warning },
+              ]}
+            >
+              <Text style={[styles.diagnosticTitle, { color: colors.text }]}>
+                {item.source ?? "App"} · {formatTimestampLabel(item.createdAt)}
+              </Text>
+              <Text style={[styles.diagnosticBody, { color: colors.subtle }]}>
+                {item.message ?? item.name ?? "Unknown error"}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <View
+            style={[
+              styles.emptySettingsCard,
+              { backgroundColor: colors.background, borderColor: colors.success },
+            ]}
+          >
+            <Text style={[styles.emptySettingsTitle, { color: colors.text }]}>
+              No recent app errors
+            </Text>
+            <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
+              Nice. This account has no recent diagnostic reports.
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.card,
           {
             backgroundColor: colors.card,
             borderWidth: 1,
@@ -2725,6 +3242,35 @@ export default function SettingsScreen({
           Use these when a tester wants a clean start or wants their account
           removed.
         </Text>
+
+        <TouchableOpacity
+          style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+          onPress={loadDemoDay}
+          disabled={dangerBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {dangerBusy ? "Working..." : "Load Demo Day"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.dangerOutlineButton,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+          onPress={shareDataExport}
+          disabled={dangerBusy}
+        >
+          <Text style={[styles.dangerOutlineText, { color: colors.text }]}>
+            {dangerBusy ? "Working..." : "Export My Data"}
+          </Text>
+        </TouchableOpacity>
+
+        {dataExportSummary ? (
+          <Text style={[styles.profileHint, { color: colors.subtle }]}>
+            {dataExportSummary}
+          </Text>
+        ) : null}
 
         <TouchableOpacity
           style={[
@@ -3563,6 +4109,64 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 16,
+  },
+  releaseScorePanel: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  releaseScoreText: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  checklistCopy: {
+    flex: 1,
+  },
+  checklistDetail: {
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  insightRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 13,
+    marginTop: 10,
+  },
+  insightTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  insightBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  diagnosticRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 13,
+    marginTop: 10,
+  },
+  diagnosticTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  diagnosticBody: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  skeletonRow: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 13,
+    marginTop: 10,
+    opacity: 0.72,
   },
   bottomSpacer: {
     height: 18,

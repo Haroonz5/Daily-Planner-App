@@ -3,6 +3,7 @@ import {
   getMultiFactorResolver,
   type MultiFactorResolver,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   TotpMultiFactorGenerator,
   type User,
@@ -35,6 +36,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mfaResolver, setMfaResolver] = useState<MultiFactorResolver | null>(
@@ -92,6 +94,7 @@ export default function Login() {
     try {
       setIsSubmitting(true);
       setError("");
+      setNotice("");
 
       const credential = await signInWithEmailAndPassword(
         auth,
@@ -128,6 +131,29 @@ export default function Login() {
       }
 
       setError("Invalid email or password");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const normalizedEmail = normalizeEmail(email);
+    const emailError = getEmailValidationError(normalizedEmail);
+
+    if (emailError) {
+      setError(emailError);
+      setNotice("");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      setError("");
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      setNotice(`Password reset sent to ${normalizedEmail}.`);
+    } catch {
+      setError("Could not send a reset link. Check the email and try again.");
+      setNotice("");
     } finally {
       setIsSubmitting(false);
     }
@@ -219,6 +245,7 @@ export default function Login() {
             secureTextEntry
           />
 
+          {notice ? <Text style={[styles.notice, { color: colors.success }]}>{notice}</Text> : null}
           {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
           {mfaResolver ? (
@@ -269,10 +296,11 @@ export default function Login() {
             </View>
           ) : null}
 
-          <TouchableOpacity
-            style={styles.rememberMe}
-            onPress={() => setRememberMe((prev) => !prev)}
-          >
+          <View style={styles.loginUtilityRow}>
+            <TouchableOpacity
+              style={styles.rememberMe}
+              onPress={() => setRememberMe((prev) => !prev)}
+            >
             <View
               style={[
                 styles.rememberBox,
@@ -286,6 +314,11 @@ export default function Login() {
               Remember Me
             </Text>
           </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleForgotPassword} disabled={isSubmitting}>
+              <Text style={[styles.forgotText, { color: colors.tint }]}>Forgot password?</Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={[styles.button, { backgroundColor: colors.tint }, isSubmitting && styles.buttonDisabled]}
@@ -388,6 +421,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
   },
+  notice: {
+    marginBottom: 12,
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   mfaPanel: {
     borderWidth: 1,
     borderRadius: 18,
@@ -404,10 +443,15 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 12,
   },
+  loginUtilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
   rememberMe: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
   },
   rememberBox: {
     width: 20,
@@ -425,5 +469,9 @@ const styles = StyleSheet.create({
   },
   rememberText: {
     fontSize: 14,
+  },
+  forgotText: {
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

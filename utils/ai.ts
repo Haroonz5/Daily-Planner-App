@@ -134,6 +134,10 @@ export type AiBackendHealth = {
   activeModel: string | null;
   timeoutSeconds: number | null;
   responseMs: number;
+  authMode?: string | null;
+  appCheckMode?: string | null;
+  auditDb?: boolean | null;
+  adminDashboard?: boolean | null;
 };
 
 const normalizeAiApiUrl = (value?: string | null) => {
@@ -173,21 +177,27 @@ const isDevMachineUrl = (url: string) =>
 const getAiApiUrls = () => {
   const configuredUrl = normalizeAiApiUrl(process.env.EXPO_PUBLIC_AI_API_URL);
   const expoHostUrl = normalizeAiApiUrl(getExpoHostAiApiUrl());
+  const requireSecureAi =
+    process.env.EXPO_PUBLIC_REQUIRE_SECURE_AI === "true";
   const urls: string[] = [];
 
-  // I prefer the live Expo LAN host for local private IPs because the phone and
-  // Metro are usually on the same Mac, while .env.local can go stale when Wi-Fi changes.
-  if (expoHostUrl && (!configuredUrl || isDevMachineUrl(configuredUrl))) {
-    urls.push(expoHostUrl);
-  }
   if (configuredUrl) urls.push(configuredUrl);
-  urls.push("http://127.0.0.1:8000");
+
+  // Tester/EAS builds can opt out of laptop fallbacks so AI traffic only goes
+  // through the hosted security gateway. Local Expo Go still keeps the friendly
+  // LAN fallback for day-to-day development.
+  if (!requireSecureAi) {
+    if (expoHostUrl && (!configuredUrl || isDevMachineUrl(configuredUrl))) {
+      urls.unshift(expoHostUrl);
+    }
+    urls.push("http://127.0.0.1:8000");
+  }
 
   return Array.from(new Set(urls));
 };
 
 const getAiApiUrl = () => {
-  return getAiApiUrls()[0] ?? "http://127.0.0.1:8000";
+  return getAiApiUrls()[0] ?? "https://configure-ai-gateway.example.com";
 };
 
 const fetchWithTimeout = (
@@ -298,15 +308,19 @@ export const checkAiBackendHealth = async (): Promise<AiBackendHealth> => {
     }
 
     const data = await response.json();
+    const service = String(data.service ?? "");
+    const isGateway = service.includes("security-gateway");
 
     return {
       ok: Boolean(data.ok),
       url,
-      provider: String(data.provider ?? "unknown"),
+      provider: isGateway ? "gateway" : String(data.provider ?? "unknown"),
       remoteSources: Array.isArray(data.remote_sources)
         ? data.remote_sources.map(String)
         : [],
-      modelConfigured: Boolean(data.model_configured),
+      modelConfigured: isGateway
+        ? Boolean(data.firebase_config)
+        : Boolean(data.model_configured),
       activeModel: data.active_model ? String(data.active_model) : null,
       timeoutSeconds:
         typeof data.timeout_seconds === "number"
@@ -315,6 +329,10 @@ export const checkAiBackendHealth = async (): Promise<AiBackendHealth> => {
             ? Number(data.timeout_seconds)
             : null,
       responseMs,
+      authMode: isGateway ? String(data.auth_mode ?? "unknown") : null,
+      appCheckMode: isGateway ? String(data.app_check_mode ?? "off") : null,
+      auditDb: isGateway ? Boolean(data.audit_db) : null,
+      adminDashboard: isGateway ? Boolean(data.admin_dashboard) : null,
     };
     } catch {
       // Try the next candidate URL before giving up. This handles stale Wi-Fi IPs

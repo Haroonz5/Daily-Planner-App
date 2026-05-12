@@ -449,6 +449,13 @@ Tester account privacy:
 - Usernames are reserved in `publicUsernames`, so testers cannot claim the same username.
 - Friend lookup is username-first and public friend records do not expose email addresses.
 
+App Check / gateway hardening:
+
+- Preview builds should point `EXPO_PUBLIC_AI_API_URL` at the hosted Go security gateway.
+- Set `SECURITY_AUTH_MODE=firebase` on the gateway for tester builds.
+- Keep `APP_CHECK_MODE=optional` until a native build has App Check tokens wired, then move it to `required` for production.
+- The gateway health endpoint no longer exposes the private Python AI backend URL.
+
 Create an internal EAS build:
 
 ```bash

@@ -203,6 +203,7 @@ export default function FriendsScreen() {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendProgress, setFriendProgress] = useState<Record<string, FriendProgress>>({});
   const [nudges, setNudges] = useState<Nudge[]>([]);
+  const [sentNudges, setSentNudges] = useState<Nudge[]>([]);
   const [challenges, setChallenges] = useState<FriendChallenge[]>([]);
   const [friendEmail, setFriendEmail] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
@@ -369,6 +370,31 @@ export default function FriendsScreen() {
   useEffect(() => {
     if (!uid) return;
 
+    const sentNudgesQuery = query(
+      collection(db, "accountabilityNudges"),
+      where("fromUid", "==", uid)
+    );
+
+    return onSnapshot(
+      sentNudgesQuery,
+      (snapshot) => {
+        setSentNudges(
+          snapshot.docs
+            .map((document) => ({
+              id: document.id,
+              ...document.data(),
+            })) as Nudge[]
+        );
+      },
+      () => {
+        setStatusMessage("Sent check-in limits need the latest Firestore rules.");
+      }
+    );
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+
     const challengesQuery = query(
       collection(db, "friendChallenges"),
       where("participantUids", "array-contains", uid)
@@ -511,6 +537,49 @@ export default function FriendsScreen() {
         ),
     [challenges]
   );
+
+  const sentNudgesTodayByFriend = useMemo(() => {
+    const counts: Record<string, number> = {};
+
+    sentNudges.forEach((nudge) => {
+      const createdDate =
+        typeof nudge.createdAt?.toDate === "function"
+          ? nudge.createdAt.toDate()
+          : nudge.createdAt
+            ? new Date(nudge.createdAt)
+            : new Date();
+      const dateKey = Number.isNaN(createdDate.getTime())
+        ? today
+        : formatDateKey(createdDate);
+
+      if (dateKey === today && nudge.toUid) {
+        counts[nudge.toUid] = (counts[nudge.toUid] ?? 0) + 1;
+      }
+    });
+
+    return counts;
+  }, [sentNudges, today]);
+
+  const accountabilityPulse = useMemo(() => {
+    const friendCount = friends.length;
+    const activeChallengeCount = activeChallenges.length;
+    const friendsWithProgress = friends.filter((friend) => friendProgress[friend.uid]).length;
+    const friendsNeedingNudge = friends.filter((friend) => {
+      const progress = friendProgress[friend.uid];
+      return progress && progress.open > 0 && (sentNudgesTodayByFriend[friend.uid] ?? 0) < 3;
+    }).length;
+
+    if (friendCount === 0) {
+      return "Add one friend to turn discipline into a shared loop.";
+    }
+    if (friendsNeedingNudge > 0) {
+      return `${friendsNeedingNudge} friend${friendsNeedingNudge === 1 ? "" : "s"} still have open tasks you can check on today.`;
+    }
+    if (activeChallengeCount > 0) {
+      return `${activeChallengeCount} active challenge${activeChallengeCount === 1 ? "" : "s"} running. Keep the pressure clean.`;
+    }
+    return `${friendsWithProgress}/${friendCount} friend${friendCount === 1 ? "" : "s"} shared progress today.`;
+  }, [activeChallenges.length, friends, friendProgress, sentNudgesTodayByFriend]);
 
   const getChallengeProgress = useCallback((challenge: FriendChallenge) => {
     const participantProgress = challenge.participantUids
@@ -761,6 +830,15 @@ export default function FriendsScreen() {
 
   const sendNudge = async (friend: FriendProfile, task?: SpotlightTask) => {
     if (!uid || !email || !myProfile) return;
+
+    const sentToday = sentNudgesTodayByFriend[friend.uid] ?? 0;
+    if (sentToday >= 3) {
+      setStatusMessage(
+        `You already sent ${sentToday} check-ins to ${getDisplayName(friend)} today. Keep nudges helpful, not noisy.`
+      );
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
 
     try {
       await addDoc(collection(db, "accountabilityNudges"), {
@@ -1049,6 +1127,33 @@ export default function FriendsScreen() {
           ))}
         </View>
       )}
+
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
+        <Text style={[styles.cardTitle, { color: colors.text }]}>Accountability Pulse</Text>
+        <Text style={[styles.cardText, { color: colors.subtle }]}>
+          {accountabilityPulse}
+        </Text>
+        <View style={styles.pulseGrid}>
+          <View style={[styles.pulseTile, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.pulseNumber, { color: colors.text }]}>
+              {friends.length}
+            </Text>
+            <Text style={[styles.pulseLabel, { color: colors.subtle }]}>Friends</Text>
+          </View>
+          <View style={[styles.pulseTile, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.pulseNumber, { color: colors.text }]}>
+              {activeChallenges.length}
+            </Text>
+            <Text style={[styles.pulseLabel, { color: colors.subtle }]}>Challenges</Text>
+          </View>
+          <View style={[styles.pulseTile, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.pulseNumber, { color: colors.text }]}>
+              {sentNudges.filter((nudge) => nudge.createdAt).length}
+            </Text>
+            <Text style={[styles.pulseLabel, { color: colors.subtle }]}>Check-ins</Text>
+          </View>
+        </View>
+      </View>
 
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint }]}>
         <Text style={[styles.cardTitle, { color: colors.text }]}>Friend Progress</Text>
@@ -1497,6 +1602,31 @@ const styles = StyleSheet.create({
   nudgeText: {
     fontSize: 12,
     fontWeight: "900",
+  },
+  nudgeButtonDisabled: {
+    opacity: 0.45,
+  },
+  pulseGrid: {
+    flexDirection: "row",
+    marginHorizontal: -4,
+    marginTop: 12,
+  },
+  pulseTile: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginHorizontal: 4,
+  },
+  pulseNumber: {
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  pulseLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+    textTransform: "uppercase",
   },
   challengeQuickRow: {
     flexDirection: "row",

@@ -49,6 +49,11 @@ service cloud.firestore {
         request.resource.data[field] is number;
     }
 
+    function optionalMap(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] is map;
+    }
+
     function validDateKey(value) {
       return value is string && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
     }
@@ -110,7 +115,8 @@ service cloud.firestore {
         validShortString(request.resource.data.message, 1000) &&
         optionalString("name", 120) &&
         optionalString("stack", 8000) &&
-        optionalString("appVersion", 40);
+        optionalString("appVersion", 40) &&
+        optionalMap("metadata");
     }
 
     function validPublicProfile(userId) {

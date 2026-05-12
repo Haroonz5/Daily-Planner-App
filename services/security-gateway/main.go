@@ -246,6 +246,9 @@ func parseCSV(value string) []string {
 
 func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		if origin := allowedOrigin(r.Header.Get("Origin"), allowedOrigins); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
@@ -276,17 +279,17 @@ func allowedOrigin(origin string, allowedOrigins []string) string {
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
-		"service":         "daily-discipline-security-gateway",
-		"auth_mode":       s.config.authMode,
-		"app_check_mode":  s.config.appCheckMode,
-		"rate_limit":      s.config.rateLimitPerMin,
-		"ai_rate_limit":   s.config.aiRateLimitPerMin,
-		"audit_db":        s.auditor.Enabled(),
-		"admin_dashboard": s.config.adminToken != "",
-		"ai_backend_url":  s.config.aiBackendURL,
-		"firebase_config": s.config.firebaseProjectID != "",
-		"allowed_origins": s.config.allowedOrigins,
+		"ok":                    true,
+		"service":               "daily-discipline-security-gateway",
+		"auth_mode":             s.config.authMode,
+		"app_check_mode":        s.config.appCheckMode,
+		"rate_limit":            s.config.rateLimitPerMin,
+		"ai_rate_limit":         s.config.aiRateLimitPerMin,
+		"audit_db":              s.auditor.Enabled(),
+		"admin_dashboard":       s.config.adminToken != "",
+		"ai_backend_configured": s.config.aiBackendURL != "",
+		"firebase_config":       s.config.firebaseProjectID != "",
+		"allowed_origins":       s.config.allowedOrigins,
 	})
 }
 
