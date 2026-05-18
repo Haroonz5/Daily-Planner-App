@@ -7,11 +7,13 @@ export type FeedbackPreferences = {
   calmFocusMusicEnabled?: boolean | null;
 };
 
-type AppSound = "taskComplete" | "petUnlock";
+type AppSound = "taskComplete" | "petUnlock" | "idleNudge" | "softConfirm";
 
 const soundSources: Record<AppSound, number> = {
   taskComplete: require("../assets/sounds/task-complete.wav"),
   petUnlock: require("../assets/sounds/pet-unlock.wav"),
+  idleNudge: require("../assets/sounds/pet-unlock.wav"),
+  softConfirm: require("../assets/sounds/task-complete.wav"),
 };
 
 const calmFocusLoop = require("../assets/sounds/calm-focus-loop.wav");
@@ -83,6 +85,43 @@ export const playSaveFeedback = async (preferences?: FeedbackPreferences) => {
   if (hapticsAllowed(preferences)) {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }
+};
+
+export const playTaskCreatedFeedback = async (
+  preferences?: FeedbackPreferences
+) => {
+  // This sits between a tiny settings save and a full completion celebration:
+  // adding a task should feel confirmed, but not as loud as finishing one.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    await Haptics.selectionAsync().catch(() => {});
+  }
+
+  await playAppSound("softConfirm", preferences, 0.3);
+};
+
+export const playAiPreviewFeedback = async (
+  preferences?: FeedbackPreferences
+) => {
+  // I added this for AI drafts so users get a small sensory cue that the plan is
+  // ready to review before it is actually saved.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.selectionAsync().catch(() => {});
+  }
+
+  await playAppSound("idleNudge", preferences, 0.2);
+};
+
+export const playIdleNudgeFeedback = async (
+  preferences?: FeedbackPreferences
+) => {
+  // A very quiet idle cue after a few untouched minutes. It respects Settings,
+  // so users can turn it off with the normal sound toggle.
+  if (hapticsAllowed(preferences)) {
+    await Haptics.selectionAsync().catch(() => {});
+  }
+
+  await playAppSound("idleNudge", preferences, 0.16);
 };
 
 export const playShareFeedback = async (preferences?: FeedbackPreferences) => {

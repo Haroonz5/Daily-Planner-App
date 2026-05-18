@@ -16,6 +16,7 @@ feedback, rewards, and accountability all live in the same loop.
 - Reality checks for overloaded schedules
 - AI rescheduling for missed tasks
 - AI backend health card with response time, model/fallback status, and timeout visibility
+- Feature flags for turning advanced tester/demo systems on or off without deleting code
 - Go security gateway for Firebase token checks, rate limits, proxying, audit logs, and an admin dashboard
 - Cloud Functions scaffold for widget summary refresh and ongoing routine refill
 - Offline-first task queue that stores task intent locally and syncs after reconnect
@@ -31,6 +32,7 @@ feedback, rewards, and accountability all live in the same loop.
 - Routine Manager with health score, streaks, pause, skip-next, edit, and cancel-all controls
 - XP rewards with unlockable companion pets and custom pet sprites
 - Focus Mode with Strict Focus app-switch strike tracking, haptics, sounds, and focus music
+- App-wide idle sound cue plus task-created, AI-preview, save, share, warning, and completion feedback
 - Accountability friends with usernames, nudges, progress sharing, watchlists, auto-completing challenges, and badge history
 - Stats dashboard with Discipline Score, weekly review, time-window analysis, and XP progress
 - Month calendar, next-7-days planner, native phone calendar export, and basic pull-sync from moved calendar events
@@ -95,6 +97,12 @@ plan-vs-reality data, task mix, AI weekly review, and next-week recommendations.
 
 Users unlock companion pets through XP, pick an active companion, rename pets,
 change habitats, and track bond progress.
+
+## Polish And QA
+
+Recent polish work added a feature-flag layer in `constants/featureFlags.ts`, app-wide idle feedback through `hooks/use-idle-feedback.ts`, and smoother Add Task save states so AI drafts, manual tasks, and breakdown steps confirm quickly without blocking reminder sync.
+
+`npm run qa` now runs TypeScript, core recurrence/time regression checks, and ESLint. The core checks specifically protect ongoing routines like `gym every day except Sunday` from turning back into huge batches of duplicate future tasks.
 
 ## AI System
 
@@ -212,6 +220,12 @@ Run app checks:
 
 ```bash
 npm run qa
+```
+
+Run the no-dependency core regression checks by themselves:
+
+```bash
+npm run test:core
 ```
 
 ## Firebase Setup

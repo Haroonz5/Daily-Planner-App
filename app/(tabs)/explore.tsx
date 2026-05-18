@@ -22,6 +22,7 @@ import {
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
 import { AppDropdown } from "@/components/app-dropdown";
+import { featureFlags } from "@/constants/featureFlags";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import {
@@ -55,8 +56,11 @@ import {
 import { ensureRollingRoutineTasks } from "../../utils/routines";
 import { enqueueOfflineTask } from "../../utils/offline-task-queue";
 import {
+  playAiPreviewFeedback,
   playSaveFeedback,
   playSelectionFeedback,
+  playTaskCreatedFeedback,
+  playWarningFeedback,
 } from "../../utils/feedback";
 import { auth, db } from "../../constants/firebaseConfig";
 
@@ -283,9 +287,13 @@ export default function AddTask() {
   const [breakdown, setBreakdown] = useState<TaskBreakdownResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [breakdownBusy, setBreakdownBusy] = useState(false);
+  const [savingTask, setSavingTask] = useState(false);
+  const [savingAiTasks, setSavingAiTasks] = useState(false);
+  const [savingBreakdownTasks, setSavingBreakdownTasks] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const aiInputRef = useRef<TextInput>(null);
+  const savingAnyTask = savingTask || savingAiTasks || savingBreakdownTasks;
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -534,6 +542,12 @@ export default function AddTask() {
   };
 
   const handleParseNaturalTasks = async () => {
+    if (!featureFlags.enableAiPlanner) {
+      setError("AI planning is turned off for this build. You can still add tasks manually.");
+      await playWarningFeedback(profile);
+      return;
+    }
+
     if (!naturalInput.trim()) {
       setError("Type a few tasks first, like: Gym at 6 PM, study at 8 PM.");
       return;
@@ -590,6 +604,8 @@ export default function AddTask() {
           check.totalMinutes > energyBudget.maxMinutes ||
           check.taskCount > energyBudget.maxTasks;
 
+        await playAiPreviewFeedback(profile);
+
         setRealityCheck(
           exceedsEnergy
             ? {
@@ -611,6 +627,7 @@ export default function AddTask() {
         );
       }
     } catch (e: any) {
+      await playWarningFeedback(profile);
       setError(e.message ?? "The AI planner could not read that yet.");
     } finally {
       setAiBusy(false);
@@ -779,13 +796,19 @@ export default function AddTask() {
   const handleAddBreakdownTasks = async () => {
     if (!breakdown || breakdown.steps.length === 0) {
       setError("Break the task into steps first.");
+      await playWarningFeedback(profile);
       return;
     }
+
+    setSavingBreakdownTasks(true);
+    setError("");
+    setSuccessMessage("");
 
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setError("You need to be logged in to add tasks.");
+        await playWarningFeedback(profile);
         return;
       }
 
@@ -848,6 +871,7 @@ export default function AddTask() {
       });
 
       await batch.commit();
+      await playTaskCreatedFeedback(profile);
       void syncCreatedTasksInBackground(uid, createdTasks);
 
       resetForm();
@@ -899,6 +923,7 @@ export default function AddTask() {
           }
         }
 
+        await playTaskCreatedFeedback(profile);
         setError("");
         setSuccessMessage(
           `${queuedCount} AI-planned task${queuedCount === 1 ? "" : "s"} saved offline. They will sync when the backend connection comes back.`
@@ -907,20 +932,29 @@ export default function AddTask() {
         return;
       }
 
+      await playWarningFeedback(profile);
       setError(getTaskSaveErrorMessage(e));
+    } finally {
+      setSavingBreakdownTasks(false);
     }
   };
 
   const handleAddParsedTasks = async () => {
     if (parsedTasks.length === 0) {
-      setError("Use Plan with AI first, then you can add the drafts.");
+      setError("Use Preview with AI first, then you can add the drafts.");
+      await playWarningFeedback(profile);
       return;
     }
+
+    setSavingAiTasks(true);
+    setError("");
+    setSuccessMessage("");
 
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setError("You need to be logged in to add tasks.");
+        await playWarningFeedback(profile);
         return;
       }
 
@@ -993,6 +1027,7 @@ export default function AddTask() {
       });
 
       await batch.commit();
+      await playTaskCreatedFeedback(profile);
 
       // I moved reminder/routine syncing into the background so pressing Add
       // feels instant even when the device has a lot of reminders to rebuild.
@@ -1037,6 +1072,7 @@ export default function AddTask() {
         }
 
         resetForm();
+        await playTaskCreatedFeedback(profile);
         setError("");
         setSuccessMessage(
           `${queuedCount} task${queuedCount === 1 ? "" : "s"} saved offline. They will sync automatically when connection is back.`
@@ -1045,20 +1081,29 @@ export default function AddTask() {
         return;
       }
 
+      await playWarningFeedback(profile);
       setError(getTaskSaveErrorMessage(e));
+    } finally {
+      setSavingAiTasks(false);
     }
   };
 
   const handleAddTask = async () => {
     if (!title.trim()) {
       setError("Please enter a task title");
+      await playWarningFeedback(profile);
       return;
     }
+
+    setSavingTask(true);
+    setError("");
+    setSuccessMessage("");
 
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setError("You need to be logged in to add a task.");
+        await playWarningFeedback(profile);
         return;
       }
 
@@ -1117,6 +1162,7 @@ export default function AddTask() {
       });
 
       await batch.commit();
+      await playTaskCreatedFeedback(profile);
       void syncCreatedTasksInBackground(uid, createdTasks);
 
       resetForm();
@@ -1130,7 +1176,10 @@ export default function AddTask() {
       setSuccessMessage(success);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
+      await playWarningFeedback(profile);
       setError(getTaskSaveErrorMessage(e));
+    } finally {
+      setSavingTask(false);
     }
   };
 
@@ -1144,6 +1193,8 @@ export default function AddTask() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.header}>
           <View style={styles.headerCopy}>
@@ -1435,10 +1486,14 @@ export default function AddTask() {
             <TouchableOpacity
               style={[styles.aiPrimaryButton, { backgroundColor: colors.tint }]}
               onPress={handleParseNaturalTasks}
-              disabled={aiBusy}
+              disabled={aiBusy || !featureFlags.enableAiPlanner}
             >
               <Text style={styles.aiPrimaryText}>
-                {aiBusy ? "Planning..." : "Preview with AI"}
+                {!featureFlags.enableAiPlanner
+                  ? "AI Off"
+                  : aiBusy
+                    ? "Planning..."
+                    : "Preview with AI"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1657,9 +1712,12 @@ export default function AddTask() {
                   },
                 ]}
                 onPress={handleAddParsedTasks}
+                disabled={savingAiTasks || aiBusy}
               >
                 <Text style={styles.aiPrimaryText}>
-                  {realityCheck?.severity === "overloaded"
+                  {savingAiTasks
+                    ? "Adding drafts..."
+                    : realityCheck?.severity === "overloaded"
                     ? "Add Draft Anyway"
                     : `Add ${aiDraftOccurrenceCount} Draft${aiDraftOccurrenceCount === 1 ? "" : "s"} to Tasks`}
                 </Text>
@@ -1837,10 +1895,12 @@ export default function AddTask() {
               <TouchableOpacity
                 style={[styles.breakdownAddButton, { backgroundColor: colors.tint }]}
                 onPress={handleAddBreakdownTasks}
+                disabled={savingBreakdownTasks}
               >
                 <Text style={styles.aiPrimaryText}>
-                  Add {breakdown.steps.length} Step
-                  {breakdown.steps.length === 1 ? "" : "s"} as Tasks
+                  {savingBreakdownTasks
+                    ? "Adding steps..."
+                    : `Add ${breakdown.steps.length} Step${breakdown.steps.length === 1 ? "" : "s"} as Tasks`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2152,23 +2212,45 @@ export default function AddTask() {
         )}
 
         {error ? (
-          <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>
+          <View
+            style={[
+              styles.statusCard,
+              { backgroundColor: colors.card, borderColor: colors.danger },
+            ]}
+          >
+            <Text style={[styles.statusTitle, { color: colors.danger }]}>Needs attention</Text>
+            <Text style={[styles.statusBody, { color: colors.text }]}>{error}</Text>
+          </View>
         ) : null}
 
         {successMessage ? (
-          <Text style={[styles.success, { color: colors.subtle }]}>
-            {successMessage}
-          </Text>
+          <View
+            style={[
+              styles.statusCard,
+              { backgroundColor: colors.card, borderColor: colors.success },
+            ]}
+          >
+            <Text style={[styles.statusTitle, { color: colors.success }]}>Saved</Text>
+            <Text style={[styles.statusBody, { color: colors.text }]}>
+              {successMessage}
+            </Text>
+          </View>
         ) : null}
 
         <TouchableOpacity
-          style={[styles.button, { backgroundColor: colors.tint }]}
+          style={[
+            styles.button,
+            { backgroundColor: colors.tint, opacity: savingTask ? 0.65 : 1 },
+          ]}
           onPress={handleAddTask}
+          disabled={savingTask || savingAnyTask}
         >
           <Text style={styles.buttonText}>
-            {recurrence === "none"
-              ? `Add Task for ${selectedDateLabel}`
-              : `Create ${recurringDates.length} Tasks`}
+            {savingTask
+              ? "Adding task..."
+              : recurrence === "none"
+                ? `Add Task for ${selectedDateLabel}`
+                : `Create ${recurringDates.length} Tasks`}
           </Text>
         </TouchableOpacity>
 
@@ -2180,6 +2262,9 @@ export default function AddTask() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollContent: {
+    paddingBottom: 24,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -2969,6 +3054,25 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  statusCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginHorizontal: 24,
+    marginBottom: 12,
+  },
+  statusTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    marginBottom: 5,
+    textTransform: "uppercase",
+  },
+  statusBody: {
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
   error: {
     marginBottom: 12,
     textAlign: "center",

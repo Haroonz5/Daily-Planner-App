@@ -20,6 +20,7 @@ import {
   hasSeenOnboarding,
   setStoredTheme,
 } from "@/constants/appTheme";
+import { featureFlags } from "@/constants/featureFlags";
 import { AppThemeName, Colors } from "@/constants/theme";
 import {
   configureTaskNotificationActions,
@@ -28,6 +29,8 @@ import {
 } from "../utils/notifications";
 import { getStartupQuote } from "../utils/discipline-quotes";
 import { getEmailVerificationSkipped } from "../utils/email-verification";
+import { useIdleFeedback } from "@/hooks/use-idle-feedback";
+import { useUserProfile } from "@/hooks/use-user-profile";
 import { reportAppError } from "../utils/error-reporting";
 import { flushOfflineTaskQueue } from "../utils/offline-task-queue";
 import { auth, db } from "../constants/firebaseConfig";
@@ -35,6 +38,7 @@ import { auth, db } from "../constants/firebaseConfig";
 export default function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const { profile } = useUserProfile();
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -299,6 +303,10 @@ export default function RootLayout() {
   };
 
   const startupQuote = getStartupQuote();
+  const markAppInteraction = useIdleFeedback(
+    profile,
+    Boolean(user) && featureFlags.enableIdleSounds
+  );
 
   if (loading || !themeLoaded || onboardingSeen === null) {
     return (
@@ -399,7 +407,7 @@ export default function RootLayout() {
         };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onTouchStart={markAppInteraction}>
       <AppThemeContext.Provider value={{ themeName, setThemeName }}>
         <ThemeProvider value={navigationTheme}>
           <ErrorBoundary>

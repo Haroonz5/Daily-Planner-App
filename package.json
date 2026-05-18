@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "qa": "npm run typecheck && npx eslint . --no-cache",
+    "qa": "npm run typecheck && npm run test:core && npx eslint . --no-cache",
     "qa:device": "npm run qa && npx expo install --check && npx expo config --type public",
     "security:check": "bash scripts/security-check.sh",
     "release:check": "npm run qa:device",
@@ -28,7 +28,8 @@
     "eas:preview": "eas build --profile preview --platform all",
     "eas:simulator": "eas build --profile simulator --platform ios",
     "eas:production": "eas build --profile production --platform all",
-    "eas:testflight": "eas build --profile production --platform ios"
+    "eas:testflight": "eas build --profile production --platform ios",
+    "test:core": "node scripts/test-core-logic.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
