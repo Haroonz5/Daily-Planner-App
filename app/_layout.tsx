@@ -7,7 +7,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -26,13 +26,16 @@ import {
   configureTaskNotificationActions,
   ensureBaseReminders,
   handleTaskNotificationResponse,
+  registerExpoPushTokenForUser,
 } from "../utils/notifications";
 import { getStartupQuote } from "../utils/discipline-quotes";
 import { getEmailVerificationSkipped } from "../utils/email-verification";
 import { useIdleFeedback } from "@/hooks/use-idle-feedback";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { reportAppError } from "../utils/error-reporting";
+import { logProductionAnalyticsEvent } from "../utils/analytics";
 import { flushOfflineTaskQueue } from "../utils/offline-task-queue";
+import { getOnboardingPersonalization, getPlanningRuleSeed } from "../utils/onboarding-personalization";
 import { auth, db } from "../constants/firebaseConfig";
 
 export default function RootLayout() {
@@ -197,6 +200,49 @@ export default function RootLayout() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) return;
+
+    registerExpoPushTokenForUser(user.uid).catch(() => {});
+    logProductionAnalyticsEvent("app_opened").catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || profile.onboardingPersonalizationApplied) return;
+
+    let active = true;
+
+    getOnboardingPersonalization()
+      .then((personalization) => {
+        if (!active) return;
+
+        // I apply the pre-login onboarding choices after Firebase auth exists,
+        // so the AI planner starts with useful rules on the user's first real session.
+        return setDoc(
+          doc(db, "users", user.uid),
+          {
+            planningGoal: personalization.planningGoal,
+            onboardingExperience: personalization.onboardingExperience,
+            planningRules: profile.planningRules || getPlanningRuleSeed(personalization),
+            weeklyFocusGoal:
+              profile.weeklyFocusGoal ||
+              (personalization.planningGoal === "fitness"
+                ? "Win the week with consistent training."
+                : personalization.planningGoal === "school"
+                  ? "Win the week by protecting study blocks."
+                  : "Win the week with one honest priority each day."),
+            onboardingPersonalizationApplied: true,
+          },
+          { merge: true }
+        );
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [profile.onboardingPersonalizationApplied, profile.planningRules, profile.weeklyFocusGoal, user]);
+
+  useEffect(() => {
     if (
       loading ||
       !themeLoaded ||
@@ -218,6 +264,9 @@ export default function RootLayout() {
     const inDemoMode = firstSegment === "demo-mode";
     const inWeeklyReport = firstSegment === "weekly-report";
     const inAiMemoryTimeline = firstSegment === "ai-memory-timeline";
+    const inAdminTesterDashboard = firstSegment === "admin-tester-dashboard";
+    const inCrashViewer = firstSegment === "crash-viewer";
+    const inPrivacy = firstSegment === "privacy";
     const inTutorial = firstSegment === "tutorial";
     const inVerifyEmail = firstSegment === "verify-email";
     const inOnboarding = firstSegment === "onboarding";
@@ -254,6 +303,9 @@ export default function RootLayout() {
         inDemoMode ||
         inWeeklyReport ||
         inAiMemoryTimeline ||
+        inAdminTesterDashboard ||
+        inCrashViewer ||
+        inPrivacy ||
         inTutorial ||
         inVerifyEmail)
     ) {
@@ -437,6 +489,9 @@ export default function RootLayout() {
               <Stack.Screen name="demo-mode" options={{ headerShown: false }} />
               <Stack.Screen name="weekly-report" options={{ headerShown: false }} />
               <Stack.Screen name="ai-memory-timeline" options={{ headerShown: false }} />
+              <Stack.Screen name="admin-tester-dashboard" options={{ headerShown: false }} />
+              <Stack.Screen name="crash-viewer" options={{ headerShown: false }} />
+              <Stack.Screen name="privacy" options={{ headerShown: false }} />
               <Stack.Screen name="modal" options={{ headerShown: false }} />
             </Stack>
           </ErrorBoundary>

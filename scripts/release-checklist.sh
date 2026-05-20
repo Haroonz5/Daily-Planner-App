@@ -5,31 +5,36 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT_DIR"
 
-echo "1/5 Expo, TypeScript, ESLint, dependency, and config checks"
+echo "1/6 Expo, TypeScript, ESLint, dependency, and config checks"
 npm run qa:device
 
-echo "2/5 Secret scan"
+echo "2/6 Secret scan"
 npm run security:check
 
-echo "3/5 Go security gateway tests"
+echo "3/6 Go security gateway tests"
 (
   cd services/security-gateway
   GOCACHE="${GOCACHE:-/tmp/daily-discipline-go-build-cache}" go test ./...
 )
 
-echo "4/5 Go stats service tests"
+echo "4/6 Go stats service tests"
 (
   cd services/stats-aggregator
   GOCACHE="${GOCACHE:-/tmp/daily-discipline-go-build-cache}" go test ./...
 )
 
-echo "5/5 Release notes"
+echo "5/6 Tester readiness check"
+node scripts/check-tester-readiness.js
+
+echo "6/6 Release notes"
 cat <<'NOTES'
 Release check passed.
 
 Next manual steps:
 - Deploy Firestore rules with: npm run deploy:rules
+- Set EXPO_PUBLIC_AI_API_URL as an EAS secret after hosting the Go gateway
+- Create an EAS preview build with: npm run tester:build
+- Cloud Functions are optional and require Firebase Blaze; do not block Spark/free tester builds on them
 - Confirm AI health in Settings on a real phone
-- Create an EAS preview build with: npm run eas:preview
 - For iOS TestFlight, build production with: npm run eas:testflight
 NOTES

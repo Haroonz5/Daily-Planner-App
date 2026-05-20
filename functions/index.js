@@ -1,10 +1,43 @@
 const admin = require("firebase-admin");
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 admin.initializeApp();
 
 const db = admin.firestore();
+
+
+const isExpoPushToken = (token) =>
+  typeof token === "string" &&
+  (token.startsWith("ExponentPushToken[") || token.startsWith("ExpoPushToken["));
+
+const sendExpoPush = async ({ token, title, body, data }) => {
+  if (!isExpoPushToken(token)) {
+    return { ok: false, reason: "missing-token" };
+  }
+
+  const response = await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip, deflate",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: token,
+      sound: "default",
+      title,
+      body,
+      data,
+    }),
+  });
+
+  if (!response.ok) {
+    return { ok: false, reason: `expo-${response.status}` };
+  }
+
+  return { ok: true, reason: "sent" };
+};
 
 const formatDateKey = (date) => {
   const year = date.getFullYear();
@@ -160,5 +193,43 @@ exports.refillRollingRoutines = onSchedule(
 
     if (created > 0) await batch.commit();
     console.log(`refillRollingRoutines created ${created} task(s).`);
+  }
+);
+
+
+exports.sendPushOnAccountabilityNudge = onDocumentCreated(
+  "accountabilityNudges/{nudgeId}",
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+
+    const nudge = snapshot.data();
+    if (!nudge?.toUid || !nudge?.fromUid) return;
+
+    const recipient = await db.collection("users").doc(nudge.toUid).get();
+    const recipientData = recipient.data() || {};
+    const token = recipientData.expoPushToken;
+
+    // I added this so friend nudges can become real push notifications in
+    // preview/production builds. The app still shows in-app nudges if push is
+    // unavailable, so accountability does not depend on a perfect device setup.
+    const result = await sendExpoPush({
+      token,
+      title: "Accountability check-in",
+      body:
+        nudge.message ||
+        `${nudge.fromName || nudge.fromUsername || "A friend"} sent you a discipline nudge.`,
+      data: {
+        type: "accountabilityNudge",
+        nudgeId: snapshot.id,
+        fromUid: nudge.fromUid,
+      },
+    }).catch((error) => ({ ok: false, reason: error?.message || "send-failed" }));
+
+    await snapshot.ref.update({
+      pushStatus: result.ok ? "sent" : "not-sent",
+      pushReason: result.reason,
+      pushAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
   }
 );

@@ -1,8 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 
 import { auth, db } from "../constants/firebaseConfig";
+import { formatDateKey } from "./task-helpers";
 
 export type NotificationTask = {
   id: string;
@@ -48,6 +50,7 @@ const TASK_NOTIFICATION_CATEGORY_ID = "dailyDisciplineTaskActions";
 const COMPLETE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineCompleteTask";
 const SNOOZE_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineSnoozeTask";
 const SKIP_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineSkipTask";
+const TOMORROW_TASK_NOTIFICATION_ACTION_ID = "dailyDisciplineTomorrowTask";
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   taskRemindersEnabled: true,
@@ -84,6 +87,14 @@ export const configureTaskNotificationActions = async () => {
       {
         identifier: SNOOZE_TASK_NOTIFICATION_ACTION_ID,
         buttonTitle: "Snooze 15m",
+        options: {
+          opensAppToForeground: false,
+          isAuthenticationRequired: false,
+        },
+      },
+      {
+        identifier: TOMORROW_TASK_NOTIFICATION_ACTION_ID,
+        buttonTitle: "Tomorrow",
         options: {
           opensAppToForeground: false,
           isAuthenticationRequired: false,
@@ -199,6 +210,52 @@ const snoozeTaskFromNotificationResponse = async (
   return true;
 };
 
+
+const moveTaskTomorrowFromNotificationResponse = async (
+  response: Notifications.NotificationResponse
+) => {
+  if (response.actionIdentifier !== TOMORROW_TASK_NOTIFICATION_ACTION_ID) {
+    return false;
+  }
+
+  const uid = auth.currentUser?.uid;
+  const taskId = getNotificationData(response.notification.request).taskId;
+  if (!uid || !taskId) return false;
+
+  const taskRef = doc(db, "users", uid, "tasks", taskId);
+  const taskSnapshot = await getDoc(taskRef).catch(() => null);
+  const task = taskSnapshot?.data() as NotificationTask | undefined;
+  if (!task) return false;
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const nextDate = formatDateKey(tomorrow);
+
+  await updateDoc(taskRef, {
+    date: nextDate,
+    completed: false,
+    status: "pending",
+    lastActionAt: new Date(),
+    movedFromNotification: true,
+  });
+
+  await syncTaskNotifications({
+    id: taskId,
+    title: task.title,
+    time: task.time,
+    date: nextDate,
+    priority: task.priority,
+    completed: false,
+    status: "pending",
+  }).catch(() => {});
+  await syncMorningSummaryNotification(uid).catch(() => {});
+  await Notifications.dismissNotificationAsync(
+    response.notification.request.identifier
+  ).catch(() => {});
+
+  return true;
+};
+
 const skipTaskFromNotificationResponse = async (
   response: Notifications.NotificationResponse
 ) => {
@@ -235,6 +292,7 @@ export const handleTaskNotificationResponse = async (
 ) =>
   (await completeTaskFromNotificationResponse(response)) ||
   (await snoozeTaskFromNotificationResponse(response)) ||
+  (await moveTaskTomorrowFromNotificationResponse(response)) ||
   (await skipTaskFromNotificationResponse(response));
 
 const getNotificationAuditKey = (request: Notifications.NotificationRequest) => {
@@ -379,6 +437,34 @@ export const ensureNotificationPermissions = async () => {
 
   const requested = await Notifications.requestPermissionsAsync();
   return requested.granted;
+};
+
+export const registerExpoPushTokenForUser = async (uid: string) => {
+  const granted = await ensureNotificationPermissions();
+  if (!granted) return null;
+
+  const projectId =
+    (Constants.easConfig as { projectId?: string } | null)?.projectId ??
+    (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)
+      ?.eas?.projectId;
+
+  const token = await Notifications.getExpoPushTokenAsync(
+    projectId ? { projectId } : undefined
+  ).catch(() => null);
+  if (!token?.data) return null;
+
+  // I store only the latest Expo push token on the private user profile. The
+  // Cloud Function reads this when a friend sends an accountability nudge.
+  await setDoc(
+    doc(db, "users", uid),
+    {
+      expoPushToken: token.data,
+      expoPushTokenUpdatedAt: new Date(),
+    },
+    { merge: true }
+  ).catch(() => {});
+
+  return token.data;
 };
 
 export const ensureBaseReminders = async () => {

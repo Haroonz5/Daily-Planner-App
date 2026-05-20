@@ -37,7 +37,13 @@ Run these before sharing:
 npm run qa
 ```
 
-Run the stronger device-readiness check:
+Run the tester-safe readiness check. This does not require Docker or Firebase Blaze:
+
+```bash
+npm run tester:check
+```
+
+Run the stronger full release check when you want the extra device/config checks:
 
 ```bash
 npm run release:check
@@ -54,7 +60,7 @@ Create an internal tester build:
 
 ```bash
 npx eas-cli@latest login
-npx eas-cli@latest build --profile preview --platform all
+npm run tester:build
 ```
 
 If the AI/security stack is deployed, point the app at the Go security gateway before building. Do not use your laptop IP for friend testers:
@@ -63,7 +69,9 @@ If the AI/security stack is deployed, point the app at the Go security gateway b
 npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-security-gateway-url
 ```
 
-The Python AI URL and Gemini/OpenAI keys stay on the backend host. The phone app should only know the public gateway URL.
+The Python AI URL and Gemini/OpenAI keys stay on the backend host. The phone app should only know the public gateway URL. If you have not hosted the backend yet, the app still works with the built-in offline planner; Settings will show the AI backend as offline.
+
+Cloud Functions note: Firebase Functions require the Blaze plan. `npm run functions:deploy` safely skips on Spark/free testing. Friend nudges still appear in-app without Functions; only server push nudge delivery waits for `npm run functions:deploy:blaze`.
 
 
 ## Account And Privacy Checks
@@ -87,7 +95,7 @@ The Python AI URL and Gemini/OpenAI keys stay on the backend host. The phone app
 - High-priority tasks ask for a quick honesty/proof note before completion.
 - Week Planner shows a calendar-style future view and can open tasks in Google Calendar.
 - Settings > Reminder Health shows scheduled reminders and duplicate status.
-- Task notifications expose Complete and Snooze 15m actions in a development or preview build.
+- Task notifications expose Complete, Snooze 15m, Tomorrow, and Skip actions in a development or preview build.
 - New-user tutorial saves the user goal and tunes energy mode.
 - Settings > Tester Feedback saves feedback successfully.
 - Settings > Tester Data Controls can reset test data without deleting the login.

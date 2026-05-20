@@ -36,7 +36,10 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps, keyboardScrollViewProps } from "@/utils/keyboard";
+
 import { AppDropdown } from "@/components/app-dropdown";
+import { KeyboardDoneAccessory } from "@/components/keyboard-done-accessory";
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { PetSprite } from "@/components/pet-sprite";
 import {
@@ -51,6 +54,7 @@ import {
 } from "@/constants/rewards";
 import { Colors, ThemeLabels } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
+import { logProductionAnalyticsEvent } from "@/utils/analytics";
 import { getEmailValidationError } from "@/utils/email-validation";
 import {
   formatDateKey,
@@ -888,10 +892,16 @@ export default function SettingsScreen({
 
     try {
       const result = await exportTasksToCalendar(tasks, 30, { uid });
+      await logProductionAnalyticsEvent("calendar_sync", {
+        mode: "push",
+        created: result.created,
+        updated: result.updated,
+        deleted: result.deleted,
+      });
       await playSaveFeedback(profile);
       setStatusTone("success");
       setStatusMessage(
-        `${result.created} task${result.created === 1 ? "" : "s"} exported to ${result.calendarTitle}. ${result.skipped} completed, skipped, old, or duplicate task${result.skipped === 1 ? " was" : "s were"} ignored.`
+        `${result.created} created, ${result.updated} updated, and ${result.deleted} completed/skipped event${result.deleted === 1 ? "" : "s"} cleaned from ${result.calendarTitle}. ${result.skipped} old or duplicate task${result.skipped === 1 ? " was" : "s were"} ignored.`
       );
     } catch (error) {
       await playWarningFeedback(profile);
@@ -914,6 +924,12 @@ export default function SettingsScreen({
 
     try {
       const result = await syncCalendarChangesToTasks(uid, tasks);
+      await logProductionAnalyticsEvent("calendar_sync", {
+        mode: "pull",
+        checked: result.checked,
+        updated: result.updated,
+        missing: result.missing,
+      });
       await playSelectionFeedback(profile);
       setStatusTone("success");
       setStatusMessage(
@@ -1666,6 +1682,7 @@ export default function SettingsScreen({
 
   return (
     <ScrollView
+      {...keyboardScrollViewProps}
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
@@ -1883,7 +1900,10 @@ export default function SettingsScreen({
         <View style={styles.inlineActionRow}>
           {[
             { label: "Demo Mode", route: "/demo-mode" },
+            { label: "Tester Dashboard", route: "/admin-tester-dashboard" },
             { label: "Admin Analytics", route: "/admin-analytics" },
+            { label: "Crash Viewer", route: "/crash-viewer" },
+            { label: "Privacy", route: "/privacy" },
             { label: "AI Memory", route: "/ai-memory-timeline" },
             { label: "Weekly Report", route: "/weekly-report" },
           ].map((item) => (
@@ -1912,12 +1932,12 @@ export default function SettingsScreen({
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
-          Calendar, Widgets & Lock Screen
+          Calendar Sync, Widgets & Lock Screen
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
           The app now writes richer widget summary data, supports Complete,
           Snooze, and Skip actions from task notifications, and can export the
-          next month of active tasks to your phone calendar.
+          next month of active tasks to your phone calendar. Existing exported events now update instead of duplicating, and completed/skipped tasks can be cleaned from the calendar.
         </Text>
 
         <View
@@ -1954,7 +1974,7 @@ export default function SettingsScreen({
               accessibilityLabel="Export next thirty days of active tasks to calendar"
             >
               <Text style={styles.inlineActionText}>
-                {calendarBusy ? "Exporting..." : "Export 30 Days"}
+                {calendarBusy ? "Syncing..." : "Sync 30 Days"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -2063,6 +2083,7 @@ export default function SettingsScreen({
             New Email
           </Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {
@@ -2168,6 +2189,7 @@ export default function SettingsScreen({
                 </Text>
               ) : null}
               <TextInput
+                {...doneKeyboardProps}
                 style={[
                   styles.input,
                   {
@@ -2183,6 +2205,11 @@ export default function SettingsScreen({
                 onChangeText={setTotpCode}
                 keyboardType="number-pad"
                 maxLength={8}
+                inputAccessoryViewID="settings-totp-code-keyboard"
+              />
+              <KeyboardDoneAccessory
+                nativeID="settings-totp-code-keyboard"
+                colors={colors}
               />
               <TouchableOpacity
                 style={[styles.primaryButton, { backgroundColor: colors.tint }]}
@@ -2249,6 +2276,7 @@ export default function SettingsScreen({
           Your Name
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {
@@ -2267,6 +2295,7 @@ export default function SettingsScreen({
           Username
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {
@@ -2290,6 +2319,7 @@ export default function SettingsScreen({
           AI Planning Rules
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             styles.largeTextInput,
@@ -2313,6 +2343,7 @@ export default function SettingsScreen({
           Weekly Focus Goal
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {
@@ -2334,6 +2365,7 @@ export default function SettingsScreen({
           Companion Nickname
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {
@@ -3122,6 +3154,7 @@ export default function SettingsScreen({
         />
 
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.feedbackInput,
             {
@@ -3352,7 +3385,8 @@ export default function SettingsScreen({
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>
           Recurring tasks support editing or deleting this task only, or this
-          task and future repeats.
+          task and future repeats. Privacy controls include analytics and
+          diagnostic opt-outs for tester builds.
         </Text>
       </View>
 
@@ -3380,6 +3414,7 @@ export default function SettingsScreen({
             </Text>
 
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 {
@@ -3394,6 +3429,7 @@ export default function SettingsScreen({
               onChangeText={setEditRoutineTitle}
             />
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 {

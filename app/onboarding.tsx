@@ -12,6 +12,7 @@ import { AmbientBackground } from "@/components/ambient-background";
 import { PetSprite } from "@/components/pet-sprite";
 import { markOnboardingSeen, useAppTheme } from "@/constants/appTheme";
 import type { PetKey } from "@/constants/rewards";
+import { saveOnboardingPersonalization, type OnboardingExperience, type OnboardingPlanningGoal } from "@/utils/onboarding-personalization";
 import { Colors } from "@/constants/theme";
 
 type OnboardingSlide = {
@@ -22,6 +23,20 @@ type OnboardingSlide = {
   petKey?: PetKey;
   bullets: string[];
 };
+
+const goalOptions: { label: string; value: OnboardingPlanningGoal }[] = [
+  { label: "School", value: "school" },
+  { label: "Fitness", value: "fitness" },
+  { label: "Work", value: "work" },
+  { label: "Discipline", value: "discipline" },
+  { label: "Wellness", value: "wellness" },
+];
+
+const experienceOptions: { label: string; value: OnboardingExperience }[] = [
+  { label: "Beginner", value: "beginner" },
+  { label: "Steady", value: "steady" },
+  { label: "Intense", value: "intense" },
+];
 
 const slides: OnboardingSlide[] = [
   {
@@ -72,6 +87,8 @@ export default function OnboardingScreen() {
   const { themeName } = useAppTheme();
   const colors = Colors[themeName];
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [planningGoal, setPlanningGoal] = useState<OnboardingPlanningGoal>("discipline");
+  const [onboardingExperience, setOnboardingExperience] = useState<OnboardingExperience>("steady");
 
   const isLastSlide = currentSlide === slides.length - 1;
   const slide = slides[currentSlide];
@@ -82,11 +99,13 @@ export default function OnboardingScreen() {
       return;
     }
 
+    await saveOnboardingPersonalization({ planningGoal, onboardingExperience });
     await markOnboardingSeen();
     router.replace("/login");
   };
 
   const handleSkip = async () => {
+    await saveOnboardingPersonalization({ planningGoal, onboardingExperience });
     await markOnboardingSeen();
     router.replace("/login");
   };
@@ -143,6 +162,53 @@ export default function OnboardingScreen() {
             ))}
           </View>
         </View>
+
+
+        {isLastSlide && (
+          <View
+            style={[
+              styles.personalizationCard,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.personalizationTitle, { color: colors.text }]}>Personalize your first week</Text>
+            <Text style={[styles.personalizationText, { color: colors.subtle }]}>These choices become your first AI planning rules after signup.</Text>
+            <Text style={[styles.optionLabel, { color: colors.subtle }]}>Main goal</Text>
+            <View style={styles.optionGrid}>
+              {goalOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.optionPill,
+                    { backgroundColor: planningGoal === option.value ? colors.tint : colors.card, borderColor: colors.border },
+                  ]}
+                  onPress={() => setPlanningGoal(option.value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choose ${option.label} goal`}
+                >
+                  <Text style={[styles.optionText, { color: planningGoal === option.value ? "#fff" : colors.text }]}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[styles.optionLabel, { color: colors.subtle }]}>Planning intensity</Text>
+            <View style={styles.optionGrid}>
+              {experienceOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.optionPill,
+                    { backgroundColor: onboardingExperience === option.value ? colors.tint : colors.card, borderColor: colors.border },
+                  ]}
+                  onPress={() => setOnboardingExperience(option.value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choose ${option.label} planning intensity`}
+                >
+                  <Text style={[styles.optionText, { color: onboardingExperience === option.value ? "#fff" : colors.text }]}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
 
         <View style={styles.dotsRow}>
           {slides.map((_, index) => (
@@ -262,6 +328,47 @@ const styles = StyleSheet.create({
   bulletText: {
     fontSize: 12,
     fontWeight: "800",
+  },
+  personalizationCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+    marginTop: 18,
+  },
+  personalizationTitle: {
+    fontSize: 17,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  personalizationText: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  optionLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  optionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+  },
+  optionPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 4,
+    marginBottom: 8,
+  },
+  optionText: {
+    fontSize: 12,
+    fontWeight: "900",
   },
   dotsRow: {
     flexDirection: "row",

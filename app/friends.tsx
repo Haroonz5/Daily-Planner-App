@@ -22,10 +22,13 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps, keyboardScrollViewProps } from "@/utils/keyboard";
+
 import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import { auth, db } from "@/constants/firebaseConfig";
+import { logProductionAnalyticsEvent } from "@/utils/analytics";
 import { formatDateKey } from "@/utils/task-helpers";
 import {
   formatUsername,
@@ -858,10 +861,14 @@ export default function FriendsScreen() {
         createdAt: new Date(),
       });
 
+      await logProductionAnalyticsEvent("friend_nudge_sent", {
+        toUid: friend.uid,
+        taskSpecific: Boolean(task),
+      });
       setStatusMessage(
         task
-          ? `Task check-in sent to ${getDisplayName(friend)}.`
-          : `Check-in sent to ${getDisplayName(friend)}.`
+          ? `Task check-in sent to ${getDisplayName(friend)}. If they have push enabled, it will ping their phone too.`
+          : `Check-in sent to ${getDisplayName(friend)}. If they have push enabled, it will ping their phone too.`
       );
       await Haptics.selectionAsync();
     } catch {
@@ -928,6 +935,7 @@ export default function FriendsScreen() {
 
   return (
     <ScrollView
+      {...keyboardScrollViewProps}
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
@@ -1069,6 +1077,7 @@ export default function FriendsScreen() {
           Search by username so emails stay private.
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {

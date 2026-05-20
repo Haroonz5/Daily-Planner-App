@@ -22,6 +22,8 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps, keyboardScrollViewProps } from "@/utils/keyboard";
+
 import { themeOptions, useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
 import { AppDropdown } from "@/components/app-dropdown";
@@ -2071,9 +2073,9 @@ export default function HomeScreen() {
         )}
 
         <ScrollView
+          {...keyboardScrollViewProps}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
           scrollEventThrottle={16}
         >
@@ -3262,6 +3264,7 @@ export default function HomeScreen() {
             </Text>
 
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 {
@@ -3277,6 +3280,7 @@ export default function HomeScreen() {
             />
 
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 {
@@ -3292,6 +3296,7 @@ export default function HomeScreen() {
             />
 
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 styles.notesInput,
@@ -3795,6 +3800,7 @@ export default function HomeScreen() {
             </Text>
 
             <TextInput
+              {...doneKeyboardProps}
               style={[
                 styles.modalInput,
                 styles.notesInput,

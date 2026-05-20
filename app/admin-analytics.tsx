@@ -2,6 +2,8 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+import { doneKeyboardProps, keyboardScrollViewProps } from "@/utils/keyboard";
+
 import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
@@ -59,7 +61,11 @@ export default function AdminAnalyticsScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+    <ScrollView
+      {...keyboardScrollViewProps}
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+    >
       <AmbientBackground colors={colors} variant="focus" />
       <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back">
         <Text style={[styles.back, { color: colors.tint }]}>Back</Text>
@@ -72,6 +78,7 @@ export default function AdminAnalyticsScreen() {
       </View>
 
       <TextInput
+        {...doneKeyboardProps}
         style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
         placeholder="Admin dashboard token"
         placeholderTextColor={colors.subtle}

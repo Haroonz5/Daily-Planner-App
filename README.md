@@ -24,6 +24,15 @@ feedback, rewards, and accountability all live in the same loop.
 - Demo Mode for seeding a realistic portfolio/tester account in one tap
 - Admin analytics dashboard for audit logs, failures, rate limits, latency, and completion-by-time data
 - Weekly discipline report card designed for sharing or screenshot export
+- Real daily and weekly report export as shareable SVG image cards and lightweight PDF files
+- Hosted backend deployment blueprint for Render with Python AI, Go gateway, Go stats service, and Postgres
+- Push notification friend nudges through Firebase Cloud Functions and Expo push tokens
+- Admin tester dashboard for task, feedback, diagnostics, analytics, and backend health signals
+- Crash/error viewer for tester diagnostics without needing a native crash SDK yet
+- Production privacy page with analytics and crash-reporting opt-outs
+- Calendar sync now creates, updates, pulls, and cleans exported task events
+- Notification actions support Complete, Snooze, Tomorrow, and Skip from lock-screen reminders
+- Personalized onboarding stores first-week goal and planning intensity for AI rules after signup
 - AI coach memory timeline that summarizes when the user performs best and where friction appears
 - Smart accountability contracts for friends who want higher-trust discipline checks
 - Cloud Functions scaffold for widget summary refresh and ongoing routine refill
@@ -119,6 +128,17 @@ Recent polish work added a feature-flag layer in `constants/featureFlags.ts`, ap
 
 `npm run qa` now runs TypeScript, core recurrence/time regression checks, and ESLint. The core checks specifically protect ongoing routines like `gym every day except Sunday` from turning back into huge batches of duplicate future tasks.
 
+## Report Export
+
+Daily and weekly summaries can now leave the app as more than plain text:
+
+- `Share Text` uses the native share sheet with a compact text recap.
+- `Export Image` writes a shareable SVG card to the local cache and opens the share sheet.
+- `Export PDF` writes a lightweight PDF report to the local cache and opens the share sheet.
+
+The export helper lives in `utils/report-export.ts`, so the same system can power
+future Instagram-style cards, accountability receipts, or weekly email reports.
+
 ## AI System
 
 The AI backend lives in `ai/` and exposes a FastAPI service. The mobile app only
@@ -183,6 +203,9 @@ my-app/
     weekly-report.tsx  # Weekly report card and share text
     ai-memory-timeline.tsx # AI coach memory timeline
     admin-analytics.tsx # Gateway/admin analytics dashboard
+    admin-tester-dashboard.tsx # Tester build health dashboard
+    crash-viewer.tsx   # In-app diagnostic/error viewer
+    privacy.tsx        # Privacy, analytics, and AI data controls
     demo-mode.tsx      # Seedable demo account tools
     week.tsx           # Calendar and future planner
     settings.tsx       # Full settings screen
@@ -226,6 +249,28 @@ my-app/
   render.yaml
 ```
 
+## Tester-Safe Deployment
+
+For sharing the app on someone else's phone, do not depend on your laptop or Cloud Functions. Use this path:
+
+```bash
+npm run deploy:rules
+npm run tester:check
+npm run tester:build
+```
+
+Required for tester builds:
+
+- Firestore rules deployed with `npm run deploy:rules`.
+- EAS preview build installed on the tester phone.
+- Optional hosted Go security gateway set through `EXPO_PUBLIC_AI_API_URL`.
+
+Optional / Blaze-only:
+
+- `npm run functions:deploy` now safely skips on Spark/free Firebase and explains why. After upgrading to Blaze, use `npm run functions:deploy:blaze` for server push nudges and routine refill functions.
+
+The preview and production EAS profiles set `EXPO_PUBLIC_REQUIRE_SECURE_AI=true`, so real tester builds will not silently call your laptop localhost/LAN backend. If no hosted gateway is configured, AI features use the built-in local fallback instead of freezing.
+
 ## Local Setup
 
 Install dependencies:
@@ -262,6 +307,25 @@ Validate the E2E smoke flow used by CI:
 
 ```bash
 npm run e2e:validate
+```
+
+## Hosted Backend Deployment
+
+The repo includes a production-shaped hosting path:
+
+- `render.yaml` defines the Python AI backend, Go security gateway, Go stats aggregator, and Postgres audit database.
+- `docs/HOSTED_BACKEND_DEPLOYMENT.md` explains the full setup and EAS environment variables.
+- Tester builds should point `EXPO_PUBLIC_AI_API_URL` at the hosted Go gateway, not a laptop IP.
+
+```bash
+npm run tester:build
+```
+
+For local Docker testing:
+
+```bash
+npm run stack:up
+EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8020 npx expo start -c
 ```
 
 ## Docker Compose Full Stack
@@ -443,6 +507,7 @@ The `functions/` folder adds production-style Firebase automation:
 
 - `updateWidgetSummaryOnTaskWrite` keeps `widgetSummary/today` fresh after task changes.
 - `refillRollingRoutines` creates the next occurrence for ongoing routines each night.
+- `sendPushOnAccountabilityNudge` sends Expo push notifications when friends send accountability nudges.
 
 Check syntax:
 
@@ -468,6 +533,18 @@ npm run ops:deploy:ai
 GitHub Actions checks TypeScript, core recurrence logic, E2E flow syntax, ESLint,
 the security script, npm audit, Python backend syntax, the AI planner evaluation
 suite, Go services, and Docker Compose configuration.
+
+## Production Analytics And Privacy
+
+Daily Discipline now has a small production analytics layer:
+
+- Owner-scoped analytics events are written under each user's `analyticsEvents`.
+- Task analytics can be sent to the backend SQL endpoint for completion-by-time analysis.
+- Settings links to Privacy, Crash Viewer, Admin Tester Dashboard, and Admin Analytics.
+- Users can opt out of product analytics and crash/error reporting from the Privacy screen.
+
+This keeps the app useful for tester data while making the privacy story clear
+for reviewers, friends, and interviewers.
 
 ## API Key Safety
 
@@ -513,7 +590,7 @@ npm run ai:dev
 npm run deploy:rules
 npm run functions:check
 npm run functions:deploy
-npm run eas:preview
+npm run tester:build
 npm run eas:simulator
 npm run eas:production
 npm run eas:testflight
@@ -568,7 +645,7 @@ Useful tester docs:
 - Expo Go does not fully support production notification behavior. Use a development or preview build for realistic notification testing.
 - Strict Focus tracks app switching in Expo Go, but true app blocking needs native Screen Time / FamilyControls or Android focus integrations.
 - Home-screen widgets require native widget UI in a custom build, but widget-ready summary data is already written to Firestore.
-- Weekly reports are currently share-text and screenshot-card friendly; native PDF/image export can be added with `expo-print` or a view-capture package.
+- Report exports use local SVG/PDF files without extra native dependencies; a later pass can add view capture for exact pixel screenshots.
 - Friend features require deployed Firestore rules.
 
 ## Roadmap Ideas

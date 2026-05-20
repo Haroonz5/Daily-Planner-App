@@ -19,6 +19,8 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps } from "@/utils/keyboard";
+
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
 import { AppDropdown } from "@/components/app-dropdown";
@@ -1440,6 +1442,7 @@ export default function AddTask() {
           </View>
 
           <TextInput
+            {...doneKeyboardProps}
             ref={aiInputRef}
             style={[
               styles.aiInput,
@@ -1727,6 +1730,7 @@ export default function AddTask() {
         </View>
 
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             {
@@ -1742,6 +1746,7 @@ export default function AddTask() {
         />
 
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.input,
             styles.notesInput,

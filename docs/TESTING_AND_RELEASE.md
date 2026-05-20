@@ -49,16 +49,18 @@ preview, or production build.
 Before sending a tester build:
 
 ```bash
-npm run qa:device
+npm run tester:check
 npm run deploy:rules
 ```
+
+Cloud Functions are optional. `npm run functions:deploy` safely skips on Spark/free Firebase. Only run `npm run functions:deploy:blaze` after upgrading Firebase to Blaze.
 
 Also walk through `docs/PRODUCTION_CHECKLIST.md` before widening the tester
 group.
 
 Then confirm:
 
-- A task reminder appears once and shows Complete, Snooze, and Skip actions.
+- A task reminder appears once and shows Complete, Snooze, Tomorrow, and Skip actions.
 - Tapping Complete from the notification marks the task complete in the app.
 - Tapping Skip from the notification keeps the task in history as skipped.
 - Settings can export the next 30 days of active tasks to the phone calendar.
@@ -124,7 +126,7 @@ npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL -
 Internal tester build:
 
 ```bash
-npx eas-cli@latest build --profile preview --platform all
+npm run tester:build
 ```
 
 iOS simulator build:

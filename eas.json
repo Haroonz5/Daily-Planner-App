@@ -6,22 +6,34 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_REQUIRE_SECURE_AI": "false"
+      }
     },
     "simulator": {
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_REQUIRE_SECURE_AI": "false"
       }
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_REQUIRE_SECURE_AI": "true"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_REQUIRE_SECURE_AI": "true"
+      }
     }
   },
   "submit": {

@@ -1,5 +1,5 @@
 import * as Calendar from "expo-calendar";
-import { doc, updateDoc } from "firebase/firestore";
+import { deleteField, doc, updateDoc } from "firebase/firestore";
 import { Linking, Platform } from "react-native";
 
 import { db } from "@/constants/firebaseConfig";
@@ -24,6 +24,8 @@ export type CalendarExportTask = {
 
 type CalendarExportResult = {
   created: number;
+  updated: number;
+  deleted: number;
   skipped: number;
   calendarTitle: string;
 };
@@ -123,19 +125,34 @@ export const exportTasksToCalendar = async (
   const lastDate = addMinutes(today, daysAhead * 24 * 60);
 
   let created = 0;
+  let updated = 0;
+  let deleted = 0;
   let skipped = 0;
   const exportedIds = new Set<string>();
 
   for (const task of tasks) {
     const startDate = parseTaskDateTime(task.date, task.time);
+    const inactive =
+      task.completed || task.status === "completed" || task.status === "skipped";
+
+    if (task.calendarEventId && inactive) {
+      await Calendar.deleteEventAsync(task.calendarEventId).catch(() => {});
+      if (options?.uid) {
+        await updateDoc(doc(db, "users", options.uid, "tasks", task.id), {
+          calendarEventId: deleteField(),
+          calendarId: deleteField(),
+          calendarSyncedAt: new Date(),
+        }).catch(() => {});
+      }
+      deleted += 1;
+      continue;
+    }
+
     if (
       !startDate ||
       startDate < today ||
       startDate > lastDate ||
-      task.completed ||
-      task.status === "completed" ||
-      task.status === "skipped" ||
-      task.calendarEventId ||
+      inactive ||
       exportedIds.has(`${task.id}-${task.date}-${task.time}`)
     ) {
       skipped += 1;
@@ -143,18 +160,37 @@ export const exportTasksToCalendar = async (
     }
 
     exportedIds.add(`${task.id}-${task.date}-${task.time}`);
-
-    // I export each active task as a normal phone calendar event so testers can
-    // verify the app connects with the device calendar without changing the
-    // Firestore task itself.
-    const eventId = await Calendar.createEventAsync(calendarId, {
+    const eventDetails = {
       title: task.title,
       notes: `Daily Discipline task${task.priority ? ` - ${task.priority} priority` : ""}`,
       startDate,
       endDate: addMinutes(startDate, 30),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       alarms: [{ relativeOffset: -10 }],
-    });
+    };
+
+    if (task.calendarEventId) {
+      // I update existing exported events instead of creating duplicates. This
+      // makes Calendar Sync feel like a real two-way integration, not a one-time
+      // dump into the phone calendar.
+      await Calendar.updateEventAsync(task.calendarEventId, eventDetails).catch(
+        async () => {
+          const replacementId = await Calendar.createEventAsync(calendarId, eventDetails);
+          if (options?.uid) {
+            await updateDoc(doc(db, "users", options.uid, "tasks", task.id), {
+              calendarEventId: replacementId,
+              calendarId,
+              calendarSyncedAt: new Date(),
+            }).catch(() => {});
+          }
+          created += 1;
+        }
+      );
+      updated += 1;
+      continue;
+    }
+
+    const eventId = await Calendar.createEventAsync(calendarId, eventDetails);
 
     if (options?.uid) {
       await updateDoc(doc(db, "users", options.uid, "tasks", task.id), {
@@ -168,6 +204,8 @@ export const exportTasksToCalendar = async (
 
   return {
     created,
+    updated,
+    deleted,
     skipped,
     calendarTitle: DAILY_DISCIPLINE_CALENDAR_TITLE,
   };

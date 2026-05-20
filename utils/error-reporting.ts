@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import { addDoc, collection } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 
 import { auth, db } from "@/constants/firebaseConfig";
 
@@ -35,6 +35,9 @@ export const reportAppError = async ({
 }: ReportAppErrorInput) => {
   const user = auth.currentUser;
   if (!user) return;
+
+  const profile = await getDoc(doc(db, "users", user.uid)).catch(() => null);
+  if (profile?.data()?.crashReportingOptOut === true) return;
 
   const normalized = normalizeError(error);
 

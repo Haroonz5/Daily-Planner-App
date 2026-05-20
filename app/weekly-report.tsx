@@ -7,7 +7,9 @@ import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import { auth, db } from "@/constants/firebaseConfig";
-import { playShareFeedback } from "@/utils/feedback";
+import { playShareFeedback, playWarningFeedback } from "@/utils/feedback";
+import { logProductionAnalyticsEvent } from "@/utils/analytics";
+import { exportReportAsPdf, exportReportAsSvgImage, type ReportExportPayload } from "@/utils/report-export";
 import { buildWeeklyReport, formatWeeklyReportForShare, type WeeklyReportTask } from "@/utils/weekly-report";
 import { useUserProfile } from "@/hooks/use-user-profile";
 
@@ -29,9 +31,53 @@ export default function WeeklyReportScreen() {
 
   const report = useMemo(() => buildWeeklyReport(tasks), [tasks]);
 
+  const reportPayload: ReportExportPayload = {
+    title: report.headline,
+    subtitle: `${report.startKey} to ${report.endKey}`,
+    metrics: [
+      { label: "Completion", value: `${report.completionRate}%` },
+      { label: "Tasks", value: `${report.completed}/${report.total}` },
+      { label: "Clean Days", value: report.cleanDays },
+      { label: "High Priority", value: `${report.highPriorityCompleted}/${report.highPriorityTotal}` },
+    ],
+    lines: [
+      report.coachingLine,
+      report.strongestDay
+        ? `Strongest day: ${report.strongestDay.day}`
+        : "Strongest day: not enough data yet",
+      `${report.skipped} skipped task${report.skipped === 1 ? "" : "s"}`,
+    ],
+    footer: "Built with Daily Discipline",
+    filePrefix: "weekly-discipline-report",
+    accentColor: colors.tint,
+    backgroundColor: colors.background,
+    textColor: colors.text,
+  };
+
   const shareReport = async () => {
     await Share.share({ message: formatWeeklyReportForShare(report) });
+    await logProductionAnalyticsEvent("weekly_report_exported", { format: "text" });
     await playShareFeedback(profile);
+  };
+
+  const exportImage = async () => {
+    try {
+      await exportReportAsSvgImage(reportPayload);
+      await logProductionAnalyticsEvent("weekly_report_exported", { format: "svg" });
+      await playShareFeedback(profile);
+    } catch {
+      await playWarningFeedback(profile);
+    }
+  };
+
+  const exportPdf = async () => {
+    try {
+      await exportReportAsPdf(reportPayload);
+      await logProductionAnalyticsEvent("weekly_report_exported", { format: "pdf" });
+      await playShareFeedback(profile);
+    } catch {
+      await playWarningFeedback(profile);
+    }
   };
 
   return (
@@ -66,10 +112,18 @@ export default function WeeklyReportScreen() {
         <Text style={[styles.coach, { color: colors.subtle }]}>{report.coachingLine}</Text>
       </View>
 
-      <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.tint }]} onPress={shareReport} accessibilityRole="button" accessibilityLabel="Share weekly discipline report">
-        <Text style={styles.primaryText}>Share Report</Text>
+      <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.tint }]} onPress={shareReport} accessibilityRole="button" accessibilityLabel="Share weekly discipline report as text">
+        <Text style={styles.primaryText}>Share Text Report</Text>
       </TouchableOpacity>
-      <Text style={[styles.hint, { color: colors.subtle }]}>This card is image-ready for screenshots now, and the share button exports the same report as text without adding heavy native PDF dependencies.</Text>
+      <View style={styles.exportRow}>
+        <TouchableOpacity style={[styles.exportButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={exportImage} accessibilityRole="button" accessibilityLabel="Export weekly report as image file">
+          <Text style={[styles.exportText, { color: colors.text }]}>Export Image</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.exportButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={exportPdf} accessibilityRole="button" accessibilityLabel="Export weekly report as PDF file">
+          <Text style={[styles.exportText, { color: colors.text }]}>Export PDF</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={[styles.hint, { color: colors.subtle }]}>Image export creates a shareable SVG card. PDF export creates a lightweight local PDF report for sending to testers, friends, or a portfolio demo.</Text>
     </ScrollView>
   );
 }
@@ -90,6 +144,9 @@ const styles = StyleSheet.create({
   statLine: { fontSize: 14, fontWeight: "800", lineHeight: 23 },
   coach: { fontSize: 15, lineHeight: 22, fontWeight: "700" },
   primaryButton: { borderRadius: 18, paddingVertical: 16, alignItems: "center" },
+  exportRow: { flexDirection: "row", marginHorizontal: -5, marginTop: 10 },
+  exportButton: { flex: 1, borderWidth: 1, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginHorizontal: 5 },
+  exportText: { fontSize: 14, fontWeight: "900" },
   primaryText: { color: "#fff", fontSize: 16, fontWeight: "900" },
   hint: { fontSize: 12, lineHeight: 18, marginTop: 12, textAlign: "center" },
 });

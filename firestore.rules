@@ -97,10 +97,16 @@ service cloud.firestore {
         optionalString("displayName", 60) &&
         optionalString("activePetKey", 40) &&
         optionalString("petNickname", 60) &&
+        optionalString("planningGoal", 40) &&
         optionalString("planningRules", 1200) &&
         optionalString("weeklyFocusGoal", 240) &&
         optionalString("aiMemory", 800) &&
+        optionalString("onboardingExperience", 40) &&
+        optionalString("expoPushToken", 240) &&
         optionalBool("proPreviewEnabled") &&
+        optionalBool("analyticsOptOut") &&
+        optionalBool("crashReportingOptOut") &&
+        optionalBool("onboardingPersonalizationApplied") &&
         optionalBool("tutorialCompleted") &&
         optionalBool("enableSounds") &&
         optionalBool("enableHaptics") &&
@@ -139,6 +145,12 @@ service cloud.firestore {
         optionalString("email", 160) &&
         optionalString("appVersion", 40) &&
         optionalString("theme", 40);
+    }
+
+    function validAnalyticsEventDoc() {
+      return validShortString(request.resource.data.eventName, 120) &&
+        optionalMap("metadata") &&
+        optionalString("appVersion", 40);
     }
 
     function validFocusSessionDoc() {
@@ -183,6 +195,12 @@ service cloud.firestore {
       match /appErrors/{errorId} {
         allow read, delete: if isOwner(userId);
         allow create: if isOwner(userId) && validAppErrorDoc();
+        allow update: if false;
+      }
+
+      match /analyticsEvents/{eventId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && validAnalyticsEventDoc();
         allow update: if false;
       }
 

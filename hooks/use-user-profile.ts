@@ -13,6 +13,8 @@ export type UserProfile = {
   displayName?: string | null;
   energyMode?: "light" | "steady" | "lockedIn" | null;
   planningGoal?: "school" | "fitness" | "work" | "discipline" | "wellness" | null;
+  onboardingExperience?: "beginner" | "steady" | "intense" | null;
+  onboardingPersonalizationApplied?: boolean | null;
   planningRules?: string | null;
   weeklyFocusGoal?: string | null;
   focusDurationMinutes?: number | null;
@@ -23,6 +25,9 @@ export type UserProfile = {
   calmFocusMusicEnabled?: boolean | null;
   aiMemory?: string | null;
   proPreviewEnabled?: boolean | null;
+  analyticsOptOut?: boolean | null;
+  crashReportingOptOut?: boolean | null;
+  expoPushToken?: string | null;
 };
 
 export function useUserProfile() {

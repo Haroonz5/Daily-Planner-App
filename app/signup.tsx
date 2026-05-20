@@ -16,6 +16,8 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps } from "@/utils/keyboard";
+
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
@@ -179,6 +181,7 @@ export default function Signup() {
         <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
           <Text style={[styles.label, { color: colors.subtle }]}>Email</Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {
@@ -198,6 +201,7 @@ export default function Signup() {
 
           <Text style={[styles.label, { color: colors.subtle }]}>Username</Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {
@@ -216,6 +220,7 @@ export default function Signup() {
 
           <Text style={[styles.label, { color: colors.subtle }]}>Password</Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {

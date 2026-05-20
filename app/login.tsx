@@ -19,6 +19,9 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps } from "@/utils/keyboard";
+
+import { KeyboardDoneAccessory } from "@/components/keyboard-done-accessory";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import {
@@ -211,6 +214,7 @@ export default function Login() {
         <View style={[styles.card, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
           <Text style={[styles.label, { color: colors.subtle }]}>Email</Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {
@@ -230,6 +234,7 @@ export default function Login() {
 
           <Text style={[styles.label, { color: colors.subtle }]}>Password</Text>
           <TextInput
+            {...doneKeyboardProps}
             style={[
               styles.input,
               {
@@ -262,6 +267,7 @@ export default function Login() {
                 Open your authenticator app and enter the current 6-digit code.
               </Text>
               <TextInput
+                {...doneKeyboardProps}
                 style={[
                   styles.input,
                   {
@@ -277,6 +283,11 @@ export default function Login() {
                 onChangeText={setMfaCode}
                 keyboardType="number-pad"
                 maxLength={8}
+                inputAccessoryViewID="login-mfa-code-keyboard"
+              />
+              <KeyboardDoneAccessory
+                nativeID="login-mfa-code-keyboard"
+                colors={colors}
               />
               <TouchableOpacity
                 style={[

@@ -11,6 +11,8 @@ import {
   View,
 } from "react-native";
 
+import { doneKeyboardProps, keyboardScrollViewProps } from "@/utils/keyboard";
+
 import { useAppTheme } from "@/constants/appTheme";
 import { AmbientBackground } from "@/components/ambient-background";
 import { PetSprite } from "@/components/pet-sprite";
@@ -27,7 +29,9 @@ import {
   type DailyFeedbackResult,
 } from "@/utils/ai";
 import { getDisciplineQuote } from "@/utils/discipline-quotes";
-import { playShareFeedback } from "@/utils/feedback";
+import { logProductionAnalyticsEvent } from "@/utils/analytics";
+import { playShareFeedback, playWarningFeedback } from "@/utils/feedback";
+import { exportReportAsPdf, exportReportAsSvgImage, type ReportExportPayload } from "@/utils/report-export";
 import {
   cancelTaskNotifications,
   syncMorningSummaryNotification,
@@ -147,6 +151,27 @@ export default function SummaryScreen() {
     [summary.percent, summary.skipped, todayDate]
   );
 
+  const dailyReportPayload: ReportExportPayload = {
+    title: summary.allDone ? "Clean day complete" : "Daily progress report",
+    subtitle: todayDate,
+    metrics: [
+      { label: "Completion", value: `${summary.percent}%` },
+      { label: "Tasks", value: `${summary.completed}/${summary.total}` },
+      { label: "XP Today", value: `+${summary.todayXp}` },
+      { label: "Skipped", value: summary.skipped },
+    ],
+    lines: [
+      message,
+      dailyFeedback?.headline ? `Coach: ${dailyFeedback.headline}` : reviewQuote.text,
+      `Companion: ${summary.activePet.name}`,
+    ],
+    footer: "Built with Daily Discipline",
+    filePrefix: "daily-discipline-progress",
+    accentColor: colors.tint,
+    backgroundColor: colors.background,
+    textColor: colors.text,
+  };
+
   const shareProgress = async () => {
     const shareCard = [
       "Daily Discipline Progress",
@@ -161,7 +186,28 @@ export default function SummaryScreen() {
     // I added this as a lightweight share card so progress can leave the app
     // without needing a native image-capture dependency yet.
     await Share.share({ message: shareCard });
+    await logProductionAnalyticsEvent("daily_report_exported", { format: "text", percent: summary.percent });
     await playShareFeedback(profile);
+  };
+
+  const exportDailyImage = async () => {
+    try {
+      await exportReportAsSvgImage(dailyReportPayload);
+      await logProductionAnalyticsEvent("daily_report_exported", { format: "svg", percent: summary.percent });
+      await playShareFeedback(profile);
+    } catch {
+      await playWarningFeedback(profile);
+    }
+  };
+
+  const exportDailyPdf = async () => {
+    try {
+      await exportReportAsPdf(dailyReportPayload);
+      await logProductionAnalyticsEvent("daily_report_exported", { format: "pdf", percent: summary.percent });
+      await playShareFeedback(profile);
+    } catch {
+      await playWarningFeedback(profile);
+    }
   };
   const reviewTasks = useMemo(
     () =>
@@ -288,6 +334,7 @@ export default function SummaryScreen() {
       <AmbientBackground colors={colors} variant="calm" />
 
       <ScrollView
+        {...keyboardScrollViewProps}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
@@ -413,6 +460,7 @@ export default function SummaryScreen() {
           A quick honest sentence turns your day into a better plan, not just a score.
         </Text>
         <TextInput
+          {...doneKeyboardProps}
           style={[
             styles.debriefInput,
             {
@@ -531,6 +579,25 @@ export default function SummaryScreen() {
       >
         <Text style={styles.shareButtonText}>Share Today&apos;s Progress</Text>
       </TouchableOpacity>
+
+      <View style={styles.exportRow}>
+        <TouchableOpacity
+          style={[styles.exportButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={exportDailyImage}
+          accessibilityRole="button"
+          accessibilityLabel="Export today progress as image file"
+        >
+          <Text style={[styles.exportText, { color: colors.text }]}>Image</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.exportButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          onPress={exportDailyPdf}
+          accessibilityRole="button"
+          accessibilityLabel="Export today progress as PDF file"
+        >
+          <Text style={[styles.exportText, { color: colors.text }]}>PDF</Text>
+        </TouchableOpacity>
+      </View>
 
       <TouchableOpacity
         style={[styles.shareButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
@@ -969,6 +1036,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
+  exportRow: { flexDirection: "row", marginHorizontal: -5, marginBottom: 12 },
+  exportButton: { flex: 1, borderWidth: 1, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginHorizontal: 5 },
+  exportText: { fontSize: 14, fontWeight: "900" },
   shareButtonText: {
     color: "#fff",
     fontSize: 14,

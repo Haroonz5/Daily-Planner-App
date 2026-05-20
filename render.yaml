@@ -6,6 +6,10 @@ services:
     plan: starter
     dockerfilePath: Dockerfile
     healthCheckPath: /health
+    disk:
+      name: daily-discipline-ai-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: AI_PROVIDER
         value: auto
@@ -15,6 +19,8 @@ services:
         value: gpt-4o-mini
       - key: AI_ALLOWED_ORIGINS
         value: "*"
+      - key: ANALYTICS_DB_PATH
+        value: /var/data/discipline_analytics.sqlite3
       - key: GEMINI_API_KEY
         sync: false
       - key: OPENAI_API_KEY
@@ -44,6 +50,29 @@ services:
       - key: UPSTREAM_TIMEOUT_SECONDS
         value: "8"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: daily-discipline-postgres
+          property: connectionString
       - key: ADMIN_DASHBOARD_TOKEN
         sync: false
+
+  - type: web
+    name: daily-discipline-stats-aggregator
+    env: docker
+    rootDir: services/stats-aggregator
+    plan: starter
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: STATS_DATA_FILE
+        value: /var/data/task-events.jsonl
+    disk:
+      name: daily-discipline-stats-data
+      mountPath: /var/data
+      sizeGB: 1
+
+databases:
+  - name: daily-discipline-postgres
+    databaseName: daily_discipline
+    user: discipline
+    plan: starter

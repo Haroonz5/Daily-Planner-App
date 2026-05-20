@@ -53,8 +53,11 @@ EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8020 npx expo start -c
 5. Open Today to complete, skip, delete, and reschedule tasks while showing feedback, haptics, sounds, and XP.
 6. Open Friends and show accountability contracts.
 7. Open AI Memory Timeline to show personalized pattern analysis.
-8. Open Weekly Report to show the share-ready discipline recap.
-9. Open Admin Analytics with token `local-admin-token` to show gateway audit metrics and completion-by-time data.
+8. Open Weekly Report and export both the SVG image card and lightweight PDF.
+9. Open Admin Tester Dashboard to show task, feedback, diagnostic, and analytics signals.
+10. Open Crash Viewer and create a test diagnostic report.
+11. Open Privacy to show analytics/crash opt-outs and the AI data explanation.
+12. Open Admin Analytics with token `local-admin-token` to show gateway audit metrics and completion-by-time data.
 
 ## Quality Checks
 
@@ -81,3 +84,6 @@ npm run stack:config
 - Ongoing routines are loop-based, so `gym every day except Sunday` creates the next needed task instead of flooding Firestore.
 - The AI eval suite catches planner regressions like wrong recurrence days, missing priorities, or bad duration parsing.
 - Demo Mode makes the app testable by recruiters, friends, and testers without needing private personal data.
+- Friend nudges become real push notifications in preview/production builds when Expo push tokens are registered.
+- Report export creates real local SVG/PDF files without adding heavy native dependencies.
+- The privacy screen shows analytics and diagnostic controls, which is important for real tester collection.
