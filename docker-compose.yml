@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: daily_discipline
       POSTGRES_USER: discipline
-      POSTGRES_PASSWORD: discipline_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -43,10 +43,10 @@ services:
     environment:
       PORT: 8020
       AI_BACKEND_URL: http://ai-backend:8000
-      DATABASE_URL: postgres://discipline:discipline_dev_password@postgres:5432/daily_discipline?sslmode=disable
+      DATABASE_URL: ${DATABASE_URL}
       SECURITY_AUTH_MODE: dev
       APP_CHECK_MODE: off
-      ADMIN_DASHBOARD_TOKEN: local-admin-token
+      ADMIN_DASHBOARD_TOKEN: ${ADMIN_DASHBOARD_TOKEN}
       SECURITY_ALLOWED_ORIGINS: "*"
       RATE_LIMIT_PER_MINUTE: 120
       AI_RATE_LIMIT_PER_MINUTE: 40
