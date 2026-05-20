@@ -1874,6 +1874,44 @@ export default function SettingsScreen({
         ]}
       >
         <Text style={[styles.cardTitle, { color: colors.subtle }]}>
+          Interview Systems
+        </Text>
+        <Text style={[styles.noteText, { color: colors.text }]}>
+          Demo the production story: seeded data, AI memory, security analytics,
+          and a weekly report card recruiters can understand quickly.
+        </Text>
+        <View style={styles.inlineActionRow}>
+          {[
+            { label: "Demo Mode", route: "/demo-mode" },
+            { label: "Admin Analytics", route: "/admin-analytics" },
+            { label: "AI Memory", route: "/ai-memory-timeline" },
+            { label: "Weekly Report", route: "/weekly-report" },
+          ].map((item) => (
+            <TouchableOpacity
+              key={item.route}
+              style={[
+                styles.inlineActionButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={() => router.push(item.route as never)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${item.label}`}
+            >
+              <Text style={[styles.inlineActionText, { color: colors.text }]}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardTitle, { color: colors.subtle }]}>
           Calendar, Widgets & Lock Screen
         </Text>
         <Text style={[styles.noteText, { color: colors.text }]}>

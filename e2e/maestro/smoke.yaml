@@ -1,0 +1,12 @@
+appId: com.haroonzaman.dailydiscipline
+---
+- launchApp
+- assertVisible: "Daily Discipline"
+- tapOn: "Add task tab"
+- assertVisible: "Add Task"
+- tapOn: "What do you need to do?"
+- inputText: "Interview demo task"
+- tapOn: "Add Task for Today"
+- assertVisible: "Saved"
+- tapOn: "Today tab"
+- assertVisible: "Interview demo task"

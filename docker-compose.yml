@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: daily_discipline
+      POSTGRES_USER: discipline
+      POSTGRES_PASSWORD: discipline_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./services/security-gateway/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U discipline -d daily_discipline"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  ai-backend:
+    build:
+      context: ./ai
+    env_file:
+      - path: ./ai/.env
+        required: false
+    environment:
+      PORT: 8000
+      AI_PROVIDER: ${AI_PROVIDER:-local}
+      ANALYTICS_DB_PATH: /data/discipline_analytics.sqlite3
+      AI_ALLOWED_ORIGINS: "*"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ai-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  security-gateway:
+    build:
+      context: ./services/security-gateway
+    environment:
+      PORT: 8020
+      AI_BACKEND_URL: http://ai-backend:8000
+      DATABASE_URL: postgres://discipline:discipline_dev_password@postgres:5432/daily_discipline?sslmode=disable
+      SECURITY_AUTH_MODE: dev
+      APP_CHECK_MODE: off
+      ADMIN_DASHBOARD_TOKEN: local-admin-token
+      SECURITY_ALLOWED_ORIGINS: "*"
+      RATE_LIMIT_PER_MINUTE: 120
+      AI_RATE_LIMIT_PER_MINUTE: 40
+      UPSTREAM_TIMEOUT_SECONDS: 8
+    ports:
+      - "8020:8020"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8020/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  stats-aggregator:
+    build:
+      context: ./services/stats-aggregator
+    environment:
+      PORT: 8010
+      STATS_DATA_FILE: /data/task-events.jsonl
+    ports:
+      - "8010:8010"
+    volumes:
+      - stats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8010/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  ai-data:
+  stats-data:

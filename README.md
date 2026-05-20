@@ -18,6 +18,14 @@ feedback, rewards, and accountability all live in the same loop.
 - AI backend health card with response time, model/fallback status, and timeout visibility
 - Feature flags for turning advanced tester/demo systems on or off without deleting code
 - Go security gateway for Firebase token checks, rate limits, proxying, audit logs, and an admin dashboard
+- Docker Compose full-stack setup for Postgres, Python AI, Go security gateway, and Go stats service
+- AI planner evaluation suite that checks natural-language parsing, recurrence, priorities, and durations
+- End-to-end smoke testing with Maestro plus CI-safe E2E flow validation
+- Demo Mode for seeding a realistic portfolio/tester account in one tap
+- Admin analytics dashboard for audit logs, failures, rate limits, latency, and completion-by-time data
+- Weekly discipline report card designed for sharing or screenshot export
+- AI coach memory timeline that summarizes when the user performs best and where friction appears
+- Smart accountability contracts for friends who want higher-trust discipline checks
 - Cloud Functions scaffold for widget summary refresh and ongoing routine refill
 - Offline-first task queue that stores task intent locally and syncs after reconnect
 - Lightweight crash/error reporting into each user's Firestore `appErrors`
@@ -93,6 +101,13 @@ history, and team pushes can record an MVP.
 Stats shows Discipline Score, XP, streaks, weekly progress, time-window quality,
 plan-vs-reality data, task mix, AI weekly review, and next-week recommendations.
 
+### Interview Systems
+
+Settings includes a small portfolio/demo area with Demo Mode, Admin Analytics,
+AI Memory Timeline, and Weekly Report. These screens make it easier to test the
+app quickly, explain the architecture, and show the backend/security work during
+an interview without needing days of real user data.
+
 ### Pet Home
 
 Users unlock companion pets through XP, pick an active companion, rename pets,
@@ -165,6 +180,10 @@ my-app/
     friends.tsx        # Friends, nudges, and challenges
     pet-home.tsx       # Pet collection and habitats
     summary.tsx        # Daily summary and share card
+    weekly-report.tsx  # Weekly report card and share text
+    ai-memory-timeline.tsx # AI coach memory timeline
+    admin-analytics.tsx # Gateway/admin analytics dashboard
+    demo-mode.tsx      # Seedable demo account tools
     week.tsx           # Calendar and future planner
     settings.tsx       # Full settings screen
     onboarding.tsx
@@ -175,9 +194,14 @@ my-app/
 
   ai/
     main.py            # FastAPI backend
+    eval_planner.py    # AI planner regression/evaluation runner
+    evals/             # JSON evaluation cases
     requirements.txt
     Dockerfile
     README.md
+
+  e2e/
+    maestro/           # Maestro device smoke tests
 
   services/
     security-gateway/  # Go middleware for auth, rate limiting, audit logs
@@ -227,6 +251,51 @@ Run the no-dependency core regression checks by themselves:
 ```bash
 npm run test:core
 ```
+
+Run the AI planner evaluation suite:
+
+```bash
+npm run ai:eval
+```
+
+Validate the E2E smoke flow used by CI:
+
+```bash
+npm run e2e:validate
+```
+
+## Docker Compose Full Stack
+
+For a production-shaped local demo, run Postgres, the Python AI backend, the Go
+security gateway, and the Go stats service together:
+
+```bash
+npm run stack:up
+```
+
+The stack exposes:
+
+- Python AI backend: `http://127.0.0.1:8000`
+- Go security gateway: `http://127.0.0.1:8020`
+- Go stats aggregator: `http://127.0.0.1:8010`
+- PostgreSQL audit database: `127.0.0.1:5432`
+
+Point Expo at the gateway for the full secure path:
+
+```bash
+EXPO_PUBLIC_AI_API_URL=http://YOUR_MAC_IP:8020 npx expo start -c
+```
+
+Useful stack commands:
+
+```bash
+npm run stack:config
+npm run stack:logs
+npm run stack:down
+```
+
+Use `.env.stack.example` as a reference for local stack values. Keep model keys
+in `ai/.env` or hosted backend secrets, never in the mobile app.
 
 ## Firebase Setup
 
@@ -396,7 +465,9 @@ npm run ops:check
 npm run ops:deploy:ai
 ```
 
-GitHub Actions also checks the Expo app, Python backend syntax, and Go service.
+GitHub Actions checks TypeScript, core recurrence logic, E2E flow syntax, ESLint,
+the security script, npm audit, Python backend syntax, the AI planner evaluation
+suite, Go services, and Docker Compose configuration.
 
 ## API Key Safety
 
@@ -485,6 +556,8 @@ npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL -
 
 Useful tester docs:
 
+- `docs/INTERVIEW_DEMO.md`
+- `docs/E2E_TESTING.md`
 - `docs/TESTER_HANDOFF.md`
 - `docs/TESTING_AND_RELEASE.md`
 - `docs/PRODUCTION_CHECKLIST.md`
@@ -495,6 +568,7 @@ Useful tester docs:
 - Expo Go does not fully support production notification behavior. Use a development or preview build for realistic notification testing.
 - Strict Focus tracks app switching in Expo Go, but true app blocking needs native Screen Time / FamilyControls or Android focus integrations.
 - Home-screen widgets require native widget UI in a custom build, but widget-ready summary data is already written to Firestore.
+- Weekly reports are currently share-text and screenshot-card friendly; native PDF/image export can be added with `expo-print` or a view-capture package.
 - Friend features require deployed Firestore rules.
 
 ## Roadmap Ideas

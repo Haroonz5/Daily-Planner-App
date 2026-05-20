@@ -103,6 +103,8 @@ type FriendChallenge = {
   targetValue?: number;
   completedAt?: any;
   winnerUid?: string | null;
+  contractTerms?: string[];
+  honestyPrompt?: string | null;
   createdAt?: any;
 };
 
@@ -140,7 +142,7 @@ const challengeTemplates: Record<
   },
   accountabilityContract: {
     title: "Accountability Contract",
-    body: "A stronger pact: no skips, visible progress, and daily pressure to finish the plan honestly.",
+    body: "A stronger pact: no skips, visible progress, and a quick honesty check before calling the day complete.",
     targetLabel: "contract integrity",
     targetValue: 100,
   },
@@ -891,6 +893,18 @@ export default function FriendsScreen() {
           date: today,
           status: "active",
           targetValue: template.targetValue,
+          contractTerms:
+            type === "accountabilityContract"
+              ? [
+                  "No silent skips: move, complete, or explain the task.",
+                  "High-priority tasks need an honest completion check.",
+                  "Both friends can send one useful nudge before the day ends.",
+                ]
+              : [],
+          honestyPrompt:
+            type === "accountabilityContract"
+              ? "Did you actually do the task, or are you trying to clear the list?"
+              : null,
           createdAt: new Date(),
         },
         { merge: true }
@@ -996,6 +1010,15 @@ export default function FriendsScreen() {
                 <Text style={[styles.challengeMeta, { color: colors.subtle }]}>
                   {progress.label} • {template.targetLabel}
                 </Text>
+                {challenge.type === "accountabilityContract" && (challenge.contractTerms?.length ?? 0) > 0 ? (
+                  <View style={[styles.contractTerms, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    {challenge.contractTerms?.map((term) => (
+                      <Text key={term} style={[styles.contractTermText, { color: colors.subtle }]}>
+                        - {term}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
                 <Text
                   style={[
                     styles.challengeBadge,
@@ -1448,6 +1471,18 @@ const styles = StyleSheet.create({
   challengePercent: {
     fontSize: 18,
     fontWeight: "900",
+  },
+  contractTerms: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 11,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  contractTermText: {
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
   },
   badgeRow: {
     borderWidth: 1,

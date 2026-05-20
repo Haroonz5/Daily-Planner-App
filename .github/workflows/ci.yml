@@ -43,6 +43,9 @@ jobs:
       - name: Compile AI backend
         run: python -c "compile(open('ai/main.py', encoding='utf-8').read(), 'ai/main.py', 'exec')"
 
+      - name: Run AI planner eval suite
+        run: cd ai && python eval_planner.py
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -55,3 +58,6 @@ jobs:
       - name: Test Go security gateway
         run: go test ./...
         working-directory: services/security-gateway
+
+      - name: Validate Docker Compose stack
+        run: npm run stack:config

@@ -214,6 +214,10 @@ export default function RootLayout() {
     const inPetHome = firstSegment === "pet-home";
     const inWeek = firstSegment === "week";
     const inFriends = firstSegment === "friends";
+    const inAdminAnalytics = firstSegment === "admin-analytics";
+    const inDemoMode = firstSegment === "demo-mode";
+    const inWeeklyReport = firstSegment === "weekly-report";
+    const inAiMemoryTimeline = firstSegment === "ai-memory-timeline";
     const inTutorial = firstSegment === "tutorial";
     const inVerifyEmail = firstSegment === "verify-email";
     const inOnboarding = firstSegment === "onboarding";
@@ -246,6 +250,10 @@ export default function RootLayout() {
         inPetHome ||
         inWeek ||
         inFriends ||
+        inAdminAnalytics ||
+        inDemoMode ||
+        inWeeklyReport ||
+        inAiMemoryTimeline ||
         inTutorial ||
         inVerifyEmail)
     ) {
@@ -425,6 +433,10 @@ export default function RootLayout() {
               <Stack.Screen name="week" options={{ headerShown: false }} />
               <Stack.Screen name="friends" options={{ headerShown: false }} />
               <Stack.Screen name="settings" options={{ headerShown: false }} />
+              <Stack.Screen name="admin-analytics" options={{ headerShown: false }} />
+              <Stack.Screen name="demo-mode" options={{ headerShown: false }} />
+              <Stack.Screen name="weekly-report" options={{ headerShown: false }} />
+              <Stack.Screen name="ai-memory-timeline" options={{ headerShown: false }} />
               <Stack.Screen name="modal" options={{ headerShown: false }} />
             </Stack>
           </ErrorBoundary>

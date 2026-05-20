@@ -526,8 +526,19 @@ export default function SummaryScreen() {
       <TouchableOpacity
         style={[styles.shareButton, { backgroundColor: colors.tint }]}
         onPress={shareProgress}
+        accessibilityRole="button"
+        accessibilityLabel="Share today's progress"
       >
         <Text style={styles.shareButtonText}>Share Today&apos;s Progress</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.shareButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
+        onPress={() => router.push("/weekly-report" as never)}
+        accessibilityRole="button"
+        accessibilityLabel="Open weekly discipline report"
+      >
+        <Text style={[styles.shareButtonText, { color: colors.text }]}>Open Weekly Report</Text>
       </TouchableOpacity>
 
       {reviewTasks.length > 0 && (

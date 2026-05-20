@@ -1,0 +1,51 @@
+[
+  {
+    "name": "daily gym creates one ongoing seed",
+    "input": "gym everyday at 6pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "title_contains": "gym",
+      "time": "6:00 PM",
+      "recurrence": "daily",
+      "priority": "Medium"
+    }
+  },
+  {
+    "name": "custom weekday routine",
+    "input": "go to the gym Mon-Thurs at 6pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "title_contains": "gym",
+      "time": "6:00 PM",
+      "recurrence": "custom",
+      "recurrence_days": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  {
+    "name": "priority inference high exam",
+    "input": "study for final exam for 2 hours at 8pm tomorrow",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "title_contains": "study",
+      "time": "8:00 PM",
+      "duration_minutes": 120,
+      "priority": "High"
+    }
+  },
+  {
+    "name": "two comma-separated tasks",
+    "input": "gym at 6pm, study at 8pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 2
+    }
+  }
+]
