@@ -27,6 +27,11 @@ feedback, rewards, and accountability all live in the same loop.
 - Real daily and weekly report export as shareable SVG image cards and lightweight PDF files
 - Hosted backend deployment blueprint for Render with Python AI, Go gateway, Go stats service, and Postgres
 - Push notification friend nudges through Firebase Cloud Functions and Expo push tokens
+- Scheduled server-side due-task push reminders with auditable push receipts
+- App Check ready Go gateway with optional and required production modes
+- k6 gateway load testing and observability docs for request IDs, audit logs, and diagnostics
+- Native iOS Focus Shield scaffold for a future development/custom build
+- GitHub Actions CI/CD covering app QA, AI evals, Go tests, Functions syntax, security checks, and Docker config
 - Admin tester dashboard for task, feedback, diagnostics, analytics, and backend health signals
 - Crash/error viewer for tester diagnostics without needing a native crash SDK yet
 - Production privacy page with analytics and crash-reporting opt-outs
@@ -691,3 +696,14 @@ The mobile app should only know the hosted Go security gateway URL. Gemini/OpenA
 - Crash-style Firestore diagnostics, local error buffer, and in-app Crash Viewer.
 - Native calendar sync for one task from Week Planner or 30 days from Settings.
 - Widget-ready summary cache plus Widget Preview screen for lock-screen/home-screen planning.
+
+## Advanced Production Systems
+
+This repo now includes several interview-grade systems beyond the core mobile UI:
+
+- Hosted backend deployment preflight with `npm run hosted:preflight` and hosted health checks with `npm run hosted:check`.
+- Go security gateway admin-token analytics access for audit logs, suspicious IPs, endpoint latency, and AI usage dashboards.
+- AI planner evaluation suite with recurrence, priority, duration, and multi-task test cases via `npm run ai:eval`.
+- Expanded Maestro E2E coverage for smoke, AI planner, settings systems, and focus mode via `npm run e2e:validate` or `npm run e2e:maestro:all`.
+- Offline-first mutation sync engine with queued creates, updates, deletes, retry backoff, and sync metadata.
+- Native iOS WidgetKit scaffold in `native/ios-widget` prepared with `npm run widget:ios:prepare` after `npx expo prebuild --platform ios`.

@@ -46,6 +46,7 @@ type config struct {
 	rateLimitPerMin   int
 	aiRateLimitPerMin int
 	requestTimeout    time.Duration
+	maxBodyBytes      int
 }
 
 type server struct {
@@ -200,6 +201,7 @@ func loadConfig() config {
 		rateLimitPerMin:   getenvInt("RATE_LIMIT_PER_MINUTE", 60),
 		aiRateLimitPerMin: getenvInt("AI_RATE_LIMIT_PER_MINUTE", 20),
 		requestTimeout:    time.Duration(getenvInt("UPSTREAM_TIMEOUT_SECONDS", 8)) * time.Second,
+		maxBodyBytes:      getenvInt("MAX_BODY_BYTES", 1048576),
 	}
 }
 
@@ -249,6 +251,7 @@ func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		if origin := allowedOrigin(r.Header.Get("Origin"), allowedOrigins); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
@@ -289,6 +292,7 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 		"admin_dashboard":       s.config.adminToken != "",
 		"ai_backend_configured": s.config.aiBackendURL != "",
 		"firebase_config":       s.config.firebaseProjectID != "",
+		"max_body_bytes":        s.config.maxBodyBytes,
 		"allowed_origins":       s.config.allowedOrigins,
 	})
 }
@@ -314,9 +318,9 @@ func (s *server) adminAuditSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
-func (s *server) requireAdminToken(r *http.Request) error {
+func (s *server) adminTokenValid(r *http.Request) bool {
 	if strings.TrimSpace(s.config.adminToken) == "" {
-		return errors.New("admin token not configured")
+		return false
 	}
 
 	token := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
@@ -326,7 +330,14 @@ func (s *server) requireAdminToken(r *http.Request) error {
 
 	// I compare admin tokens in constant time so this dashboard does not leak
 	// useful timing clues if someone probes it from outside the app.
-	if subtle.ConstantTimeCompare([]byte(token), []byte(s.config.adminToken)) != 1 {
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.config.adminToken)) == 1
+}
+
+func (s *server) requireAdminToken(r *http.Request) error {
+	if strings.TrimSpace(s.config.adminToken) == "" {
+		return errors.New("admin token not configured")
+	}
+	if !s.adminTokenValid(r) {
 		return errors.New("invalid admin token")
 	}
 
@@ -358,20 +369,27 @@ func (s *server) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	authenticatedUID, err := s.authenticate(r)
-	if err != nil {
-		status = http.StatusUnauthorized
-		reason = err.Error()
-		writeError(w, status, "unauthorized")
-		return
-	}
-	uid = authenticatedUID
+	if isAdminReadableEndpoint(r.URL.Path) && s.adminTokenValid(r) {
+		// I allow the admin dashboard token to read analytics endpoints through
+		// the gateway, so the dashboard can show SQL/AI stats without pretending
+		// to be a mobile Firebase user.
+		uid = "admin-dashboard"
+	} else {
+		authenticatedUID, err := s.authenticate(r)
+		if err != nil {
+			status = http.StatusUnauthorized
+			reason = err.Error()
+			writeError(w, status, "unauthorized")
+			return
+		}
+		uid = authenticatedUID
 
-	if err := s.verifyAppCheck(r); err != nil {
-		status = http.StatusUnauthorized
-		reason = err.Error()
-		writeError(w, status, "app check failed")
-		return
+		if err := s.verifyAppCheck(r); err != nil {
+			status = http.StatusUnauthorized
+			reason = err.Error()
+			writeError(w, status, "app check failed")
+			return
+		}
 	}
 
 	limitKey := uid
@@ -484,6 +502,15 @@ func isAIHeavyEndpoint(path string) bool {
 		"/v1/pattern-feedback",
 		"/v1/weekly-review",
 		"/v1/routine-coach":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAdminReadableEndpoint(path string) bool {
+	switch path {
+	case "/v1/analytics/completion-by-time", "/health":
 		return true
 	default:
 		return false
@@ -608,10 +635,10 @@ func (c *firebaseCertCache) PublicKey(ctx context.Context, kid string) (*rsa.Pub
 }
 
 func (s *server) forward(w http.ResponseWriter, r *http.Request, uid string, requestID string) (int, string) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(s.config.maxBodyBytes)))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read request body")
-		return http.StatusBadRequest, "read body failed"
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return http.StatusRequestEntityTooLarge, "read body failed"
 	}
 
 	target := *s.backendURL

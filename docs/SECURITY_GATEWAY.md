@@ -146,3 +146,43 @@ ADMIN_DASHBOARD_TOKEN=long-random-value
 Move `APP_CHECK_MODE` from `optional` to `required` only after the mobile app is
 configured to send valid Firebase App Check tokens. Until then, optional mode
 lets the gateway verify tokens when present without breaking Expo Go testing.
+
+## Hardening Added
+
+The gateway now includes these production hardening controls:
+
+- `MAX_BODY_BYTES` caps proxied request bodies before forwarding to the AI backend.
+- HSTS, `nosniff`, `no-referrer`, and restricted permissions headers are applied to responses.
+- Admin dashboard token checks use constant-time comparison.
+- AI-heavy endpoints use a stricter rate limiter than normal endpoints.
+- App Check can run in `off`, `optional`, or `required` mode.
+- Request IDs and audit logs make failed/slow calls traceable.
+
+Suggested production env:
+
+```env
+SECURITY_AUTH_MODE=firebase
+FIREBASE_PROJECT_ID=daily-planner-76712
+APP_CHECK_MODE=required
+SECURITY_ALLOWED_ORIGINS=https://your-domain.example
+RATE_LIMIT_PER_MINUTE=60
+AI_RATE_LIMIT_PER_MINUTE=20
+UPSTREAM_TIMEOUT_SECONDS=8
+MAX_BODY_BYTES=1048576
+DATABASE_URL=postgres://user:password@host:5432/database?sslmode=require
+ADMIN_DASHBOARD_TOKEN=long-random-value
+```
+
+## App Check Rollout Note
+
+The gateway and `render.production.yaml` are ready for `APP_CHECK_MODE=required`, but do not turn required mode on for normal testers until the native mobile build is sending valid App Check tokens.
+
+This Expo app currently uses the Firebase JS SDK for Auth/Firestore. For native iOS/Android App Check attestation, the next production step is a development/custom build with a native App Check provider, then attaching that token to AI gateway requests as `X-Firebase-AppCheck`.
+
+Safe rollout order:
+
+1. Keep testers on `APP_CHECK_MODE=optional`.
+2. Add native App Check token retrieval in a custom build.
+3. Confirm the gateway sees valid `X-Firebase-AppCheck` tokens in optional mode.
+4. Switch only production hosted services to `render.production.yaml` / `APP_CHECK_MODE=required`.
+5. Confirm requests without App Check receive `401` and appear in audit logs.

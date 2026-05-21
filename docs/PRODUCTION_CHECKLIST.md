@@ -98,3 +98,29 @@ Test on a real phone:
 - Focus music starts and stops cleanly.
 - Summary share card opens the native share sheet.
 - Notifications arrive once and actions work in a preview/dev build.
+
+## 6. Production Gateway And Push
+
+Run the full production preflight:
+
+```bash
+npm run production:preflight
+```
+
+For hosted services:
+
+```bash
+HOSTED_GATEWAY_URL=https://your-gateway-url npm run hosted:check
+GATEWAY_URL=https://your-gateway-url ADMIN_DASHBOARD_TOKEN=token npm run load:gateway
+```
+
+Before a larger tester release, confirm:
+
+- Go gateway `/health` is reachable.
+- Gateway health reports `audit_db: true`.
+- Admin dashboard loads with the private token.
+- `MAX_BODY_BYTES` is visible in `/health`.
+- AI requests show in PostgreSQL audit logs.
+- Firestore rules are deployed.
+- Cloud Functions are deployed if the Firebase project is on Blaze.
+- Push receipts appear under `users/{uid}/pushReceipts` after a nudge or due-task push.

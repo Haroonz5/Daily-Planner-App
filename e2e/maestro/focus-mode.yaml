@@ -1,0 +1,10 @@
+appId: com.haroonzaman.dailydiscipline
+---
+- launchApp
+- tapOn: "Today tab"
+- scrollUntilVisible:
+    element: "Focus"
+    direction: DOWN
+- tapOn: "Focus"
+- assertVisible: "Focus Mode"
+- assertVisible: "Focus Coach"

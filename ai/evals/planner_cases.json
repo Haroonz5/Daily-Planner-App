@@ -47,5 +47,77 @@
     "expect": {
       "count": 2
     }
+  },
+  {
+    "name": "weekday routine inference",
+    "category": "recurrence",
+    "input": "meal prep every weekday at 4pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "first": {
+        "title_contains": "meal prep",
+        "time": "4:00 PM",
+        "recurrence": "weekdays"
+      }
+    }
+  },
+  {
+    "name": "everyday except sunday routine",
+    "category": "recurrence",
+    "input": "gym everyday except sunday at 12pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "first": {
+        "title_contains": "gym",
+        "time": "12:00 PM",
+        "recurrence": "custom",
+        "recurrence_days": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    }
+  },
+  {
+    "name": "low priority inference",
+    "category": "priority",
+    "input": "low priority walk at 7am",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 1,
+      "first": {
+        "title_contains": "walk",
+        "time": "7:00 AM",
+        "priority": "Low"
+      }
+    }
+  },
+  {
+    "name": "multi task duration and ordering",
+    "category": "multi_task",
+    "input": "study for 2 hours at 8pm, gym at 6pm",
+    "default_date": "2026-05-03",
+    "expect": {
+      "count": 2,
+      "tasks": [
+        {
+          "index": 0,
+          "title_contains": "study",
+          "duration_minutes": 120,
+          "priority": "High"
+        },
+        {
+          "index": 1,
+          "title_contains": "gym",
+          "time": "6:00 PM"
+        }
+      ]
+    }
   }
 ]

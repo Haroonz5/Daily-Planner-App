@@ -6,6 +6,8 @@ admin.initializeApp();
 
 const db = admin.firestore();
 
+const TASK_PUSH_LOOKAHEAD_MINUTES = 8;
+const TASK_PUSH_GRACE_MINUTES = 2;
 
 const isExpoPushToken = (token) =>
   typeof token === "string" &&
@@ -49,6 +51,51 @@ const formatDateKey = (date) => {
 const parseTaskDate = (dateKey) => {
   const [year, month, day] = String(dateKey).split("-").map(Number);
   return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
+
+const parseClockTime = (time) => {
+  const match = String(time || "").trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!match) return null;
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || "0");
+  const period = match[3].toUpperCase();
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+
+  if (period === "PM" && hour !== 12) hour += 12;
+  if (period === "AM" && hour === 12) hour = 0;
+
+  return { hour, minute };
+};
+
+const parseTaskDateTime = (dateKey, time) => {
+  const [year, month, day] = String(dateKey || "").split("-").map(Number);
+  const parsedTime = parseClockTime(time);
+  if (!year || !month || !day || !parsedTime) return null;
+
+  return new Date(year, month - 1, day, parsedTime.hour, parsedTime.minute, 0, 0);
+};
+
+const writePushReceipt = async ({ uid, type, status, reason, token, title, body, data }) => {
+  if (!uid) return;
+
+  await db
+    .collection("users")
+    .doc(uid)
+    .collection("pushReceipts")
+    .add({
+      type,
+      status,
+      reason,
+      tokenSuffix: typeof token === "string" ? token.slice(-12) : null,
+      title,
+      body,
+      data: data || {},
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    .catch(() => {});
 };
 
 const getNextRecurringDate = (task) => {
@@ -231,5 +278,112 @@ exports.sendPushOnAccountabilityNudge = onDocumentCreated(
       pushReason: result.reason,
       pushAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+
+    await writePushReceipt({
+      uid: nudge.toUid,
+      type: "accountabilityNudge",
+      status: result.ok ? "sent" : "not-sent",
+      reason: result.reason,
+      token,
+      title: "Accountability check-in",
+      body:
+        nudge.message ||
+        `${nudge.fromName || nudge.fromUsername || "A friend"} sent you a discipline nudge.`,
+      data: {
+        type: "accountabilityNudge",
+        nudgeId: snapshot.id,
+        fromUid: nudge.fromUid,
+      },
+    });
+  }
+);
+
+
+exports.sendDueTaskPushReminders = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "America/New_York",
+  },
+  async () => {
+    const now = new Date();
+    const today = formatDateKey(now);
+    const windowStart = now.getTime() - TASK_PUSH_GRACE_MINUTES * 60 * 1000;
+    const windowEnd = now.getTime() + TASK_PUSH_LOOKAHEAD_MINUTES * 60 * 1000;
+
+    const snapshot = await db
+      .collectionGroup("tasks")
+      .where("date", "==", today)
+      .where("completed", "==", false)
+      .get();
+
+    let checked = 0;
+    let sent = 0;
+    let skipped = 0;
+
+    for (const document of snapshot.docs) {
+      const task = document.data();
+      checked += 1;
+
+      if ((task.status || "pending") === "skipped" || task.duePushSentAt) {
+        skipped += 1;
+        continue;
+      }
+
+      const dueAt = parseTaskDateTime(task.date, task.time);
+      if (!dueAt || dueAt.getTime() < windowStart || dueAt.getTime() > windowEnd) {
+        skipped += 1;
+        continue;
+      }
+
+      const userRef = document.ref.parent.parent;
+      if (!userRef) {
+        skipped += 1;
+        continue;
+      }
+
+      const user = await userRef.get();
+      const uid = userRef.id;
+      const userData = user.data() || {};
+      const token = userData.expoPushToken;
+      const title = task.priority === "High" ? "High Priority Task" : "Task Reminder";
+      const body = task.priority === "High"
+        ? `${task.title} matters now. Do the honest block.`
+        : `${task.title} is due at ${task.time}.`;
+      const data = {
+        type: "taskDue",
+        taskId: document.id,
+        taskTitle: task.title,
+        date: task.date,
+        time: task.time,
+      };
+
+      const result = await sendExpoPush({ token, title, body, data }).catch((error) => ({
+        ok: false,
+        reason: error?.message || "send-failed",
+      }));
+
+      await document.ref.update({
+        duePushAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
+        duePushStatus: result.ok ? "sent" : "not-sent",
+        duePushReason: result.reason,
+        ...(result.ok ? { duePushSentAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+      });
+
+      await writePushReceipt({
+        uid,
+        type: "taskDue",
+        status: result.ok ? "sent" : "not-sent",
+        reason: result.reason,
+        token,
+        title,
+        body,
+        data,
+      });
+
+      if (result.ok) sent += 1;
+      else skipped += 1;
+    }
+
+    console.log(`sendDueTaskPushReminders checked=${checked} sent=${sent} skipped=${skipped}`);
   }
 );

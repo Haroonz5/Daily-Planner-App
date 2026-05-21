@@ -1,0 +1,13 @@
+appId: com.haroonzaman.dailydiscipline
+---
+- launchApp
+- tapOn: "Settings tab"
+- assertVisible: "Tester Launch Checklist"
+- scrollUntilVisible:
+    element: "AI Backend Status"
+    direction: DOWN
+- assertVisible: "AI Backend Status"
+- scrollUntilVisible:
+    element: "Calendar Sync, Widgets & Lock Screen"
+    direction: DOWN
+- assertVisible: "Widget Preview"

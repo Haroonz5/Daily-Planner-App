@@ -1,0 +1,9 @@
+appId: com.haroonzaman.dailydiscipline
+---
+- launchApp
+- tapOn: "Add task tab"
+- assertVisible: "Plan with AI"
+- tapOn: "Tell AI what to plan"
+- inputText: "gym everyday except sunday at 6pm"
+- tapOn: "Plan with AI"
+- assertVisible: "Add to Tasks"

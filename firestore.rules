@@ -73,6 +73,8 @@ service cloud.firestore {
         optionalString("offlineQueuedAt", 80) &&
         optionalString("calendarEventId", 240) &&
         optionalString("calendarId", 240) &&
+        optionalString("duePushStatus", 40) &&
+        optionalString("duePushReason", 240) &&
         optionalBool("aiCreated") &&
         optionalBool("breakdownCreated") &&
         optionalBool("rollingRoutine") &&
@@ -202,6 +204,13 @@ service cloud.firestore {
         allow read, delete: if isOwner(userId);
         allow create: if isOwner(userId) && validAnalyticsEventDoc();
         allow update: if false;
+      }
+
+      match /pushReceipts/{receiptId} {
+        allow read, delete: if isOwner(userId);
+        // Cloud Functions write these with Admin SDK. Clients can read receipts
+        // for debugging but cannot forge delivery records.
+        allow create, update: if false;
       }
 
       match /friends/{friendId} {

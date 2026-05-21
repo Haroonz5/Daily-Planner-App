@@ -47,7 +47,15 @@
     "tester:android": "npx eas-cli@latest build --profile preview --platform android",
     "testflight:build": "npx eas-cli@latest build --profile production --platform ios",
     "testflight:submit": "npx eas-cli@latest submit --platform ios --latest",
-    "deploy:testflight": "npm run deploy:rules && npm run tester:check && npm run testflight:build"
+    "deploy:testflight": "npm run deploy:rules && npm run tester:check && npm run testflight:build",
+    "hosted:preflight": "node scripts/hosted-preflight.js",
+    "widget:ios:prepare": "bash scripts/prepare-ios-widget-extension.sh",
+    "e2e:maestro:all": "maestro test e2e/maestro",
+    "ai:eval:report": "npm run ai:eval && node -e \"console.log(require('fs').readFileSync('ai/evals/latest-report.json','utf8'))\"",
+    "focus:ios:prepare": "bash scripts/prepare-ios-focus-extension.sh",
+    "load:gateway": "k6 run load/k6/gateway-load.js",
+    "load:gateway:local": "GATEWAY_URL=http://127.0.0.1:8020 ADMIN_DASHBOARD_TOKEN=local-dev-admin k6 run load/k6/gateway-load.js",
+    "production:preflight": "npm run tester:check && npm run hosted:preflight && npm run ai:eval && npm run functions:check"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

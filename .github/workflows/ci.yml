@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   app-and-backend:
@@ -23,8 +24,14 @@ jobs:
       - name: Install app dependencies
         run: npm ci
 
-      - name: Typecheck and lint app
+      - name: Typecheck, lint, core tests, and E2E validation
         run: npm run qa
+
+      - name: Tester readiness
+        run: node scripts/check-tester-readiness.js
+
+      - name: Hosted backend preflight
+        run: npm run hosted:preflight
 
       - name: Repository security checks
         run: npm run security:check
@@ -32,10 +39,13 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=critical
 
+      - name: Firebase Functions syntax check
+        run: npm run functions:check
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Install AI backend dependencies
         run: pip install -r ai/requirements.txt
@@ -46,10 +56,17 @@ jobs:
       - name: Run AI planner eval suite
         run: cd ai && python eval_planner.py
 
+      - name: Upload AI eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-eval-report
+          path: ai/evals/latest-report.json
+          if-no-files-found: warn
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: '1.23'
 
       - name: Test Go stats aggregator
         run: go test ./...
@@ -61,3 +78,10 @@ jobs:
 
       - name: Validate Docker Compose stack
         run: npm run stack:config
+
+      - name: Shell script syntax checks
+        run: |
+          bash -n scripts/check-hosted-backend.sh
+          bash -n scripts/prepare-ios-widget-extension.sh
+          bash -n scripts/prepare-ios-focus-extension.sh
+          bash -n scripts/release-checklist.sh

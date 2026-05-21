@@ -95,3 +95,33 @@ npm run testflight:submit
 ```
 
 The Gemini/OpenAI keys stay only on Render. The mobile app should only receive the public gateway URL.
+
+## Preflight Before Hosting
+
+Run this before creating or updating hosted services:
+
+```bash
+npm run hosted:preflight
+```
+
+It checks the Render blueprint, Dockerfiles, gateway migrations, and required package scripts. It intentionally warns when local secrets are absent because real Gemini/OpenAI keys should live in Render, not git.
+
+## Production App Check Blueprint
+
+Use `render.yaml` while testers are still on optional App Check. Use `render.production.yaml` only when the native app is sending valid App Check tokens on every AI request.
+
+`render.production.yaml` changes the gateway service to:
+
+```env
+SECURITY_AUTH_MODE=firebase
+APP_CHECK_MODE=required
+MAX_BODY_BYTES=1048576
+```
+
+Before switching to the production blueprint:
+
+1. Confirm Firebase App Check is configured for the iOS/Android apps.
+2. Confirm the mobile app sends `X-Firebase-AppCheck` to the gateway.
+3. Confirm `/health` shows `app_check_mode: required`.
+4. Confirm a real device can use Plan with AI through the gateway.
+5. Confirm requests without App Check fail with `401` and appear in audit logs.

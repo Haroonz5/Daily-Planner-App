@@ -1,13 +1,13 @@
 services:
   - type: web
-    name: daily-discipline-ai
+    name: daily-discipline-ai-prod
     env: docker
     rootDir: ai
     plan: starter
     dockerfilePath: Dockerfile
     healthCheckPath: /health
     disk:
-      name: daily-discipline-ai-data
+      name: daily-discipline-ai-prod-data
       mountPath: /var/data
       sizeGB: 1
     envVars:
@@ -26,7 +26,7 @@ services:
       - key: OPENAI_API_KEY
         sync: false
   - type: web
-    name: daily-discipline-security-gateway
+    name: daily-discipline-security-gateway-prod
     env: docker
     rootDir: services/security-gateway
     plan: starter
@@ -40,7 +40,7 @@ services:
       - key: FIREBASE_PROJECT_ID
         value: daily-planner-76712
       - key: APP_CHECK_MODE
-        value: optional
+        value: required
       - key: SECURITY_ALLOWED_ORIGINS
         sync: false
       - key: RATE_LIMIT_PER_MINUTE
@@ -53,13 +53,13 @@ services:
         value: "1048576"
       - key: DATABASE_URL
         fromDatabase:
-          name: daily-discipline-postgres
+          name: daily-discipline-postgres-prod
           property: connectionString
       - key: ADMIN_DASHBOARD_TOKEN
         sync: false
 
   - type: web
-    name: daily-discipline-stats-aggregator
+    name: daily-discipline-stats-aggregator-prod
     env: docker
     rootDir: services/stats-aggregator
     plan: starter
@@ -74,7 +74,7 @@ services:
       sizeGB: 1
 
 databases:
-  - name: daily-discipline-postgres
+  - name: daily-discipline-postgres-prod
     databaseName: daily_discipline
     user: discipline
     plan: starter
