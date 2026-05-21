@@ -17,7 +17,7 @@ Please try:
 - Complete, skip, and reschedule a task.
 - Add a friend by username from Settings > Accountability Friends.
 - Try Focus Mode with Strict Focus turned on, then switch apps once.
-- Check Settings > AI Backend Status, Routine Manager, and Reminder Health.
+- Check Settings > AI Backend Status, Routine Manager, Reminder Health, Widget Preview, and Calendar Sync.
 - Add one personal rule in Settings > AI Planning Rules, then plan another task.
 - Set one Weekly Focus Goal and confirm it appears on Today.
 - Tell me if anything feels confusing, slow, cramped, or annoying.
@@ -63,6 +63,19 @@ npx eas-cli@latest login
 npm run tester:build
 ```
 
+Platform-specific internal builds:
+
+```bash
+npm run tester:ios
+npm run tester:android
+```
+
+TestFlight candidate:
+
+```bash
+npm run testflight:build
+```
+
 If the AI/security stack is deployed, point the app at the Go security gateway before building. Do not use your laptop IP for friend testers:
 
 ```bash
@@ -93,7 +106,7 @@ Cloud Functions note: Firebase Functions require the Blaze plan. `npm run functi
 - Recurring tasks can skip one occurrence without ending the full routine.
 - Ongoing routines keep one active next task, create the next occurrence after completion or skip, and can be canceled from Settings > Routine Manager with Cancel All.
 - High-priority tasks ask for a quick honesty/proof note before completion.
-- Week Planner shows a calendar-style future view and can open tasks in Google Calendar.
+- Week Planner shows a calendar-style future view and can sync individual tasks to the native phone calendar.
 - Settings > Reminder Health shows scheduled reminders and duplicate status.
 - Task notifications expose Complete, Snooze 15m, Tomorrow, and Skip actions in a development or preview build.
 - New-user tutorial saves the user goal and tunes energy mode.

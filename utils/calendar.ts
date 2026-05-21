@@ -6,6 +6,7 @@ import { db } from "@/constants/firebaseConfig";
 import {
   formatDateKey,
   formatTimeFromDate,
+  getEstimatedTaskDurationMinutes,
   parseDateKey,
   parseTimeToMinutes,
 } from "@/utils/task-helpers";
@@ -20,6 +21,7 @@ export type CalendarExportTask = {
   priority?: "Low" | "Medium" | "High";
   calendarEventId?: string | null;
   calendarId?: string | null;
+  durationMinutes?: number | null;
 };
 
 type CalendarExportResult = {
@@ -164,7 +166,7 @@ export const exportTasksToCalendar = async (
       title: task.title,
       notes: `Daily Discipline task${task.priority ? ` - ${task.priority} priority` : ""}`,
       startDate,
-      endDate: addMinutes(startDate, 30),
+      endDate: addMinutes(startDate, getEstimatedTaskDurationMinutes(task)),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       alarms: [{ relativeOffset: -10 }],
     };
@@ -278,4 +280,15 @@ export const openTaskInGoogleCalendar = async (task: CalendarExportTask) => {
 
   await Linking.openURL(url);
   return true;
+};
+
+
+export const syncTaskToNativeCalendar = async (
+  task: CalendarExportTask,
+  options?: { uid?: string }
+) => {
+  // I use the same native calendar sync path for one-off task rows and the
+  // bulk Settings export so tester behavior stays consistent.
+  const result = await exportTasksToCalendar([task], 365, options);
+  return result;
 };

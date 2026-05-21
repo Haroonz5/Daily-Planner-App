@@ -662,3 +662,32 @@ Useful tester docs:
 Daily Discipline is designed to make productivity feel personal, realistic, and
 rewarding. Instead of only tracking tasks, it helps users understand their
 patterns, recover from misses, and build consistency over time.
+
+## Hosted Tester Build Flow
+
+Use this order when preparing a build that behaves like an installed App Store/TestFlight app:
+
+```bash
+npm run tester:check
+npm run deploy:rules
+HOSTED_GATEWAY_URL=https://your-gateway.onrender.com npm run hosted:check
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-gateway.onrender.com
+npm run tester:build
+```
+
+For iOS TestFlight:
+
+```bash
+npm run testflight:build
+npm run testflight:submit
+```
+
+The mobile app should only know the hosted Go security gateway URL. Gemini/OpenAI keys stay on the hosted backend.
+
+## Production-Ready Tester Features
+
+- Hosted Python AI backend plus Go security gateway health checks.
+- EAS preview, platform-specific tester builds, and TestFlight command shortcuts.
+- Crash-style Firestore diagnostics, local error buffer, and in-app Crash Viewer.
+- Native calendar sync for one task from Week Planner or 30 days from Settings.
+- Widget-ready summary cache plus Widget Preview screen for lock-screen/home-screen planning.

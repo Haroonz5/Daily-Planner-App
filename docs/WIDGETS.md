@@ -1,21 +1,32 @@
 # Widget Support Plan
 
-Daily Discipline now writes a small widget-ready summary to:
+Daily Discipline writes a widget-ready summary to both local device storage and Firestore:
 
 ```text
 users/{uid}/widgetSummary/today
+AsyncStorage: daily-discipline.widget-summary.{uid}
 ```
 
 The document contains:
 
-- `today`
+- `date`
 - `total`
 - `completed`
 - `open`
-- `nextTask`
-- `completionRate`
-- `updatedAt`
+- `progressPercent`
+- `nextTaskTitle`
+- `nextTaskTime`
+- `nextTaskDate`
+- `nextTaskLabel`
+- `smallWidgetLine`
+- `lockScreenLine`
+- `largeWidgetLines`
+- `petName`
+- `petKey`
+- `readinessLabel`
+- `readinessScore`
+- `updatedAt` / `updatedAtIso`
 
-The React Native app writes this from the Home screen, and the Cloud Functions scaffold can refresh it server-side after task changes. A real iOS widget would read this summary from an App Group or a tiny native bridge in a development/production build.
+The Today screen refreshes this summary whenever tasks, theme, pet, or readiness data changes. Settings links to `/widget-preview`, which renders the same payload as a lock-screen and large home-screen widget mock.
 
-This keeps the feature resume-ready now while avoiding a brittle native widget implementation inside Expo Go.
+A real iOS widget would read the local summary through an App Group/native bridge in a development or production build. Android can use the same compact payload through a native widget provider. Keeping the payload small avoids querying Firestore from the widget itself and makes the feature safer for battery life.

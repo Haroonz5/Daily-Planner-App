@@ -13,7 +13,9 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -76,6 +78,7 @@ import {
   getDisciplineQuote,
   getSkipQuote,
 } from "../../utils/discipline-quotes";
+import { saveWidgetSummary } from "../../utils/widget-summary";
 import { auth, db } from "../../constants/firebaseConfig";
 
 type Priority = "Low" | "Medium" | "High";
@@ -414,13 +417,6 @@ export default function HomeScreen() {
       tasks: groupTasks,
     }));
   }, [futureTasks]);
-  const nextOpenTask = useMemo(
-    () =>
-      todayTasks.find(
-        (task) => !task.completed && (task.status ?? "pending") !== "skipped"
-      ) ?? null,
-    [todayTasks]
-  );
   const completed = todayTasks.filter((t) => t.completed).length;
   const openTodayTasks = todayTasks.filter(
     (task) => !task.completed && (task.status ?? "pending") !== "skipped"
@@ -890,43 +886,27 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid || !tasksLoaded) return;
 
-    void setDoc(
-      doc(db, "users", uid, "widgetSummary", "today"),
-      {
-        date: today,
-        nextTaskTitle: nextOpenTask?.title ?? "All clear",
-        nextTaskTime: nextOpenTask?.time ?? null,
-        nextTaskDate: nextOpenTask?.date ?? today,
-        completed,
-        total: todayTasks.length,
-        open: openTodayTasks,
-        progressPercent: Math.round(progressPercent),
-        readinessLabel: todayReadiness.label,
-        readinessScore: todayReadiness.score,
-        petName: activePetDisplayName,
-        petKey: activePet.key,
-        energyMode,
-        themeName,
-        updatedAt: new Date(),
-      },
-      { merge: true }
-    ).catch(() => {});
+    void saveWidgetSummary({
+      uid,
+      tasks,
+      today,
+      petName: activePetDisplayName,
+      petKey: activePet.key,
+      readinessLabel: todayReadiness.label,
+      readinessScore: todayReadiness.score,
+      energyMode,
+      themeName,
+    }).catch(() => {});
   }, [
     activePet.key,
     activePetDisplayName,
-    completed,
     energyMode,
-    nextOpenTask?.time,
-    nextOpenTask?.title,
-    nextOpenTask?.date,
-    openTodayTasks,
-    progressPercent,
+    tasks,
     tasksLoaded,
     themeName,
     today,
     todayReadiness.label,
     todayReadiness.score,
-    todayTasks.length,
   ]);
 
   const patternAction = useMemo(() => {
@@ -3783,75 +3763,91 @@ export default function HomeScreen() {
         transparent
         onRequestClose={() => setProofCandidate(null)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.themeCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Be Honest Check
-            </Text>
-
-            <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
-              {proofCandidate?.title ?? "This task"} is high priority. Before
-              you mark it complete, add one quick note about what you actually
-              finished.
-            </Text>
-            <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
-              I added this check so high-priority XP connects to honest proof,
-              not just tapping a box.
-            </Text>
-
-            <TextInput
-              {...doneKeyboardProps}
+        <KeyboardAvoidingView
+          style={styles.proofModalBackdrop}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 22 : 0}
+        >
+          <ScrollView
+            {...keyboardScrollViewProps}
+            contentContainerStyle={styles.proofModalScroll}
+            showsVerticalScrollIndicator={false}
+          >
+            <View
               style={[
-                styles.modalInput,
-                styles.notesInput,
-                {
-                  backgroundColor: colors.background,
-                  borderColor: colors.border,
-                  color: colors.text,
-                },
+                styles.themeCard,
+                styles.proofCard,
+                { backgroundColor: colors.card },
               ]}
-              placeholder="Example: Finished chest workout and 15 min cardio."
-              placeholderTextColor={colors.subtle}
-              value={proofNote}
-              onChangeText={(value) => {
-                setProofNote(value);
-                if (proofError) setProofError("");
-              }}
-              multiline
-            />
-            {!!proofError && (
-              <Text style={[styles.missedPromptText, { color: colors.warning }]}>
-                {proofError}
+            >
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Be Honest Check
               </Text>
-            )}
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
+              <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
+                {proofCandidate?.title ?? "This task"} is high priority. Before
+                you mark it complete, add one quick note about what you actually
+                finished.
+              </Text>
+              <Text style={[styles.missedPromptText, { color: colors.subtle }]}>
+                I added this check so high-priority XP connects to honest proof,
+                not just tapping a box.
+              </Text>
+
+              <TextInput
+                {...doneKeyboardProps}
                 style={[
-                  styles.secondaryButton,
-                  { backgroundColor: colors.surface },
+                  styles.modalInput,
+                  styles.notesInput,
+                  {
+                    backgroundColor: colors.background,
+                    borderColor: colors.border,
+                    color: colors.text,
+                  },
                 ]}
-                onPress={() => setProofCandidate(null)}
-              >
-                <Text
-                  style={[
-                    styles.secondaryButtonText,
-                    { color: colors.subtle },
-                  ]}
-                >
-                  Not Yet
+                placeholder="Example: Finished chest workout and 15 min cardio."
+                placeholderTextColor={colors.subtle}
+                value={proofNote}
+                onChangeText={(value) => {
+                  setProofNote(value);
+                  if (proofError) setProofError("");
+                }}
+                multiline
+              />
+              {!!proofError && (
+                <Text style={[styles.missedPromptText, { color: colors.warning }]}>
+                  {proofError}
                 </Text>
-              </TouchableOpacity>
+              )}
 
-              <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: colors.tint }]}
-                onPress={confirmProofCompletion}
-              >
-                <Text style={styles.primaryButtonText}>I Did It</Text>
-              </TouchableOpacity>
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryButton,
+                    { backgroundColor: colors.surface },
+                  ]}
+                  onPress={() => setProofCandidate(null)}
+                >
+                  <Text
+                    style={[
+                      styles.secondaryButtonText,
+                      { color: colors.subtle },
+                    ]}
+                  >
+                    Not Yet
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+                  onPress={confirmProofCompletion}
+                >
+                  <Text style={styles.primaryButtonText}>I Did It</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
@@ -4941,6 +4937,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 20,
   },
+  proofModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(74, 63, 85, 0.24)",
+  },
+  proofModalScroll: {
+    flexGrow: 1,
+    justifyContent: "flex-start",
+    paddingTop: 62,
+    paddingBottom: 28,
+  },
   collectionCard: {
     borderRadius: 24,
     padding: 20,
@@ -5065,6 +5071,10 @@ const styles = StyleSheet.create({
     marginTop: "auto",
     borderRadius: 24,
     padding: 20,
+  },
+  proofCard: {
+    marginTop: 0,
+    marginBottom: 24,
   },
   modalTitle: {
     fontSize: 24,

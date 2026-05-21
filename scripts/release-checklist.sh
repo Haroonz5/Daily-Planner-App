@@ -32,8 +32,10 @@ Release check passed.
 
 Next manual steps:
 - Deploy Firestore rules with: npm run deploy:rules
+- Check hosted gateway health with: HOSTED_GATEWAY_URL=https://your-gateway npm run hosted:check
 - Set EXPO_PUBLIC_AI_API_URL as an EAS secret after hosting the Go gateway
 - Create an EAS preview build with: npm run tester:build
+- Create an iOS TestFlight candidate with: npm run testflight:build
 - Cloud Functions are optional and require Firebase Blaze; do not block Spark/free tester builds on them
 - Confirm AI health in Settings on a real phone
 - For iOS TestFlight, build production with: npm run eas:testflight

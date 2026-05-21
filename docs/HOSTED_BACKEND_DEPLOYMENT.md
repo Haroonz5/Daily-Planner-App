@@ -65,3 +65,33 @@ curl https://your-gateway.onrender.com/health
 ```
 
 The app Settings screen also includes AI Backend Status, Admin Analytics, Demo Mode, Crash Viewer, and Privacy controls for tester validation.
+
+## Verify Hosted Services
+
+After Render deploys the Python AI backend and Go security gateway, run:
+
+```bash
+HOSTED_GATEWAY_URL=https://your-gateway.onrender.com npm run hosted:check
+```
+
+Optional direct AI check:
+
+```bash
+HOSTED_GATEWAY_URL=https://your-gateway.onrender.com HOSTED_AI_URL=https://your-ai.onrender.com npm run hosted:check
+```
+
+Then set the phone app to call the gateway:
+
+```bash
+npx eas-cli@latest secret:create --scope project --name EXPO_PUBLIC_AI_API_URL --value https://your-gateway.onrender.com
+npm run tester:build
+```
+
+For iOS TestFlight candidates:
+
+```bash
+npm run testflight:build
+npm run testflight:submit
+```
+
+The Gemini/OpenAI keys stay only on Render. The mobile app should only receive the public gateway URL.

@@ -17,6 +17,11 @@ type AppErrorRow = {
   name?: string;
   message?: string;
   stack?: string | null;
+  severity?: string;
+  fingerprint?: string;
+  appVersion?: string;
+  device?: { platform?: string; osVersion?: string | number };
+  metadata?: Record<string, unknown>;
   createdAt?: any;
 };
 
@@ -48,7 +53,8 @@ export default function CrashViewerScreen() {
     await reportAppError({
       source: "CrashViewerTest",
       error: new Error("Manual test diagnostic from Crash Viewer"),
-      metadata: { safeTest: true },
+      severity: "warning",
+      metadata: { safeTest: true, screen: "Crash Viewer" },
     });
     await playWarningFeedback(profile);
   };
@@ -80,7 +86,10 @@ export default function CrashViewerScreen() {
       {errors.length ? errors.map((error) => (
         <View key={error.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
           <Text style={[styles.cardTitle, { color: colors.text }]}>{error.source ?? "App"} · {formatTime(error.createdAt)}</Text>
+          <Text style={[styles.badge, { color: colors.warning }]}>{(error.severity ?? "error").toUpperCase()} · {error.appVersion ?? "1.0.0"}</Text>
           <Text style={[styles.message, { color: colors.subtle }]}>{error.message ?? error.name ?? "Unknown error"}</Text>
+          {error.device ? <Text style={[styles.meta, { color: colors.subtle }]}>{error.device.platform ?? "device"} {String(error.device.osVersion ?? "")}</Text> : null}
+          {error.fingerprint ? <Text style={[styles.meta, { color: colors.subtle }]} numberOfLines={1}>{error.fingerprint}</Text> : null}
           {error.stack ? <Text style={[styles.stack, { color: colors.subtle }]} numberOfLines={5}>{error.stack}</Text> : null}
           <TouchableOpacity style={[styles.deleteButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => clearError(error.id)} accessibilityRole="button" accessibilityLabel="Delete this error report">
             <Text style={[styles.deleteText, { color: colors.text }]}>Delete Report</Text>
@@ -108,7 +117,9 @@ const styles = StyleSheet.create({
   primaryText: { color: "#fff", fontSize: 16, fontWeight: "900" },
   card: { borderWidth: 1, borderRadius: 22, padding: 18, marginBottom: 14 },
   cardTitle: { fontSize: 17, fontWeight: "900", marginBottom: 8 },
+  badge: { fontSize: 11, fontWeight: "900", letterSpacing: 0.7, marginBottom: 8 },
   message: { fontSize: 14, lineHeight: 22, fontWeight: "700" },
+  meta: { fontSize: 11, lineHeight: 16, fontWeight: "800", marginTop: 6 },
   stack: { fontSize: 11, lineHeight: 16, marginTop: 10 },
   deleteButton: { borderWidth: 1, borderRadius: 14, paddingVertical: 12, alignItems: "center", marginTop: 12 },
   deleteText: { fontSize: 13, fontWeight: "900" },

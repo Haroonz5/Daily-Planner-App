@@ -1946,6 +1946,7 @@ export default function SettingsScreen({
             { label: "Privacy", route: "/privacy" },
             { label: "AI Memory", route: "/ai-memory-timeline" },
             { label: "Weekly Report", route: "/weekly-report" },
+            { label: "Widget Preview", route: "/widget-preview" },
           ].map((item) => (
             <TouchableOpacity
               key={item.route}
@@ -1991,8 +1992,8 @@ export default function SettingsScreen({
           </Text>
           <Text style={[styles.emptySettingsText, { color: colors.subtle }]}>
             Full iPhone home-screen widgets need a development or production
-            build. Calendar export can be tested on device after giving calendar
-            permission.
+            build. This screen now includes a widget preview, local cache, and
+            Firestore summary so the native layer has a clean payload to read.
           </Text>
           <View style={styles.inlineActionRow}>
             <TouchableOpacity
@@ -2002,6 +2003,19 @@ export default function SettingsScreen({
               accessibilityLabel="Open week planner"
             >
               <Text style={styles.inlineActionText}>Open Week Planner</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.inlineActionButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={() => router.push("/widget-preview" as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Open widget preview"
+            >
+              <Text style={[styles.inlineActionText, { color: colors.text }]}>
+                Widget Preview
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -3079,9 +3093,9 @@ export default function SettingsScreen({
 
             {notificationAudit.nextNotifications.length > 0 && (
               <View style={styles.auditUpcoming}>
-                {notificationAudit.nextNotifications.slice(0, 3).map((item) => (
+                {notificationAudit.nextNotifications.slice(0, 3).map((item, index) => (
                   <Text
-                    key={item.id}
+                    key={`${item.id}-${item.kind}-${index}`}
                     style={[styles.auditUpcomingText, { color: colors.subtle }]}
                     numberOfLines={1}
                   >

@@ -267,6 +267,7 @@ export default function RootLayout() {
     const inAdminTesterDashboard = firstSegment === "admin-tester-dashboard";
     const inCrashViewer = firstSegment === "crash-viewer";
     const inPrivacy = firstSegment === "privacy";
+    const inWidgetPreview = firstSegment === "widget-preview";
     const inTutorial = firstSegment === "tutorial";
     const inVerifyEmail = firstSegment === "verify-email";
     const inOnboarding = firstSegment === "onboarding";
@@ -306,6 +307,7 @@ export default function RootLayout() {
         inAdminTesterDashboard ||
         inCrashViewer ||
         inPrivacy ||
+        inWidgetPreview ||
         inTutorial ||
         inVerifyEmail)
     ) {

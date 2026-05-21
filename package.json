@@ -41,7 +41,13 @@
     "functions:deploy:blaze": "CONFIRM_BLAZE=1 bash scripts/deploy-functions-if-blaze.sh",
     "tester:check": "npm run qa && node scripts/check-tester-readiness.js",
     "tester:build": "npx eas-cli@latest build --profile preview --platform all",
-    "deploy:tester": "npm run deploy:rules && npm run tester:check && npm run tester:build"
+    "deploy:tester": "npm run deploy:rules && npm run tester:check && npm run tester:build",
+    "hosted:check": "bash scripts/check-hosted-backend.sh",
+    "tester:ios": "npx eas-cli@latest build --profile preview --platform ios",
+    "tester:android": "npx eas-cli@latest build --profile preview --platform android",
+    "testflight:build": "npx eas-cli@latest build --profile production --platform ios",
+    "testflight:submit": "npx eas-cli@latest submit --platform ios --latest",
+    "deploy:testflight": "npm run deploy:rules && npm run tester:check && npm run testflight:build"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

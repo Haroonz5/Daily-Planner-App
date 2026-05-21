@@ -7,7 +7,7 @@ import { AmbientBackground } from "@/components/ambient-background";
 import { useAppTheme } from "@/constants/appTheme";
 import { Colors } from "@/constants/theme";
 import { useUserProfile } from "@/hooks/use-user-profile";
-import { openTaskInGoogleCalendar } from "@/utils/calendar";
+import { syncTaskToNativeCalendar } from "@/utils/calendar";
 import { playSelectionFeedback, playWarningFeedback } from "@/utils/feedback";
 import { formatDateKey, getRelativeDateLabel, parseTimeToMinutes } from "@/utils/task-helpers";
 import { auth, db } from "../constants/firebaseConfig";
@@ -21,6 +21,9 @@ type Task = {
   priority?: "Low" | "Medium" | "High";
   notes?: string | null;
   status?: "pending" | "completed" | "skipped";
+  durationMinutes?: number | null;
+  calendarEventId?: string | null;
+  calendarId?: string | null;
 };
 
 const priorityColors = {
@@ -131,16 +134,27 @@ export default function WeekScreen() {
   }, [tasks]);
 
   const handleAddToCalendar = async (task: Task) => {
-    const opened = await openTaskInGoogleCalendar(task);
-    await (opened
-      ? playSelectionFeedback(profile)
-      : playWarningFeedback(profile));
-    setCalendarMessage(
-      opened
-        ? `${task.title} opened in Google Calendar.`
-        : "Calendar export could not open on this device."
-    );
-    setTimeout(() => setCalendarMessage(""), 2600);
+    const uid = auth.currentUser?.uid;
+
+    try {
+      const result = await syncTaskToNativeCalendar(task, { uid });
+      const changed = result.created + result.updated;
+      await playSelectionFeedback(profile);
+      setCalendarMessage(
+        changed > 0
+          ? `${task.title} synced to ${result.calendarTitle}.`
+          : `${task.title} was skipped because it is old, complete, or duplicated.`
+      );
+    } catch (error) {
+      await playWarningFeedback(profile);
+      setCalendarMessage(
+        error instanceof Error
+          ? error.message
+          : "Calendar sync could not finish on this device."
+      );
+    }
+
+    setTimeout(() => setCalendarMessage(""), 3200);
   };
 
   return (
@@ -355,7 +369,7 @@ export default function WeekScreen() {
                             { color: colors.tint },
                           ]}
                         >
-                          Calendar
+                          Sync
                         </Text>
                       </TouchableOpacity>
                     )}
