@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 
 import { auth } from "@/constants/firebaseConfig";
-import { formatDateKey, type RecurrenceRule } from "./task-helpers";
+import { findTaskScheduleConflicts, formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
 // I added "gemini" here so the app can label real Gemini responses as AI
@@ -848,18 +848,26 @@ const localRealityCheck = ({
     warnings.push(`${busiestDate} has ${highPriorityCount} high-priority tasks.`);
   }
 
-  const scheduled = dayTasks
-    .map((task) => ({ task, minutes: getTimeMinutes(task.time) }))
-    .filter((item): item is { task: ParsedAiTask | AiExistingTask; minutes: number } =>
-      item.minutes !== null
-    )
-    .sort((a, b) => a.minutes - b.minutes);
-  const crowded = scheduled.some(
-    (item, index) => index > 0 && item.minutes - scheduled[index - 1].minutes <= 45
-  );
+  const conflicts = findTaskScheduleConflicts(dayTasks, { maxConflicts: 3 });
+  let crowded = false;
 
-  if (crowded) {
-    warnings.push("Some tasks are less than 45 minutes apart.");
+  if (conflicts.length > 0) {
+    conflicts.forEach((conflict) => warnings.push(conflict.message));
+    suggestions.push("Move overlapping tasks or lower the duration before saving the draft.");
+  } else {
+    const scheduled = dayTasks
+      .map((task) => ({ task, minutes: getTimeMinutes(task.time) }))
+      .filter((item): item is { task: ParsedAiTask | AiExistingTask; minutes: number } =>
+        item.minutes !== null
+      )
+      .sort((a, b) => a.minutes - b.minutes);
+    crowded = scheduled.some(
+      (item, index) => index > 0 && item.minutes - scheduled[index - 1].minutes <= 45
+    );
+
+    if (crowded) {
+      warnings.push("Some tasks are less than 45 minutes apart.");
+    }
   }
 
   const suggestedTrimTitles: string[] = [];

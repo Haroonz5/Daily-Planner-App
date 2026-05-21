@@ -72,7 +72,7 @@ type FocusSession = {
   createdAt?: any;
 };
 
-const focusPresets = [15, 25, 45];
+const focusPresets = [10, 15, 25, 45, 60];
 
 const formatClock = (seconds: number) => {
   const mins = Math.floor(seconds / 60)
@@ -278,13 +278,32 @@ export default function FocusScreen() {
       0
     );
 
+    const cleanSessionsToday = completedSessionsToday.filter(
+      (session) => session.strictFocus && (session.distractionStrikes ?? 0) === 0
+    ).length;
+    const suggestedMinutes = selectedTask
+      ? selectedTask.priority === "High"
+        ? 45
+        : selectedTask.priority === "Low"
+          ? 15
+          : profile.focusDurationMinutes ?? 25
+      : profile.focusDurationMinutes ?? 25;
+    const focusScore = Math.min(
+      100,
+      Math.round(focusMinutesToday * 1.5 + cleanSessionsToday * 18 + completedToday * 8)
+    );
+
     return {
       activePet,
       currentTask: selectedTask,
       queue: pendingTasks.filter((task) => task.id !== selectedTask?.id),
       completed: completedToday,
       completedSessionsToday,
+      cleanSessionsToday,
       focusMinutesToday,
+      focusScore,
+      suggestedMinutes,
+      suggestedBreakMinutes: focusMinutesToday >= 90 ? 10 : 5,
       total: todayTasks.length,
       petLabel: getPetDisplayName(
         activePet,
@@ -297,6 +316,7 @@ export default function FocusScreen() {
     focusSessions,
     profile.activePetKey,
     profile.displayName,
+    profile.focusDurationMinutes,
     profile.petNickname,
     profile.petNicknames,
     selectedTaskId,
@@ -405,6 +425,15 @@ export default function FocusScreen() {
     resetStrictFocusState();
   };
 
+  const handleStartNextBlock = async () => {
+    await playSelectionFeedback(profile);
+    setSessionMinutes(focusData.suggestedMinutes);
+    setSecondsLeft(focusData.suggestedMinutes * 60);
+    loggedSessionRef.current = false;
+    resetStrictFocusState();
+    setTimerState("running");
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -459,6 +488,48 @@ export default function FocusScreen() {
           {focusData.completedSessionsToday.length === 1 ? "" : "s"} •{" "}
           {focusData.focusMinutesToday} focus min
         </Text>
+      </View>
+
+      <View
+        style={[
+          styles.focusCoachCard,
+          { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.tint },
+        ]}
+      >
+        <Text style={[styles.cardLabel, { color: colors.subtle }]}>Focus Coach</Text>
+        <Text style={[styles.focusCoachTitle, { color: colors.text }]}>
+          {focusData.currentTask
+            ? `Best next block: ${focusData.suggestedMinutes} minutes`
+            : "No task pressure right now"}
+        </Text>
+        <Text style={[styles.focusCoachBody, { color: colors.subtle }]}>
+          {focusData.currentTask
+            ? `${focusData.currentTask.priority ?? "Medium"} priority work gets a cleaner block when the timer matches the task weight.`
+            : "Use the space to plan the next honest task or keep the day clear."}
+        </Text>
+
+        <View style={styles.focusCoachGrid}>
+          {[
+            { label: "Score", value: `${focusData.focusScore}%` },
+            { label: "Clean", value: focusData.cleanSessionsToday },
+            { label: "Break", value: `${focusData.suggestedBreakMinutes}m` },
+          ].map((item) => (
+            <View
+              key={item.label}
+              style={[
+                styles.focusCoachMetric,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.focusCoachValue, { color: colors.text }]}>
+                {item.value}
+              </Text>
+              <Text style={[styles.focusCoachLabel, { color: colors.subtle }]}>
+                {item.label}
+              </Text>
+            </View>
+          ))}
+        </View>
       </View>
 
       <View style={[styles.timerCard, { backgroundColor: colors.card, shadowColor: colors.tint }]}>
@@ -667,6 +738,14 @@ export default function FocusScreen() {
                 ? `${distractionStrikes}/3 app switches. Still finished, but the next block should be cleaner.`
                 : "Timer complete. If the task is truly done, mark it complete and collect the win."}
           </Text>
+          <TouchableOpacity
+            style={[styles.recapActionButton, { backgroundColor: colors.tint }]}
+            onPress={handleStartNextBlock}
+          >
+            <Text style={styles.primaryButtonText}>
+              Start {focusData.suggestedMinutes}m Next Block
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -875,6 +954,50 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
+  focusCoachCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  focusCoachTitle: {
+    fontSize: 19,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  focusCoachBody: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+  },
+  focusCoachGrid: {
+    flexDirection: "row",
+    marginHorizontal: -5,
+    marginTop: 14,
+  },
+  focusCoachMetric: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 10,
+    marginHorizontal: 5,
+    alignItems: "center",
+  },
+  focusCoachValue: {
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  focusCoachLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
   timerCard: {
     borderRadius: 20,
     padding: 20,
@@ -905,6 +1028,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     fontWeight: "700",
+  },
+  recapActionButton: {
+    borderRadius: 16,
+    alignItems: "center",
+    marginTop: 14,
+    paddingVertical: 13,
   },
   cardLabel: {
     fontSize: 13,

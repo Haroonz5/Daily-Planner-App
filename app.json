@@ -12,7 +12,10 @@
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/images/app-icon.png",
-      "bundleIdentifier": "com.haroonzaman.dailydiscipline"
+      "bundleIdentifier": "com.haroonzaman.dailydiscipline",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.haroonzaman.dailydiscipline",
@@ -21,7 +24,11 @@
         "foregroundImage": "./assets/images/app-icon.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
+      ]
     },
     "web": {
       "output": "static",
@@ -56,6 +63,18 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9b5691ad-e84c-4617-b987-9a33d146b356"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9b5691ad-e84c-4617-b987-9a33d146b356"
     }
   }
 }

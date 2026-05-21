@@ -6,13 +6,27 @@ export type TimeBucket = "early" | "morning" | "afternoon" | "evening";
 export const weekdayShortLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export type TaskLike = {
+  id?: string;
+  title?: string;
   date: string;
   time: string;
   completed: boolean;
   status?: TaskStatus;
   priority?: TaskPriority;
+  durationMinutes?: number | null;
   rescheduledCount?: number;
   originalTime?: string;
+};
+
+export type TaskScheduleConflict = {
+  date: string;
+  firstTitle: string;
+  secondTitle: string;
+  firstStartMinutes: number;
+  firstEndMinutes: number;
+  secondStartMinutes: number;
+  overlapMinutes: number;
+  message: string;
 };
 
 export type BehaviorCallout = {
@@ -108,6 +122,98 @@ export const sortTasksBySchedule = <T extends { time: string }>(tasks: T[]) =>
     const timeB = parseTimeToMinutes(b.time) ?? 0;
     return timeA - timeB;
   });
+
+export const getEstimatedTaskDurationMinutes = (task: {
+  durationMinutes?: number | null;
+  priority?: TaskPriority;
+}) => {
+  if (task.durationMinutes && task.durationMinutes > 0) {
+    return Math.min(Math.max(task.durationMinutes, 5), 720);
+  }
+
+  if (task.priority === "High") return 90;
+  if (task.priority === "Low") return 30;
+  return 60;
+};
+
+const formatConflictTime = (minutes: number) => {
+  const date = new Date();
+  date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return formatTimeFromDate(date);
+};
+
+export const findTaskScheduleConflicts = <
+  T extends {
+    id?: string;
+    title?: string;
+    date: string;
+    time: string;
+    completed?: boolean;
+    status?: TaskStatus;
+    priority?: TaskPriority;
+    durationMinutes?: number | null;
+  },
+>(
+  tasks: T[],
+  options: { bufferMinutes?: number; maxConflicts?: number } = {}
+): TaskScheduleConflict[] => {
+  const bufferMinutes = options.bufferMinutes ?? 0;
+  const maxConflicts = options.maxConflicts ?? 5;
+
+  const scheduled = tasks
+    .filter((task) => !task.completed && (task.status ?? "pending") !== "skipped")
+    .map((task) => {
+      const start = parseTimeToMinutes(task.time);
+      if (start === null) return null;
+
+      return {
+        task,
+        start,
+        end: start + getEstimatedTaskDurationMinutes(task),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => {
+      if (a.task.date !== b.task.date) return a.task.date.localeCompare(b.task.date);
+      return a.start - b.start;
+    });
+
+  const conflicts: TaskScheduleConflict[] = [];
+
+  for (let index = 0; index < scheduled.length; index += 1) {
+    const current = scheduled[index];
+
+    for (let nextIndex = index + 1; nextIndex < scheduled.length; nextIndex += 1) {
+      const next = scheduled[nextIndex];
+      if (current.task.date !== next.task.date) break;
+
+      const overlapMinutes = current.end + bufferMinutes - next.start;
+      if (overlapMinutes <= 0) continue;
+
+      const firstTitle = current.task.title ?? "Task";
+      const secondTitle = next.task.title ?? "Task";
+
+      conflicts.push({
+        date: current.task.date,
+        firstTitle,
+        secondTitle,
+        firstStartMinutes: current.start,
+        firstEndMinutes: current.end,
+        secondStartMinutes: next.start,
+        overlapMinutes,
+        message: `${secondTitle} at ${formatConflictTime(
+          next.start
+        )} overlaps ${firstTitle}, which runs until about ${formatConflictTime(
+          current.end
+        )}.`,
+      });
+
+      if (conflicts.length >= maxConflicts) return conflicts;
+    }
+  }
+
+  return conflicts;
+};
 
 export const matchesRecurrenceDate = (
   date: Date,

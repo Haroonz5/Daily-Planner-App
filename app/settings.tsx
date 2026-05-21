@@ -279,6 +279,7 @@ export default function SettingsScreen({
     Record<string, RoutineCoachResult>
   >({});
   const [routineCoachBusyId, setRoutineCoachBusyId] = useState<string | null>(null);
+  const [routineManagerBusy, setRoutineManagerBusy] = useState(false);
   const [editingRoutine, setEditingRoutine] = useState<RoutineGroup | null>(null);
   const [editRoutineTitle, setEditRoutineTitle] = useState("");
   const [editRoutineTime, setEditRoutineTime] = useState("");
@@ -650,6 +651,21 @@ export default function SettingsScreen({
         })),
     [routineGroups]
   );
+
+  const routineManagerSummary = useMemo(() => {
+    const needsAttention = routineGroups.filter(
+      (routine) => routine.healthScore < 70 || routine.recentCompletionRate < 60
+    ).length;
+    const nextSevenDays = new Set(
+      routineGroups.flatMap((routine) => routine.upcomingDates)
+    ).size;
+
+    return {
+      active: routineGroups.length,
+      needsAttention,
+      nextSevenDays,
+    };
+  }, [routineGroups]);
 
   const releaseChecklistItems = useMemo(
     () => [
@@ -1418,6 +1434,30 @@ export default function SettingsScreen({
       setStatusMessage("Feedback sent. This will help polish the tester build.");
     } finally {
       setFeedbackBusy(false);
+    }
+  };
+
+  const repairRollingRoutines = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || routineManagerBusy) return;
+
+    setRoutineManagerBusy(true);
+
+    try {
+      // I added this button so the routine manager can repair rolling tasks on
+      // demand instead of making the user wait for the home screen to refill.
+      const generated = await ensureRollingRoutineTasks({ uid, tasks });
+      await syncMorningSummaryNotification(uid);
+      await refreshAudit();
+      await playRoutineFeedback(profile);
+      setStatusTone("success");
+      setStatusMessage(
+        generated > 0
+          ? `${generated} routine task${generated === 1 ? "" : "s"} refilled.`
+          : "Routines are already caught up."
+      );
+    } finally {
+      setRoutineManagerBusy(false);
     }
   };
 
@@ -2677,6 +2717,42 @@ export default function SettingsScreen({
           every day except Sunday&quot; without deleting completed history.
         </Text>
 
+        <View
+          style={[
+            styles.routineManagerPanel,
+            { backgroundColor: colors.background, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.routineManagerStats}>
+            {[
+              { label: "Active", value: routineManagerSummary.active },
+              { label: "Needs Tune", value: routineManagerSummary.needsAttention },
+              { label: "Upcoming", value: routineManagerSummary.nextSevenDays },
+            ].map((item) => (
+              <View key={item.label} style={styles.routineManagerStat}>
+                <Text style={[styles.routineManagerValue, { color: colors.text }]}>
+                  {item.value}
+                </Text>
+                <Text style={[styles.routineManagerLabel, { color: colors.subtle }]}>
+                  {item.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: colors.tint }]}
+            onPress={repairRollingRoutines}
+            disabled={routineManagerBusy || routineGroups.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Refill rolling routine tasks"
+          >
+            <Text style={styles.primaryButtonText}>
+              {routineManagerBusy ? "Checking routines..." : "Refill / Repair Routines"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {routineGroups.length > 0 ? (
           routineGroups.map((routine) => {
             const coach = routineCoachById[routine.id];
@@ -3919,6 +3995,33 @@ const styles = StyleSheet.create({
   routineActionText: {
     fontSize: 12,
     fontWeight: "900",
+  },
+  routineManagerPanel: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  routineManagerStats: {
+    flexDirection: "row",
+    marginHorizontal: -5,
+    marginBottom: 12,
+  },
+  routineManagerStat: {
+    flex: 1,
+    alignItems: "center",
+    marginHorizontal: 5,
+  },
+  routineManagerValue: {
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  routineManagerLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 3,
+    textTransform: "uppercase",
   },
   modalBackdrop: {
     flex: 1,

@@ -38,9 +38,11 @@ import {
 } from "../../utils/ai";
 import {
   buildRecurringDates,
+  findTaskScheduleConflicts,
   formatDateKey,
   formatRecurrenceLabel,
   formatTimeFromDate,
+  getEstimatedTaskDurationMinutes,
   getRelativeDateLabel,
   getTimeBucket,
   parseTimeToMinutes,
@@ -75,6 +77,7 @@ type Task = {
   priority?: TaskPriority;
   notes?: string;
   status?: TaskStatus;
+  durationMinutes?: number | null;
   rescheduledCount?: number;
   originalTime?: string;
   recurrence?: RecurrenceRule;
@@ -382,6 +385,28 @@ export default function AddTask() {
       selectedDayTasks.filter((task) => task.priority === "High").length +
       (title.trim() && priority === "High" ? 1 : 0);
 
+    const proposedTask = title.trim()
+      ? {
+          id: "draft-task",
+          title: title.trim(),
+          date: selectedDateKey,
+          time: formattedTime,
+          completed: false,
+          status: "pending" as TaskStatus,
+          priority,
+          durationMinutes: getEstimatedTaskDurationMinutes({ priority }),
+        }
+      : null;
+    const scheduleConflicts = proposedTask
+      ? findTaskScheduleConflicts([...selectedDayTasks, proposedTask], {
+          maxConflicts: 3,
+        }).filter(
+          (conflict) =>
+            conflict.firstTitle === proposedTask.title ||
+            conflict.secondTitle === proposedTask.title
+        )
+      : [];
+
     const closeTasks = selectedDayTasks.filter((task) => {
       const existing = parseTimeToMinutes(task.time);
       if (existing === null || selectedMinutes === null) return false;
@@ -402,7 +427,9 @@ export default function AddTask() {
       );
     }
 
-    if (closeTasks.length >= 2) {
+    if (scheduleConflicts.length > 0) {
+      scheduleConflicts.forEach((conflict) => warnings.push(conflict.message));
+    } else if (closeTasks.length >= 2) {
       warnings.push(
         "This time slot is getting crowded. Give yourself more breathing room between tasks."
       );
@@ -491,6 +518,7 @@ export default function AddTask() {
       suggestion,
       dayTaskCount: projectedTaskCount,
       closeTaskCount: closeTasks.length,
+      conflictCount: scheduleConflicts.length,
     };
   }, [formattedTime, priority, selectedDateKey, selectedDateLabel, tasks, title]);
 
@@ -576,6 +604,7 @@ export default function AddTask() {
           date: task.date,
           time: task.time,
           priority: task.priority,
+          durationMinutes: task.durationMinutes ?? null,
           completed: task.completed,
           status: task.status,
         })),
@@ -597,6 +626,7 @@ export default function AddTask() {
             date: task.date,
             time: task.time,
             priority: task.priority,
+            durationMinutes: task.durationMinutes ?? null,
             completed: task.completed,
             status: task.status,
           })),
@@ -659,6 +689,7 @@ export default function AddTask() {
       time: string;
       date: string;
       priority?: TaskPriority;
+      durationMinutes?: number | null;
       notes?: string;
       completed?: boolean;
       status?: TaskStatus;
@@ -695,6 +726,125 @@ export default function AddTask() {
     ).catch(() => {});
 
     await syncMorningSummaryNotification(uid).catch(() => {});
+  };
+
+  const queueOfflinePayloads = async (payloads: Record<string, unknown>[]) => {
+    // I route failed writes through the same offline queue so manual tasks, AI
+    // drafts, and breakdown steps all survive bad Wi-Fi instead of disappearing.
+    for (const payload of payloads) {
+      await enqueueOfflineTask({
+        ...payload,
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+        skippedAt: null,
+        lastActionAt: new Date().toISOString(),
+        rescheduledCount: 0,
+      });
+    }
+
+    return payloads.length;
+  };
+
+  const queueParsedTasksOffline = async (uid: string) => {
+    const payloads: Record<string, unknown>[] = [];
+
+    parsedTasks.forEach((parsedTask, index) => {
+      const taskRecurrence = parsedTask.recurrence ?? "none";
+      const recurrenceGroupId =
+        taskRecurrence === "none"
+          ? null
+          : `${uid}-${Date.now()}-offline-ai-${index}`;
+      const taskDates = buildRecurringDates(
+        parsedTask.date,
+        taskRecurrence,
+        parsedTask.recurrenceDays
+      );
+
+      taskDates.forEach((dateKey) => {
+        payloads.push({
+          title: parsedTask.title.trim(),
+          notes: composeParsedNotes(parsedTask),
+          priority: parsedTask.priority ?? "Medium",
+          durationMinutes: parsedTask.durationMinutes ?? null,
+          time: parsedTask.time,
+          date: dateKey,
+          completed: false,
+          status: "pending",
+          originalTime: parsedTask.time,
+          recurrence: taskRecurrence,
+          recurrenceGroupId,
+          recurrenceDays:
+            taskRecurrence === "custom" ? parsedTask.recurrenceDays ?? [] : null,
+          rollingRoutine: taskRecurrence !== "none",
+          aiCreated: true,
+        });
+      });
+    });
+
+    return queueOfflinePayloads(payloads);
+  };
+
+  const queueBreakdownTasksOffline = async () => {
+    if (!breakdown) return 0;
+
+    const startMinutes =
+      parseTimeToMinutes(formattedTime) ?? time.getHours() * 60 + time.getMinutes();
+    let cursorMinutes = startMinutes;
+    const payloads = breakdown.steps.map((step) => {
+      const stepTime = formatMinutesAsTaskTime(
+        Math.min(cursorMinutes, 23 * 60 + 45)
+      );
+      const stepNotes = [
+        step.notes,
+        `Part of: ${title.trim()}`,
+        `Estimated duration: ${step.durationMinutes} minutes`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      cursorMinutes += step.durationMinutes + 10;
+
+      return {
+        title: step.title.trim(),
+        notes: stepNotes,
+        priority: step.priority,
+        durationMinutes: step.durationMinutes,
+        time: stepTime,
+        date: selectedDateKey,
+        completed: false,
+        status: "pending",
+        originalTime: stepTime,
+        recurrence: "none",
+        recurrenceGroupId: null,
+        aiCreated: true,
+        breakdownCreated: true,
+        parentTaskTitle: title.trim(),
+      };
+    });
+
+    return queueOfflinePayloads(payloads);
+  };
+
+  const queueManualTasksOffline = async (uid: string) => {
+    const recurrenceGroupId =
+      recurrence === "none" ? null : `${uid}-${Date.now()}-offline`;
+    const payloads = recurringDates.map((dateKey) => ({
+      title: title.trim(),
+      notes: notes.trim(),
+      priority,
+      durationMinutes: null,
+      time: formattedTime,
+      date: dateKey,
+      completed: false,
+      status: "pending",
+      originalTime: formattedTime,
+      recurrence,
+      recurrenceGroupId,
+      recurrenceDays: null,
+      rollingRoutine: recurrence !== "none",
+    }));
+
+    return queueOfflinePayloads(payloads);
   };
 
   const applyTimePreset = (timeLabel: string) => {
@@ -782,6 +932,7 @@ export default function AddTask() {
           date: task.date,
           time: task.time,
           priority: task.priority,
+          durationMinutes: task.durationMinutes ?? null,
           completed: task.completed,
           status: task.status,
         })),
@@ -825,6 +976,7 @@ export default function AddTask() {
         time: string;
         date: string;
         priority: TaskPriority;
+        durationMinutes?: number | null;
       }[] = [];
 
       breakdown.steps.forEach((step) => {
@@ -844,6 +996,7 @@ export default function AddTask() {
           title: step.title.trim(),
           notes: stepNotes,
           priority: step.priority,
+          durationMinutes: step.durationMinutes,
           time: stepTime,
           date: selectedDateKey,
           completed: false,
@@ -867,6 +1020,7 @@ export default function AddTask() {
           time: stepTime,
           date: selectedDateKey,
           priority: step.priority,
+          durationMinutes: step.durationMinutes,
         });
 
         cursorMinutes += step.durationMinutes + 10;
@@ -885,50 +1039,13 @@ export default function AddTask() {
     } catch (e: any) {
       const uid = auth.currentUser?.uid;
       if (uid && shouldQueueOffline(e)) {
-        let queuedCount = 0;
+        const queuedCount = await queueBreakdownTasksOffline();
 
-        for (const [index, parsedTask] of parsedTasks.entries()) {
-          const taskRecurrence = parsedTask.recurrence ?? "none";
-          const recurrenceGroupId =
-            taskRecurrence === "none" ? null : `${uid}-${Date.now()}-offline-ai-${index}`;
-          const taskDates = buildRecurringDates(
-            parsedTask.date,
-            taskRecurrence,
-            parsedTask.recurrenceDays
-          );
-
-          for (const dateKey of taskDates) {
-            await enqueueOfflineTask({
-              title: parsedTask.title.trim(),
-              notes: composeParsedNotes(parsedTask),
-              priority: parsedTask.priority ?? "Medium",
-              time: parsedTask.time,
-              date: dateKey,
-              completed: false,
-              status: "pending",
-              createdAt: new Date().toISOString(),
-              completedAt: null,
-              skippedAt: null,
-              lastActionAt: new Date().toISOString(),
-              rescheduledCount: 0,
-              originalTime: parsedTask.time,
-              recurrence: taskRecurrence,
-              recurrenceGroupId,
-              recurrenceDays:
-                taskRecurrence === "custom"
-                  ? parsedTask.recurrenceDays ?? []
-                  : null,
-              rollingRoutine: taskRecurrence !== "none",
-              aiCreated: true,
-            });
-            queuedCount += 1;
-          }
-        }
-
+        resetForm();
         await playTaskCreatedFeedback(profile);
         setError("");
         setSuccessMessage(
-          `${queuedCount} AI-planned task${queuedCount === 1 ? "" : "s"} saved offline. They will sync when the backend connection comes back.`
+          `${queuedCount} breakdown step${queuedCount === 1 ? "" : "s"} saved offline. They will sync when connection comes back.`
         );
         setTimeout(() => setSuccessMessage(""), 3200);
         return;
@@ -967,6 +1084,7 @@ export default function AddTask() {
         time: string;
         date: string;
         priority: TaskPriority;
+        durationMinutes?: number | null;
         notes?: string;
         completed: boolean;
         status: TaskStatus;
@@ -993,6 +1111,7 @@ export default function AddTask() {
             title: parsedTask.title.trim(),
             notes: composeParsedNotes(parsedTask),
             priority: safePriority,
+            durationMinutes: parsedTask.durationMinutes ?? null,
             time: parsedTask.time,
             date: dateKey,
             completed: false,
@@ -1017,6 +1136,7 @@ export default function AddTask() {
             time: parsedTask.time,
             date: dateKey,
             priority: safePriority,
+            durationMinutes: parsedTask.durationMinutes ?? null,
             notes: composeParsedNotes(parsedTask),
             completed: false,
             status: "pending",
@@ -1046,38 +1166,17 @@ export default function AddTask() {
     } catch (e: any) {
       const uid = auth.currentUser?.uid;
       if (uid && shouldQueueOffline(e)) {
-        const recurrenceGroupId =
-          recurrence === "none" ? null : `${uid}-${Date.now()}-offline`;
-        let queuedCount = 0;
+        const queuedCount = await queueParsedTasksOffline(uid);
 
-        for (const dateKey of recurringDates) {
-          await enqueueOfflineTask({
-            title: title.trim(),
-            notes: notes.trim(),
-            priority,
-            time: formattedTime,
-            date: dateKey,
-            completed: false,
-            status: "pending",
-            createdAt: new Date().toISOString(),
-            completedAt: null,
-            skippedAt: null,
-            lastActionAt: new Date().toISOString(),
-            rescheduledCount: 0,
-            originalTime: formattedTime,
-            recurrence,
-            recurrenceGroupId,
-            recurrenceDays: null,
-            rollingRoutine: recurrence !== "none",
-          });
-          queuedCount += 1;
-        }
-
-        resetForm();
+        setNaturalInput("");
+        setParsedTasks([]);
+        setAiWarnings([]);
+        setAiSource(null);
+        setRealityCheck(null);
         await playTaskCreatedFeedback(profile);
         setError("");
         setSuccessMessage(
-          `${queuedCount} task${queuedCount === 1 ? "" : "s"} saved offline. They will sync automatically when connection is back.`
+          `${queuedCount} AI-planned task${queuedCount === 1 ? "" : "s"} saved offline. They will sync when connection comes back.`
         );
         setTimeout(() => setSuccessMessage(""), 3200);
         return;
@@ -1118,6 +1217,7 @@ export default function AddTask() {
         time: string;
         date: string;
         priority: TaskPriority;
+        durationMinutes?: number | null;
         notes?: string;
         completed: boolean;
         status: TaskStatus;
@@ -1132,6 +1232,7 @@ export default function AddTask() {
           title: title.trim(),
           notes: notes.trim(),
           priority,
+          durationMinutes: null,
           time: formattedTime,
           date: dateKey,
           completed: false,
@@ -1154,6 +1255,7 @@ export default function AddTask() {
           time: formattedTime,
           date: dateKey,
           priority,
+          durationMinutes: null,
           notes: notes.trim(),
           completed: false,
           status: "pending",
@@ -1178,6 +1280,20 @@ export default function AddTask() {
       setSuccessMessage(success);
       setTimeout(() => setSuccessMessage(""), 2600);
     } catch (e: any) {
+      const uid = auth.currentUser?.uid;
+      if (uid && shouldQueueOffline(e)) {
+        const queuedCount = await queueManualTasksOffline(uid);
+
+        resetForm();
+        await playTaskCreatedFeedback(profile);
+        setError("");
+        setSuccessMessage(
+          `${queuedCount} task${queuedCount === 1 ? "" : "s"} saved offline. They will sync automatically when connection is back.`
+        );
+        setTimeout(() => setSuccessMessage(""), 3200);
+        return;
+      }
+
       await playWarningFeedback(profile);
       setError(getTaskSaveErrorMessage(e));
     } finally {
@@ -1253,9 +1369,9 @@ export default function AddTask() {
             <View style={styles.plannerHeroDivider} />
             <View style={styles.plannerHeroStat}>
               <Text style={styles.plannerHeroStatValue}>
-                {planningInsights.closeTaskCount}
+                {planningInsights.conflictCount}
               </Text>
-              <Text style={styles.plannerHeroStatLabel}>nearby</Text>
+              <Text style={styles.plannerHeroStatLabel}>conflicts</Text>
             </View>
             <View style={styles.plannerHeroDivider} />
             <View style={styles.plannerHeroStat}>
