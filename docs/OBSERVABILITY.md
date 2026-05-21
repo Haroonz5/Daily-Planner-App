@@ -119,3 +119,30 @@ Before a tester push:
 - Structured JSON logs in the Python backend.
 - Push receipt polling for Expo ticket delivery outcomes.
 - Alerting for high 401/429/5xx rates.
+
+## Native Observability Hooks
+
+The mobile app now has provider-safe hooks for native observability:
+
+- `utils/request-tracing.ts` adds request IDs and `traceparent` headers to AI/analytics calls.
+- `utils/app-check.ts` attaches `X-Firebase-AppCheck` when a native App Check bridge is available.
+- `utils/crash-provider.ts` forwards existing crash reports to a future Sentry/Crashlytics adapter without breaking Expo Go.
+
+See `docs/NATIVE_OBSERVABILITY.md` for the bridge contracts.
+
+## Production Doctor
+
+The app now includes a protected tester/admin screen at `/production-doctor`.
+
+It checks:
+
+- AI backend/gateway health
+- gateway auth and App Check mode
+- mobile App Check token availability
+- Expo push token registration
+- latest server push receipt state
+- scheduled local notification duplicates
+- offline sync queue health
+- crash provider bridge status
+
+Use it before sending a TestFlight/internal build to quickly spot whether the problem is mobile permissions, gateway config, Functions deployment, or backend availability.

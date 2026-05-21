@@ -16,6 +16,7 @@ const requiredFiles = [
   "docs/HOSTED_BACKEND_DEPLOYMENT.md",
   "docs/PUSH_PIPELINE.md",
   "docs/OBSERVABILITY.md",
+  "docs/NATIVE_OBSERVABILITY.md",
 ];
 
 const failures = [];

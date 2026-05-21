@@ -38,6 +38,15 @@ type CalendarPullResult = {
   missing: number;
 };
 
+export type CalendarConflict = {
+  taskTitle: string;
+  eventTitle: string;
+  calendarTitle: string;
+  startDate: string;
+  endDate: string;
+  message: string;
+};
+
 const DAILY_DISCIPLINE_CALENDAR_TITLE = "Daily Discipline";
 
 const addMinutes = (date: Date, minutes: number) =>
@@ -109,6 +118,103 @@ const getWritableCalendarId = async () => {
     ownerAccount: DAILY_DISCIPLINE_CALENDAR_TITLE,
     accessLevel: Calendar.CalendarAccessLevel.OWNER,
   });
+};
+
+const getEventDate = (value: Calendar.Event["startDate"] | Calendar.Event["endDate"]) => {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const findNativeCalendarConflicts = async (
+  tasks: CalendarExportTask[],
+  options?: { limit?: number }
+) => {
+  const current = await Calendar.getCalendarPermissionsAsync().catch(() => null);
+  if (!current?.granted) {
+    return {
+      permissionGranted: false,
+      conflicts: [] as CalendarConflict[],
+    };
+  }
+
+  const windows = tasks
+    .filter((task) => !task.completed && task.status !== "completed" && task.status !== "skipped")
+    .map((task) => {
+      const start = parseTaskDateTime(task.date, task.time);
+      if (!start) return null;
+
+      return {
+        task,
+        start,
+        end: addMinutes(start, getEstimatedTaskDurationMinutes(task)),
+      };
+    })
+    .filter(Boolean) as {
+      task: CalendarExportTask;
+      start: Date;
+      end: Date;
+    }[];
+
+  if (windows.length === 0) {
+    return { permissionGranted: true, conflicts: [] as CalendarConflict[] };
+  }
+
+  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT).catch(
+    () => []
+  );
+  const calendarById = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+  const sourceCalendars = calendars.filter(
+    (calendar) =>
+      calendar.id &&
+      calendar.title !== DAILY_DISCIPLINE_CALENDAR_TITLE &&
+      (!calendar.entityType || calendar.entityType === Calendar.EntityTypes.EVENT)
+  );
+
+  if (sourceCalendars.length === 0) {
+    return { permissionGranted: true, conflicts: [] as CalendarConflict[] };
+  }
+
+  const firstStart = new Date(
+    Math.min(...windows.map((window) => window.start.getTime()))
+  );
+  const lastEnd = new Date(Math.max(...windows.map((window) => window.end.getTime())));
+  firstStart.setMinutes(firstStart.getMinutes() - 5);
+  lastEnd.setMinutes(lastEnd.getMinutes() + 5);
+
+  const events = await Calendar.getEventsAsync(
+    sourceCalendars.map((calendar) => calendar.id),
+    firstStart,
+    lastEnd
+  ).catch(() => []);
+  const conflicts: CalendarConflict[] = [];
+  const limit = options?.limit ?? 5;
+
+  for (const window of windows) {
+    for (const event of events) {
+      const eventStart = getEventDate(event.startDate);
+      const eventEnd = getEventDate(event.endDate);
+      if (!eventStart || !eventEnd) continue;
+      if (window.start >= eventEnd || window.end <= eventStart) continue;
+
+      const calendarTitle =
+        calendarById.get(event.calendarId ?? "")?.title ?? "phone calendar";
+      const eventTitle = event.title || "calendar event";
+      conflicts.push({
+        taskTitle: window.task.title,
+        eventTitle,
+        calendarTitle,
+        startDate: eventStart.toISOString(),
+        endDate: eventEnd.toISOString(),
+        message: `${window.task.title} overlaps ${eventTitle} on ${calendarTitle}.`,
+      });
+
+      if (conflicts.length >= limit) {
+        return { permissionGranted: true, conflicts };
+      }
+    }
+  }
+
+  return { permissionGranted: true, conflicts };
 };
 
 export const exportTasksToCalendar = async (

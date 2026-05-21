@@ -22,6 +22,8 @@ type AppErrorRow = {
   appVersion?: string;
   device?: { platform?: string; osVersion?: string | number };
   metadata?: Record<string, unknown>;
+  requestId?: string;
+  traceId?: string;
   createdAt?: any;
 };
 
@@ -89,6 +91,8 @@ export default function CrashViewerScreen() {
           <Text style={[styles.badge, { color: colors.warning }]}>{(error.severity ?? "error").toUpperCase()} · {error.appVersion ?? "1.0.0"}</Text>
           <Text style={[styles.message, { color: colors.subtle }]}>{error.message ?? error.name ?? "Unknown error"}</Text>
           {error.device ? <Text style={[styles.meta, { color: colors.subtle }]}>{error.device.platform ?? "device"} {String(error.device.osVersion ?? "")}</Text> : null}
+          {error.requestId ? <Text style={[styles.meta, { color: colors.tint }]} numberOfLines={1}>request {error.requestId}</Text> : null}
+          {error.traceId ? <Text style={[styles.meta, { color: colors.subtle }]} numberOfLines={1}>trace {error.traceId}</Text> : null}
           {error.fingerprint ? <Text style={[styles.meta, { color: colors.subtle }]} numberOfLines={1}>{error.fingerprint}</Text> : null}
           {error.stack ? <Text style={[styles.stack, { color: colors.subtle }]} numberOfLines={5}>{error.stack}</Text> : null}
           <TouchableOpacity style={[styles.deleteButton, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => clearError(error.id)} accessibilityRole="button" accessibilityLabel="Delete this error report">

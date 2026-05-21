@@ -33,6 +33,7 @@ import { getEmailVerificationSkipped } from "../utils/email-verification";
 import { useIdleFeedback } from "@/hooks/use-idle-feedback";
 import { useUserProfile } from "@/hooks/use-user-profile";
 import { reportAppError } from "../utils/error-reporting";
+import { configureCrashScope } from "../utils/crash-provider";
 import { logProductionAnalyticsEvent } from "../utils/analytics";
 import { flushOfflineTaskQueue } from "../utils/offline-task-queue";
 import { getOnboardingPersonalization, getPlanningRuleSeed } from "../utils/onboarding-personalization";
@@ -202,6 +203,8 @@ export default function RootLayout() {
   useEffect(() => {
     if (!user) return;
 
+    configureCrashScope({ uid: user.uid, email: user.email }).catch(() => {});
+
     registerExpoPushTokenForUser(user.uid).catch(() => {});
     logProductionAnalyticsEvent("app_opened").catch(() => {});
   }, [user]);
@@ -266,6 +269,8 @@ export default function RootLayout() {
     const inAiMemoryTimeline = firstSegment === "ai-memory-timeline";
     const inAdminTesterDashboard = firstSegment === "admin-tester-dashboard";
     const inCrashViewer = firstSegment === "crash-viewer";
+    const inProductionDoctor = firstSegment === "production-doctor";
+    const inNotificationInbox = firstSegment === "notification-inbox";
     const inPrivacy = firstSegment === "privacy";
     const inWidgetPreview = firstSegment === "widget-preview";
     const inTutorial = firstSegment === "tutorial";
@@ -306,6 +311,8 @@ export default function RootLayout() {
         inAiMemoryTimeline ||
         inAdminTesterDashboard ||
         inCrashViewer ||
+        inProductionDoctor ||
+        inNotificationInbox ||
         inPrivacy ||
         inWidgetPreview ||
         inTutorial ||
@@ -493,6 +500,8 @@ export default function RootLayout() {
               <Stack.Screen name="ai-memory-timeline" options={{ headerShown: false }} />
               <Stack.Screen name="admin-tester-dashboard" options={{ headerShown: false }} />
               <Stack.Screen name="crash-viewer" options={{ headerShown: false }} />
+              <Stack.Screen name="production-doctor" options={{ headerShown: false }} />
+              <Stack.Screen name="notification-inbox" options={{ headerShown: false }} />
               <Stack.Screen name="privacy" options={{ headerShown: false }} />
               <Stack.Screen name="modal" options={{ headerShown: false }} />
             </Stack>

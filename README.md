@@ -14,6 +14,8 @@ feedback, rewards, and accountability all live in the same loop.
 - AI memory that learns preferred planning windows from completion history
 - Voice-assisted planning through phone keyboard dictation
 - Reality checks for overloaded schedules
+- AI confidence scoring on planned drafts, with reasons when a draft may need review
+- Calendar conflict warnings against existing tasks and phone calendar events when calendar permission is available
 - AI rescheduling for missed tasks
 - AI backend health card with response time, model/fallback status, and timeout visibility
 - Feature flags for turning advanced tester/demo systems on or off without deleting code
@@ -30,6 +32,10 @@ feedback, rewards, and accountability all live in the same loop.
 - Scheduled server-side due-task push reminders with auditable push receipts
 - App Check ready Go gateway with optional and required production modes
 - k6 gateway load testing and observability docs for request IDs, audit logs, and diagnostics
+- Native observability hooks for App Check tokens, request tracing, and future Sentry/Crashlytics adapters
+- Production Doctor screen for AI, gateway, App Check, push, offline sync, and crash-provider health
+- Smart Notification Inbox for local reminders, friend nudges, push receipts, and duplicate reminder signals
+- Expo push receipt polling for delivered/failed notification diagnostics
 - Native iOS Focus Shield scaffold for a future development/custom build
 - GitHub Actions CI/CD covering app QA, AI evals, Go tests, Functions syntax, security checks, and Docker config
 - Admin tester dashboard for task, feedback, diagnostics, analytics, and backend health signals
@@ -86,6 +92,11 @@ The planner extracts structured tasks with dates, times, duration estimates,
 priority, notes, and recurrence rules. Settings also includes **AI Planning
 Rules**, so users can save preferences like `no workouts on Sunday` or `keep
 school tasks before 9 PM`.
+
+AI drafts now show a confidence score and compact reasons such as time conflicts,
+missing duration, or duplicate tasks. Manual and AI planning also reuse the
+calendar conflict checker, so the app can warn when a new task overlaps existing
+Daily Discipline tasks or phone calendar events.
 
 Users can also load built-in task templates or save their own custom templates
 for recurring personal routines.
@@ -210,6 +221,7 @@ my-app/
     admin-analytics.tsx # Gateway/admin analytics dashboard
     admin-tester-dashboard.tsx # Tester build health dashboard
     crash-viewer.tsx   # In-app diagnostic/error viewer
+    notification-inbox.tsx # Smart local/push notification inbox
     privacy.tsx        # Privacy, analytics, and AI data controls
     demo-mode.tsx      # Seedable demo account tools
     week.tsx           # Calendar and future planner
@@ -695,6 +707,8 @@ The mobile app should only know the hosted Go security gateway URL. Gemini/OpenA
 - EAS preview, platform-specific tester builds, and TestFlight command shortcuts.
 - Crash-style Firestore diagnostics, local error buffer, and in-app Crash Viewer.
 - Native calendar sync for one task from Week Planner or 30 days from Settings.
+- Calendar conflict detection for manual and AI-planned tasks.
+- Smart Notification Inbox for reminders, accountability nudges, and push receipt status.
 - Widget-ready summary cache plus Widget Preview screen for lock-screen/home-screen planning.
 
 ## Advanced Production Systems

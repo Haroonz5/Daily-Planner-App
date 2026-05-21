@@ -256,3 +256,28 @@ Strong next engineering tasks:
 Gateway-side App Check is implemented with `off`, `optional`, and `required` modes. `render.production.yaml` enables required mode for production hosting.
 
 The mobile client token path is intentionally not forced yet because the current Expo/Firebase JS SDK setup does not automatically provide native iOS App Attest/DeviceCheck or Android Play Integrity tokens. Keep tester builds on optional mode until a custom native build/provider is added and verified.
+
+## Latest Native Observability Pass
+
+A newer technical pass added:
+
+- `utils/request-tracing.ts` for request IDs, trace IDs, and W3C `traceparent` headers.
+- AI and analytics calls now send trace headers.
+- Go security gateway forwards trace headers and continues storing request IDs in audit logs.
+- `utils/app-check.ts` for optional native App Check token bridging through `globalThis.DailyDisciplineAppCheck`.
+- `utils/crash-provider.ts` for optional Sentry/Crashlytics-style bridging through `globalThis.DailyDisciplineCrashProvider`.
+- Error reports now include `requestId` and `traceId` and the Crash Viewer shows them.
+- Firestore rules allow the new diagnostic trace fields.
+- `docs/NATIVE_OBSERVABILITY.md` explains how to finish native App Check and crash provider adapters later.
+
+## Latest Debuggability Pass
+
+Another pass added:
+
+- Expo push ticket capture in Firebase Functions.
+- Scheduled Expo push receipt polling with `pollExpoPushReceipts`.
+- Push receipt records now include `ticketId`, `receiptStatus`, `receiptReason`, and `receiptCheckedAt`.
+- Task docs can store `duePushTicketId` for due-task reminder auditing.
+- New `/production-doctor` screen checks AI/gateway, App Check, push token, push receipts, scheduled reminders, offline queue, and crash provider status.
+- Settings links to Production Doctor from Interview Systems.
+- Push and observability docs were updated with receipt polling and doctor-screen workflows.

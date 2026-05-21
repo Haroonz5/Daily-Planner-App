@@ -8,6 +8,7 @@ const db = admin.firestore();
 
 const TASK_PUSH_LOOKAHEAD_MINUTES = 8;
 const TASK_PUSH_GRACE_MINUTES = 2;
+const PUSH_RECEIPT_POLL_LIMIT = 80;
 
 const isExpoPushToken = (token) =>
   typeof token === "string" &&
@@ -38,7 +39,38 @@ const sendExpoPush = async ({ token, title, body, data }) => {
     return { ok: false, reason: `expo-${response.status}` };
   }
 
-  return { ok: true, reason: "sent" };
+  const payload = await response.json().catch(() => ({}));
+  const ticket = Array.isArray(payload?.data) ? payload.data[0] : payload?.data;
+  if (ticket?.status === "error") {
+    return {
+      ok: false,
+      reason: ticket.details?.error || ticket.message || "expo-ticket-error",
+      ticketId: ticket.id || null,
+    };
+  }
+
+  return { ok: true, reason: "sent", ticketId: ticket?.id || null };
+};
+
+const fetchExpoPushReceipts = async (ids) => {
+  if (!Array.isArray(ids) || ids.length === 0) return {};
+
+  const response = await fetch("https://exp.host/--/api/v2/push/getReceipts", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip, deflate",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ids }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`expo-receipts-${response.status}`);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  return payload?.data || {};
 };
 
 const formatDateKey = (date) => {
@@ -78,7 +110,7 @@ const parseTaskDateTime = (dateKey, time) => {
   return new Date(year, month - 1, day, parsedTime.hour, parsedTime.minute, 0, 0);
 };
 
-const writePushReceipt = async ({ uid, type, status, reason, token, title, body, data }) => {
+const writePushReceipt = async ({ uid, type, status, reason, ticketId, token, title, body, data }) => {
   if (!uid) return;
 
   await db
@@ -89,6 +121,8 @@ const writePushReceipt = async ({ uid, type, status, reason, token, title, body,
       type,
       status,
       reason,
+      ticketId: ticketId || null,
+      receiptStatus: ticketId ? "pending" : null,
       tokenSuffix: typeof token === "string" ? token.slice(-12) : null,
       title,
       body,
@@ -284,6 +318,7 @@ exports.sendPushOnAccountabilityNudge = onDocumentCreated(
       type: "accountabilityNudge",
       status: result.ok ? "sent" : "not-sent",
       reason: result.reason,
+      ticketId: result.ticketId,
       token,
       title: "Accountability check-in",
       body:
@@ -366,6 +401,7 @@ exports.sendDueTaskPushReminders = onSchedule(
         duePushAttemptedAt: admin.firestore.FieldValue.serverTimestamp(),
         duePushStatus: result.ok ? "sent" : "not-sent",
         duePushReason: result.reason,
+        duePushTicketId: result.ticketId || null,
         ...(result.ok ? { duePushSentAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
       });
 
@@ -374,6 +410,7 @@ exports.sendDueTaskPushReminders = onSchedule(
         type: "taskDue",
         status: result.ok ? "sent" : "not-sent",
         reason: result.reason,
+        ticketId: result.ticketId,
         token,
         title,
         body,
@@ -385,5 +422,62 @@ exports.sendDueTaskPushReminders = onSchedule(
     }
 
     console.log(`sendDueTaskPushReminders checked=${checked} sent=${sent} skipped=${skipped}`);
+  }
+);
+
+exports.pollExpoPushReceipts = onSchedule(
+  {
+    schedule: "every 15 minutes",
+    timeZone: "America/New_York",
+  },
+  async () => {
+    const pending = await db
+      .collectionGroup("pushReceipts")
+      .where("receiptStatus", "==", "pending")
+      .limit(PUSH_RECEIPT_POLL_LIMIT)
+      .get();
+
+    const receiptsByTicket = new Map();
+    pending.docs.forEach((document) => {
+      const data = document.data();
+      if (typeof data.ticketId === "string" && data.ticketId.trim()) {
+        receiptsByTicket.set(data.ticketId, document.ref);
+      }
+    });
+
+    const ticketIds = Array.from(receiptsByTicket.keys());
+    if (ticketIds.length === 0) {
+      console.log("pollExpoPushReceipts checked=0 updated=0");
+      return;
+    }
+
+    let receipts = {};
+    try {
+      receipts = await fetchExpoPushReceipts(ticketIds);
+    } catch (error) {
+      console.error("pollExpoPushReceipts failed", error);
+      return;
+    }
+
+    const batch = db.batch();
+    let updated = 0;
+
+    Object.entries(receipts).forEach(([ticketId, receipt]) => {
+      const ref = receiptsByTicket.get(ticketId);
+      if (!ref) return;
+
+      const status = receipt?.status === "ok" ? "delivered" : "failed";
+      const detail = receipt?.details?.error || receipt?.message || receipt?.status || "unknown";
+
+      batch.update(ref, {
+        receiptStatus: status,
+        receiptReason: detail,
+        receiptCheckedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      updated += 1;
+    });
+
+    if (updated > 0) await batch.commit();
+    console.log(`pollExpoPushReceipts checked=${ticketIds.length} updated=${updated}`);
   }
 );

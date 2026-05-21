@@ -57,6 +57,7 @@ import {
   syncMorningSummaryNotification,
   syncTaskNotifications,
 } from "../../utils/notifications";
+import { findNativeCalendarConflicts } from "../../utils/calendar";
 import { ensureRollingRoutineTasks } from "../../utils/routines";
 import { enqueueOfflineTask } from "../../utils/offline-task-queue";
 import {
@@ -225,6 +226,84 @@ const shouldQueueOffline = (error: any) => {
   );
 };
 
+type AiConfidenceLevel = "High" | "Medium" | "Low";
+
+type AiTaskConfidence = {
+  level: AiConfidenceLevel;
+  score: number;
+  reasons: string[];
+};
+
+const getAiTaskConfidence = (
+  draft: ParsedAiTask,
+  existingTasks: Task[]
+): AiTaskConfidence => {
+  const title = draft.title.trim();
+  const priority = draft.priority ?? "Medium";
+  const proposedTask: Task = {
+    id: "ai-draft-task",
+    title,
+    date: draft.date,
+    time: draft.time,
+    completed: false,
+    status: "pending",
+    priority,
+    durationMinutes:
+      draft.durationMinutes ?? getEstimatedTaskDurationMinutes({ priority }),
+  };
+  const sameDayTasks = existingTasks.filter((task) => task.date === draft.date);
+  const taskConflicts = findTaskScheduleConflicts(
+    [...sameDayTasks, proposedTask],
+    { maxConflicts: 3 }
+  ).filter(
+    (conflict) =>
+      conflict.firstTitle === title || conflict.secondTitle === title
+  );
+  const duplicateTitle = sameDayTasks.some(
+    (task) => task.title.trim().toLowerCase() === title.toLowerCase()
+  );
+  const reasons: string[] = [];
+  let score = 92;
+
+  if (title.split(/\s+/).length <= 1) {
+    score -= 8;
+    reasons.push("Short title");
+  }
+
+  if (!draft.durationMinutes) {
+    score -= 8;
+    reasons.push("No duration estimate");
+  }
+
+  if (taskConflicts.length > 0) {
+    score -= 30;
+    reasons.push("Time conflict");
+  }
+
+  if (duplicateTitle) {
+    score -= 12;
+    reasons.push("Similar task already exists");
+  }
+
+  if (draft.recurrence && draft.recurrence !== "none") {
+    score += 4;
+    reasons.push("Repeat rule understood");
+  }
+
+  const boundedScore = Math.max(35, Math.min(99, score));
+  const level =
+    boundedScore >= 82 ? "High" : boundedScore >= 62 ? "Medium" : "Low";
+
+  return {
+    level,
+    score: boundedScore,
+    reasons:
+      reasons.length > 0
+        ? reasons.slice(0, 3)
+        : ["Clear title, date, and time"],
+  };
+};
+
 const getDefaultFutureDate = () => {
   const date = new Date();
   date.setDate(date.getDate() + 2);
@@ -287,6 +366,12 @@ export default function AddTask() {
   const [parsedTasks, setParsedTasks] = useState<ParsedAiTask[]>([]);
   const [customTemplates, setCustomTemplates] = useState<TaskTemplate[]>([]);
   const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [calendarConflictWarnings, setCalendarConflictWarnings] = useState<
+    string[]
+  >([]);
+  const [manualCalendarWarnings, setManualCalendarWarnings] = useState<string[]>(
+    []
+  );
   const [aiSource, setAiSource] = useState<AiSource | null>(null);
   const [realityCheck, setRealityCheck] = useState<RealityCheckResult | null>(null);
   const [breakdown, setBreakdown] = useState<TaskBreakdownResult | null>(null);
@@ -522,6 +607,62 @@ export default function AddTask() {
     };
   }, [formattedTime, priority, selectedDateKey, selectedDateLabel, tasks, title]);
 
+  useEffect(() => {
+    let active = true;
+
+    if (!title.trim()) {
+      setManualCalendarWarnings([]);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void findNativeCalendarConflicts(
+        [
+          {
+            id: "manual-draft",
+            title: title.trim(),
+            date: selectedDateKey,
+            time: formattedTime,
+            priority,
+            durationMinutes: getEstimatedTaskDurationMinutes({ priority }),
+          },
+        ],
+        { limit: 2 }
+      )
+        .then((result) => {
+          if (!active) return;
+          setManualCalendarWarnings(
+            result.permissionGranted
+              ? result.conflicts.map((conflict) => conflict.message)
+              : []
+          );
+        })
+        .catch(() => {
+          if (active) setManualCalendarWarnings([]);
+        });
+    }, 450);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [formattedTime, priority, selectedDateKey, title]);
+
+  const combinedPlanningWarnings = useMemo(
+    () => [...planningInsights.warnings, ...manualCalendarWarnings],
+    [manualCalendarWarnings, planningInsights.warnings]
+  );
+
+  const aiTaskConfidence = useMemo(
+    () => parsedTasks.map((task) => getAiTaskConfidence(task, tasks)),
+    [parsedTasks, tasks]
+  );
+
+  const combinedAiWarnings = useMemo(
+    () => [...aiWarnings, ...calendarConflictWarnings],
+    [aiWarnings, calendarConflictWarnings]
+  );
+
   const selectedDayTaskCount = tasks.filter(
     (task) => task.date === selectedDateKey
   ).length;
@@ -586,6 +727,7 @@ export default function AddTask() {
     setAiBusy(true);
     setError("");
     setSuccessMessage("");
+    setCalendarConflictWarnings([]);
 
     try {
       const aiMemoryRules = [
@@ -619,6 +761,23 @@ export default function AddTask() {
         setRealityCheck(null);
         setError("I could not turn that into tasks yet. Try adding times with 'at'.");
       } else {
+        const calendarResult = await findNativeCalendarConflicts(
+          result.tasks.map((task, index) => ({
+            id: `ai-draft-${index}`,
+            title: task.title,
+            date: task.date,
+            time: task.time,
+            priority: task.priority ?? "Medium",
+            durationMinutes: task.durationMinutes ?? null,
+          })),
+          { limit: 4 }
+        ).catch(() => null);
+        setCalendarConflictWarnings(
+          calendarResult?.permissionGranted
+            ? calendarResult.conflicts.map((conflict) => conflict.message)
+            : []
+        );
+
         const check = await runRealityCheck({
           proposedTasks: result.tasks,
           existingTasks: tasks.map((task) => ({
@@ -1158,6 +1317,7 @@ export default function AddTask() {
       setNaturalInput("");
       setParsedTasks([]);
       setAiWarnings([]);
+      setCalendarConflictWarnings([]);
       setAiSource(null);
       setRealityCheck(null);
       setError("");
@@ -1171,6 +1331,7 @@ export default function AddTask() {
         setNaturalInput("");
         setParsedTasks([]);
         setAiWarnings([]);
+        setCalendarConflictWarnings([]);
         setAiSource(null);
         setRealityCheck(null);
         await playTaskCreatedFeedback(profile);
@@ -1582,6 +1743,7 @@ export default function AddTask() {
                 setNaturalInput("");
                 setParsedTasks([]);
                 setAiWarnings([]);
+                setCalendarConflictWarnings([]);
                 setAiSource(null);
                 setRealityCheck(null);
               }}
@@ -1670,43 +1832,78 @@ export default function AddTask() {
                 ) : null}
               </View>
 
-              {parsedTasks.map((task, index) => (
-                <View
-                  key={`${task.title}-${task.date}-${task.time}-${index}`}
-                  style={[
-                    styles.aiParsedTask,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.aiParsedTopRow}>
-                    <Text style={[styles.aiParsedTitle, { color: colors.text }]}>
-                      {task.title}
-                    </Text>
-                    <Text style={[styles.aiParsedPriority, { color: colors.subtle }]}>
-                      {task.priority}
-                    </Text>
-                  </View>
-                  <Text style={[styles.aiParsedMeta, { color: colors.subtle }]}>
-                    {getRelativeDateLabel(task.date)} at {task.time}
-                    {task.durationMinutes ? ` • ${task.durationMinutes} min` : ""}
-                  </Text>
-                  {task.recurrence && task.recurrence !== "none" && (
-                    <Text style={[styles.aiParsedRepeat, { color: colors.tint }]}>
-                      Repeats{" "}
-                      {formatRecurrenceLabel(
-                        task.recurrence,
-                        task.recurrenceDays
-                      ).toLowerCase()}{" "}
-                      · saves as an ongoing routine
-                    </Text>
-                  )}
-                </View>
-              ))}
+              {parsedTasks.map((task, index) => {
+                const confidence = aiTaskConfidence[index];
+                const confidenceColor =
+                  confidence?.level === "High"
+                    ? colors.success
+                    : confidence?.level === "Medium"
+                      ? colors.warning
+                      : colors.danger;
 
-              {aiWarnings.map((warning) => (
+                return (
+                  <View
+                    key={`${task.title}-${task.date}-${task.time}-${index}`}
+                    style={[
+                      styles.aiParsedTask,
+                      {
+                        backgroundColor: colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.aiParsedTopRow}>
+                      <Text style={[styles.aiParsedTitle, { color: colors.text }]}>
+                        {task.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.aiParsedPriority,
+                          { color: colors.subtle },
+                        ]}
+                      >
+                        {task.priority}
+                      </Text>
+                    </View>
+                    <Text style={[styles.aiParsedMeta, { color: colors.subtle }]}>
+                      {getRelativeDateLabel(task.date)} at {task.time}
+                      {task.durationMinutes ? ` • ${task.durationMinutes} min` : ""}
+                    </Text>
+                    <View style={styles.aiConfidenceRow}>
+                      <Text
+                        style={[
+                          styles.aiConfidenceText,
+                          { color: confidenceColor },
+                        ]}
+                      >
+                        Confidence {confidence?.score ?? 0}% ·{" "}
+                        {confidence?.level ?? "Low"}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.aiConfidenceReason,
+                          { color: colors.subtle },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {confidence?.reasons.join(" / ")}
+                      </Text>
+                    </View>
+                    {task.recurrence && task.recurrence !== "none" && (
+                      <Text style={[styles.aiParsedRepeat, { color: colors.tint }]}>
+                        Repeats{" "}
+                        {formatRecurrenceLabel(
+                          task.recurrence,
+                          task.recurrenceDays
+                        ).toLowerCase()}{" "}
+                        · saves as an ongoing routine
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+
+              {combinedAiWarnings.map((warning) => (
                 <Text
                   key={warning}
                   style={[styles.aiWarningText, { color: colors.warning }]}
@@ -1930,7 +2127,7 @@ export default function AddTask() {
           </View>
 
           <Text style={[styles.snapshotHint, { color: colors.subtle }]}>
-            {planningInsights.warnings.length > 0
+            {combinedPlanningWarnings.length > 0
               ? "The app spotted some friction below. Adjust before adding if you want a cleaner day."
               : "This plan looks clean so far. Keep it realistic and specific."}
           </Text>
@@ -2294,7 +2491,7 @@ export default function AddTask() {
           </View>
         )}
 
-        {planningInsights.warnings.length > 0 && (
+        {combinedPlanningWarnings.length > 0 && (
           <View
             style={[
               styles.insightCard,
@@ -2305,7 +2502,7 @@ export default function AddTask() {
             <Text style={[styles.insightTitle, { color: colors.text }]}>
               Reality Check
             </Text>
-            {planningInsights.warnings.map((warning) => (
+            {combinedPlanningWarnings.map((warning) => (
               <Text
                 key={warning}
                 style={[styles.insightText, { color: colors.subtle }]}
@@ -2391,8 +2588,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 22,
+    paddingTop: 54,
+    paddingBottom: 16,
   },
   headerCopy: {
     flex: 1,
@@ -2424,17 +2621,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textTransform: "uppercase",
   },
-  title: { fontSize: 34, fontWeight: "900", letterSpacing: -0.7 },
+  title: { fontSize: 30, fontWeight: "900", letterSpacing: -0.7 },
   subtitle: {
-    fontSize: 14,
-    marginTop: 7,
-    lineHeight: 20,
+    fontSize: 13,
+    marginTop: 5,
+    lineHeight: 18,
   },
   plannerHero: {
     marginHorizontal: 24,
-    marginBottom: 18,
-    borderRadius: 28,
-    padding: 20,
+    marginBottom: 14,
+    borderRadius: 24,
+    padding: 16,
     overflow: "hidden",
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.2,
@@ -2460,22 +2657,22 @@ const styles = StyleSheet.create({
   },
   plannerHeroTitle: {
     color: "#fff",
-    fontSize: 24,
+    fontSize: 21,
     fontWeight: "900",
-    lineHeight: 29,
-    marginBottom: 8,
+    lineHeight: 25,
+    marginBottom: 6,
   },
   plannerHeroBody: {
     color: "rgba(255,255,255,0.84)",
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 19,
   },
   plannerHeroStats: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 18,
-    borderRadius: 20,
-    paddingVertical: 12,
+    marginTop: 13,
+    borderRadius: 18,
+    paddingVertical: 10,
     backgroundColor: "rgba(255,255,255,0.14)",
   },
   plannerHeroStat: {
@@ -2501,10 +2698,10 @@ const styles = StyleSheet.create({
   },
   energyPlannerCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 20,
+    padding: 14,
     marginHorizontal: 24,
-    marginBottom: 18,
+    marginBottom: 14,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -2564,10 +2761,10 @@ const styles = StyleSheet.create({
   },
   templateCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 20,
+    padding: 14,
     marginHorizontal: 24,
-    marginBottom: 18,
+    marginBottom: 14,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -2635,10 +2832,10 @@ const styles = StyleSheet.create({
   },
   aiCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 20,
+    padding: 14,
     marginHorizontal: 24,
-    marginBottom: 18,
+    marginBottom: 14,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -2675,8 +2872,8 @@ const styles = StyleSheet.create({
   aiInput: {
     borderWidth: 1,
     borderRadius: 14,
-    padding: 14,
-    minHeight: 88,
+    padding: 12,
+    minHeight: 76,
     fontSize: 15,
     textAlignVertical: "top",
   },
@@ -2726,7 +2923,7 @@ const styles = StyleSheet.create({
   aiParsedTask: {
     borderWidth: 1,
     borderRadius: 14,
-    padding: 12,
+    padding: 11,
     marginBottom: 8,
   },
   aiParsedTopRow: {
@@ -2754,6 +2951,21 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 17,
     marginTop: 6,
+  },
+  aiConfidenceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  aiConfidenceText: {
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  aiConfidenceReason: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700",
   },
   aiWarningText: {
     fontSize: 12,

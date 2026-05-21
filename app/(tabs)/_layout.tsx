@@ -54,12 +54,12 @@ export default function TabLayout() {
 
   return (
     <Tabs
-      detachInactiveScreens={false}
+      detachInactiveScreens
       screenOptions={{
         headerShown: false,
-        lazy: false,
+        lazy: true,
         freezeOnBlur: true,
-        animation: "fade",
+        animation: "shift",
         transitionSpec: {
           animation: "timing",
           config: {
@@ -83,23 +83,23 @@ export default function TabLayout() {
           justifyContent: "center",
         },
         tabBarStyle: {
-          backgroundColor: colors.card,
+          backgroundColor: `${colors.card}F2`,
           borderTopWidth: 0,
           borderWidth: 1,
           borderColor: colors.border,
-          borderRadius: 36,
-          height: Platform.OS === "ios" ? 84 : 76,
-          marginHorizontal: 18,
-          marginBottom: Platform.OS === "ios" ? 14 : 12,
-          paddingTop: 8,
-          paddingHorizontal: 10,
-          paddingBottom: Platform.OS === "ios" ? 16 : 8,
+          borderRadius: 32,
+          height: Platform.OS === "ios" ? 78 : 70,
+          marginHorizontal: 22,
+          marginBottom: Platform.OS === "ios" ? 14 : 10,
+          paddingTop: 7,
+          paddingHorizontal: 12,
+          paddingBottom: Platform.OS === "ios" ? 14 : 7,
           position: "absolute",
           shadowColor: colors.tint,
-          shadowOffset: { width: 0, height: 16 },
-          shadowOpacity: 0.14,
-          shadowRadius: 28,
-          elevation: 14,
+          shadowOffset: { width: 0, height: 12 },
+          shadowOpacity: 0.12,
+          shadowRadius: 22,
+          elevation: 10,
         },
       }}
     >
@@ -149,8 +149,8 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   dockItem: {
-    minWidth: 48,
-    height: 48,
+    minWidth: 44,
+    height: 44,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "transparent",
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   dockItemFocused: {
-    minWidth: 58,
+    minWidth: 52,
     paddingHorizontal: 7,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
@@ -168,9 +168,9 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   dockIconShell: {
-    width: 35,
-    height: 35,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
   },

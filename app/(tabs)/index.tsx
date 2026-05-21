@@ -4,15 +4,18 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  orderBy,
+  query,
   setDoc,
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -185,6 +188,7 @@ const confettiPalette = [
 ];
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+const HOME_FUTURE_TASK_PREVIEW_LIMIT = 18;
 
 const completionBurstPieces = Array.from({ length: 32 }, (_, index) => {
   const angle = (index / 32) * Math.PI * 2;
@@ -318,6 +322,7 @@ export default function HomeScreen() {
   const petHydratedRef = useRef(false);
   const previousPetKeyRef = useRef<string | null>(null);
   const rollingRoutineBusyRef = useRef(false);
+  const maintenanceKeyRef = useRef("");
 
   const getTodayDate = () => formatDateKey(new Date());
 
@@ -325,16 +330,25 @@ export default function HomeScreen() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    const unsub = onSnapshot(
+    const taskQuery = query(
       collection(db, "users", uid, "tasks"),
-      async (snap) => {
+      orderBy("date", "asc"),
+      orderBy("time", "asc")
+    );
+
+    const unsub = onSnapshot(
+      taskQuery,
+      (snap) => {
         const fetched = snap.docs.map((d) => ({
           id: d.id,
           ...d.data(),
         })) as Task[];
 
-        setTasks(sortTasksBySchedule(fetched));
-        setTasksLoaded(true);
+        const sortedTasks = sortTasksBySchedule(fetched);
+        startTransition(() => {
+          setTasks(sortedTasks);
+          setTasksLoaded(true);
+        });
 
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
@@ -348,37 +362,53 @@ export default function HomeScreen() {
             (t.status ?? "pending") !== "skipped"
         );
 
-        for (const task of incompleteTasks) {
-          try {
-            await updateDoc(doc(db, "users", uid, "tasks", task.id), {
+        const maintenanceKey = [
+          todayDate,
+          incompleteTasks.map((task) => task.id).sort().join(","),
+          fetched
+            .filter((task) => task.rollingRoutine)
+            .map((task) => `${task.recurrenceGroupId ?? task.id}:${task.date}`)
+            .sort()
+            .join(","),
+        ].join("|");
+
+        if (maintenanceKeyRef.current === maintenanceKey) return;
+        maintenanceKeyRef.current = maintenanceKey;
+
+        // I defer task carry-forward and routine maintenance until after current
+        // UI interactions, so deleting/checking a task does not compete with
+        // Firestore writes and notification scheduling on the main screen.
+        InteractionManager.runAfterInteractions(() => {
+          incompleteTasks.forEach((task) => {
+            updateDoc(doc(db, "users", uid, "tasks", task.id), {
               date: todayDate,
               lastActionAt: new Date(),
               recoveryFromDate: yesterdayDate,
               rescheduledCount: (task.rescheduledCount ?? 0) + 1,
-            });
+            })
+              .then(() =>
+                syncTaskNotifications({
+                  id: task.id,
+                  title: task.title,
+                  time: task.time,
+                  date: todayDate,
+                  priority: task.priority,
+                  completed: false,
+                  status: "pending",
+                })
+              )
+              .catch(() => {});
+          });
 
-            await syncTaskNotifications({
-              id: task.id,
-              title: task.title,
-              time: task.time,
-              date: todayDate,
-              priority: task.priority,
-              completed: false,
-              status: "pending",
-            });
-          } catch {
-            // Ignore permission/network hiccups so the task list can still render.
+          if (!rollingRoutineBusyRef.current) {
+            rollingRoutineBusyRef.current = true;
+            ensureRollingRoutineTasks({ uid, tasks: fetched })
+              .catch(() => {})
+              .finally(() => {
+                rollingRoutineBusyRef.current = false;
+              });
           }
-        }
-
-        if (!rollingRoutineBusyRef.current) {
-          rollingRoutineBusyRef.current = true;
-          ensureRollingRoutineTasks({ uid, tasks: fetched })
-            .catch(() => {})
-            .finally(() => {
-              rollingRoutineBusyRef.current = false;
-            });
-        }
+        });
       },
       () => {
         setTasks([]);
@@ -399,16 +429,25 @@ export default function HomeScreen() {
     () => tasks.filter((task) => task.date > today),
     [tasks, today]
   );
+  const futurePreviewTasks = useMemo(
+    () => futureTasks.slice(0, HOME_FUTURE_TASK_PREVIEW_LIMIT),
+    [futureTasks]
+  );
+  const hiddenFutureTaskCount = Math.max(
+    0,
+    futureTasks.length - futurePreviewTasks.length
+  );
   const futureTaskGroups = useMemo(() => {
     const grouped = new Map<string, Task[]>();
-    const sortedFutureTasks = [...futureTasks].sort((a, b) => {
+    const sortedFutureTasks = [...futurePreviewTasks].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       return (parseTimeToMinutes(a.time) ?? 0) - (parseTimeToMinutes(b.time) ?? 0);
     });
 
     sortedFutureTasks.forEach((task) => {
-      const current = grouped.get(task.date) ?? [];
-      grouped.set(task.date, [...current, task]);
+      const current = grouped.get(task.date);
+      if (current) current.push(task);
+      else grouped.set(task.date, [task]);
     });
 
     return [...grouped.entries()].map(([date, groupTasks]) => ({
@@ -416,7 +455,7 @@ export default function HomeScreen() {
       label: getRelativeDateLabel(date),
       tasks: groupTasks,
     }));
-  }, [futureTasks]);
+  }, [futurePreviewTasks]);
   const completed = todayTasks.filter((t) => t.completed).length;
   const openTodayTasks = todayTasks.filter(
     (task) => !task.completed && (task.status ?? "pending") !== "skipped"
@@ -3051,6 +3090,21 @@ export default function HomeScreen() {
                   </View>
                 </View>
               ))}
+              {hiddenFutureTaskCount > 0 ? (
+                <TouchableOpacity
+                  style={[
+                    styles.futureMoreButton,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                  onPress={() => router.push("/week" as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open full future plan"
+                >
+                  <Text style={[styles.futureMoreText, { color: colors.text }]}>
+                    View {hiddenFutureTaskCount} more in Week View
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
 
@@ -4884,6 +4938,18 @@ const styles = StyleSheet.create({
   },
   futureTaskList: {
     marginBottom: 0,
+  },
+  futureMoreButton: {
+    marginHorizontal: 16,
+    marginTop: 2,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  futureMoreText: {
+    fontSize: 13,
+    fontWeight: "900",
   },
   weekPlannerButton: {
     marginHorizontal: 16,

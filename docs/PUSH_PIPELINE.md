@@ -86,3 +86,18 @@ If the Firebase project is still on Spark/free tier, the app continues to work w
 - Expo Push API is used directly; production scale should later add push-ticket receipt polling.
 - Scheduled task reminders use a short lookahead window and today-only query to keep reads controlled.
 - Real notification action handling from the lock screen still depends on native build behavior.
+
+## Expo Receipt Polling
+
+Cloud Functions now store Expo push ticket IDs and poll Expo receipts every 15 minutes.
+
+Flow:
+
+1. `sendExpoPush` sends through Expo Push API.
+2. The function stores `ticketId` and `receiptStatus: pending` in `users/{uid}/pushReceipts`.
+3. `pollExpoPushReceipts` queries pending receipts, calls Expo `getReceipts`, and updates each receipt with:
+   - `receiptStatus: delivered` or `failed`
+   - `receiptReason`
+   - `receiptCheckedAt`
+
+The Production Doctor screen reads the latest push receipts so tester builds can see whether push issues are permission/token problems, function send problems, or Expo delivery problems.

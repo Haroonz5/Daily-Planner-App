@@ -2,6 +2,8 @@ import Constants from "expo-constants";
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 
 import { auth, db } from "@/constants/firebaseConfig";
+import { getAppCheckHeaders } from "./app-check";
+import { createRequestTrace, traceHeaders } from "./request-tracing";
 
 export type AnalyticsEventName =
   | "app_opened"
@@ -54,6 +56,7 @@ export const logTaskAnalyticsEvent = async (event: TaskAnalyticsEvent) => {
   const user = auth.currentUser;
   if (!user) return;
   if (await isAnalyticsOptedOut(user.uid)) return;
+  const trace = createRequestTrace("analytics-event");
 
   const payload = {
     user_hash: `user_${user.uid.slice(0, 12)}`,
@@ -74,6 +77,8 @@ export const logTaskAnalyticsEvent = async (event: TaskAnalyticsEvent) => {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${await user.getIdToken().catch(() => "")}`,
+      ...(await getAppCheckHeaders()),
+      ...traceHeaders(trace),
     },
     body: JSON.stringify(payload),
   }).catch(() => {});

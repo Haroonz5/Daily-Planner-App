@@ -4,6 +4,8 @@ import { addDoc, collection, doc, getDoc, setDoc } from "firebase/firestore";
 import { Platform } from "react-native";
 
 import { auth, db } from "@/constants/firebaseConfig";
+import { captureWithNativeCrashProvider, configureCrashScope } from "./crash-provider";
+import { createRequestTrace } from "./request-tracing";
 
 export type ErrorSeverity = "info" | "warning" | "error" | "fatal";
 
@@ -21,6 +23,8 @@ export type LocalErrorReport = {
   message: string;
   stack: string | null;
   metadata: Record<string, unknown>;
+  requestId: string;
+  traceId: string;
   fingerprint: string;
   appVersion: string;
   createdAtIso: string;
@@ -103,11 +107,14 @@ export const reportAppError = async ({
 }: ReportAppErrorInput) => {
   const normalized = normalizeError(error);
   const appVersion = Constants.expoConfig?.version ?? "1.0.0";
+  const trace = createRequestTrace(`error-${source}`);
   const report: LocalErrorReport = {
     ...normalized,
     source,
     severity,
     metadata: metadata ?? {},
+    requestId: trace.requestId,
+    traceId: trace.traceId,
     fingerprint: buildFingerprint(source, normalized.name, normalized.message),
     appVersion,
     createdAtIso: new Date().toISOString(),
@@ -117,6 +124,8 @@ export const reportAppError = async ({
   await cacheLocalErrorReport(report).catch(() => {});
 
   const user = auth.currentUser;
+  await configureCrashScope({ uid: user?.uid ?? null, email: user?.email ?? null });
+  await captureWithNativeCrashProvider({ report, severity }).catch(() => {});
   if (!user) return;
 
   const profile = await getDoc(doc(db, "users", user.uid)).catch(() => null);

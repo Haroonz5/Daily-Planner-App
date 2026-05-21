@@ -302,7 +302,7 @@ export default function SettingsScreen({
     if (!uid) return;
 
     const unsubscribe = onSnapshot(
-      collection(db, "users", uid, "tasks"),
+      query(collection(db, "users", uid, "tasks"), orderBy("date", "desc"), limit(160)),
       (snap) => {
         const fetched = snap.docs.map((doc) => ({
           id: doc.id,
@@ -1942,6 +1942,8 @@ export default function SettingsScreen({
             { label: "Demo Mode", route: "/demo-mode" },
             { label: "Tester Dashboard", route: "/admin-tester-dashboard" },
             { label: "Admin Analytics", route: "/admin-analytics" },
+            { label: "Production Doctor", route: "/production-doctor" },
+            { label: "Notification Inbox", route: "/notification-inbox" },
             { label: "Crash Viewer", route: "/crash-viewer" },
             { label: "Privacy", route: "/privacy" },
             { label: "AI Memory", route: "/ai-memory-timeline" },

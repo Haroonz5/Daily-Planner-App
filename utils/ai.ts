@@ -1,6 +1,8 @@
 import Constants from "expo-constants";
 
 import { auth } from "@/constants/firebaseConfig";
+import { getAppCheckHeaders } from "./app-check";
+import { createRequestTrace, traceHeaders } from "./request-tracing";
 import { findTaskScheduleConflicts, formatDateKey, type RecurrenceRule } from "./task-helpers";
 
 export type AiTaskPriority = "Low" | "Medium" | "High";
@@ -259,9 +261,13 @@ const fetchAiEndpoint = async (
 ) => {
   let lastError: unknown = null;
   const authHeaders = await getAiAuthHeaders();
+  const appCheckHeaders = await getAppCheckHeaders();
+  const trace = createRequestTrace(`ai-${path.replace(/^\/v1\//, "")}`);
   const headers = {
     ...normalizeHeaders(init.headers),
     ...authHeaders,
+    ...appCheckHeaders,
+    ...traceHeaders(trace),
   };
 
   for (const url of getAiApiUrls()) {

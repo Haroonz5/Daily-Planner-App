@@ -659,6 +659,12 @@ func (s *server) forward(w http.ResponseWriter, r *http.Request, uid string, req
 	copyHeaders(upstreamRequest.Header, r.Header)
 	upstreamRequest.Header.Set("X-Authenticated-Uid", uid)
 	upstreamRequest.Header.Set("X-Request-ID", requestID)
+	if traceparent := strings.TrimSpace(r.Header.Get("traceparent")); traceparent != "" {
+		upstreamRequest.Header.Set("traceparent", traceparent)
+	}
+	if clientTraceID := strings.TrimSpace(r.Header.Get("X-Client-Trace-ID")); clientTraceID != "" {
+		upstreamRequest.Header.Set("X-Client-Trace-ID", clientTraceID)
+	}
 
 	response, err := s.client.Do(upstreamRequest)
 	if err != nil {
@@ -669,6 +675,9 @@ func (s *server) forward(w http.ResponseWriter, r *http.Request, uid string, req
 
 	copyHeaders(w.Header(), response.Header)
 	w.Header().Set("X-Request-ID", requestID)
+	if traceparent := strings.TrimSpace(r.Header.Get("traceparent")); traceparent != "" {
+		w.Header().Set("traceparent", traceparent)
+	}
 	w.WriteHeader(response.StatusCode)
 	if _, err := io.Copy(w, response.Body); err != nil {
 		return response.StatusCode, "response copy failed"
