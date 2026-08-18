@@ -1,16 +1,26 @@
-import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import * as Haptics from 'expo-haptics';
+import type { BottomTabBarButtonProps } from 'expo-router/build/react-navigation/bottom-tabs/types';
+import type { ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 
-export function HapticTab(props: BottomTabBarButtonProps) {
+export function HapticTab({
+  pressColor,
+  style,
+  onPressIn,
+  hoverEffect: _hoverEffect,
+  ...props
+}: BottomTabBarButtonProps): ReactNode {
+  const compatiblePressColor = typeof pressColor === 'string' ? pressColor : undefined;
+
   return (
     <PlatformPressable
       {...props}
+      pressColor={compatiblePressColor}
       android_ripple={{ borderless: false, color: 'transparent' }}
-      style={[props.style, styles.tabButton]}
+      style={[style, styles.tabButton]}
       onPressIn={(ev) => {
-        props.onPressIn?.(ev);
+        onPressIn?.(ev);
 
         if (process.env.EXPO_OS === 'ios') {
           requestAnimationFrame(() => {

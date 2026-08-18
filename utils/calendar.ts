@@ -48,6 +48,7 @@ export type CalendarConflict = {
 };
 
 const DAILY_DISCIPLINE_CALENDAR_TITLE = "Daily Discipline";
+type NativeCalendar = Awaited<ReturnType<typeof Calendar.getCalendarsAsync>>[number];
 
 const addMinutes = (date: Date, minutes: number) =>
   new Date(date.getTime() + minutes * 60 * 1000);
@@ -64,7 +65,7 @@ const parseTaskDateTime = (dateKey: string, time: string) => {
 const formatGoogleDate = (date: Date) =>
   date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 
-const isWritableCalendar = (calendar: Calendar.Calendar) =>
+const isWritableCalendar = (calendar: NativeCalendar) =>
   calendar.allowsModifications &&
   (!calendar.entityType || calendar.entityType === Calendar.EntityTypes.EVENT);
 
@@ -120,7 +121,7 @@ const getWritableCalendarId = async () => {
   });
 };
 
-const getEventDate = (value: Calendar.Event["startDate"] | Calendar.Event["endDate"]) => {
+const getEventDate = (value: Date | string) => {
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 };

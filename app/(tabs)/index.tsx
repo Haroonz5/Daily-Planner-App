@@ -5320,7 +5320,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   confettiLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "none",
     zIndex: 20,
   },
@@ -5332,7 +5332,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   completionBurstLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "none",
     zIndex: 30,
   },
@@ -5392,7 +5392,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   victoryBurstLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "none",
     zIndex: 40,
   },

@@ -1,6 +1,6 @@
 import { Tabs } from "expo-router";
 import React, { type ComponentProps } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { type ColorValue, Platform, StyleSheet, View } from "react-native";
 
 import { useAppTheme } from "@/constants/appTheme";
 import { HapticTab } from "@/components/haptic-tab";
@@ -15,7 +15,7 @@ export default function TabLayout() {
   const renderDockIcon = (
     name: DockIconName,
     focused: boolean,
-    color: string
+    color: ColorValue
   ) => (
     <View
       style={[
