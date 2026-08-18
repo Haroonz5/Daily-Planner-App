@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 const EMPTY_KEY_FALLBACK = "dailyDiscipline.emptyKey";
 
@@ -13,6 +14,9 @@ const toSecureStoreKey = (key: string) => {
 // old values users already saved before this security pass.
 export const getSecureItem = async (key: string) => {
   const secureKey = toSecureStoreKey(key);
+  // Expo Secure Store uses native Keychain/Keystore APIs. The web preview has no
+  // equivalent API, so retain the existing AsyncStorage fallback in browsers.
+  if (Platform.OS === "web") return AsyncStorage.getItem(key);
   const secureValue = await SecureStore.getItemAsync(secureKey);
   if (secureValue !== null) return secureValue;
 
@@ -31,6 +35,10 @@ export const getSecureItem = async (key: string) => {
 
 export const setSecureItem = async (key: string, value: string) => {
   const secureKey = toSecureStoreKey(key);
+  if (Platform.OS === "web") {
+    await AsyncStorage.setItem(key, value);
+    return;
+  }
   await SecureStore.setItemAsync(secureKey, value);
   await AsyncStorage.removeItem(key);
   if (key !== secureKey) await AsyncStorage.removeItem(secureKey);
@@ -38,6 +46,10 @@ export const setSecureItem = async (key: string, value: string) => {
 
 export const removeSecureItem = async (key: string) => {
   const secureKey = toSecureStoreKey(key);
+  if (Platform.OS === "web") {
+    await AsyncStorage.removeItem(key);
+    return;
+  }
   await SecureStore.deleteItemAsync(secureKey);
   await AsyncStorage.removeItem(key);
   if (key !== secureKey) await AsyncStorage.removeItem(secureKey);
